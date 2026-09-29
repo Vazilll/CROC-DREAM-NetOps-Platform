@@ -144,6 +144,7 @@ class JobService:
                 intended_snapshot_id=target.intended_snapshot_id,
                 remediation_config=target.remediation_config,
                 rollback_config=target.rollback_config,
+                health_expectations=target.health_expectations,
             )
             for target in changed
         ]

@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from netops.network import BgpSessionState, HealthSnapshot, InterfaceState, evaluate_health
+from netops.intent import DeviceIntent
+from netops.network import (
+    BgpSessionState,
+    HealthExpectations,
+    HealthSnapshot,
+    InterfaceState,
+    evaluate_health,
+)
 
 UP = InterfaceState("up", "up")
 DOWN = InterfaceState("down", "down")
@@ -107,3 +114,96 @@ def test_problems_are_reported_in_a_stable_order() -> None:
         "Interface Gi3 disappeared (was up/up)",
         "Ping to x: 50% packet loss",
     )
+
+
+class TestDeclaredState:
+    """Rules applied when the intent is known (spec 2.6)."""
+
+    EXPECTED = HealthExpectations(
+        bgp_peers=("10.0.1.0", "10.0.1.2"),
+        interfaces={"Gi2": True, "Gi3": True, "Gi4": False},
+    )
+
+    def _after(self, **overrides: object) -> HealthSnapshot:
+        base: dict[str, object] = {
+            "bgp": {"10.0.1.0": ESTABLISHED, "10.0.1.2": ESTABLISHED},
+            "interfaces": {"Gi2": UP, "Gi3": UP, "Gi4": InterfaceState("admin down", "down")},
+        }
+        base.update(overrides)
+        return _snapshot(**base)  # type: ignore[arg-type]
+
+    def test_everything_declared_is_healthy(self) -> None:
+        assert evaluate_health(_snapshot(), self._after(), expected=self.EXPECTED).healthy
+
+    def test_declared_peer_must_be_established(self) -> None:
+        after = self._after(bgp={"10.0.1.0": ESTABLISHED, "10.0.1.2": BgpSessionState("Connect")})
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("BGP peer 10.0.1.2 is Connect, expected Established",)
+
+    def test_declared_peer_must_be_reported(self) -> None:
+        after = self._after(bgp={"10.0.1.0": ESTABLISHED})
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("BGP peer 10.0.1.2 is not reported by the device",)
+
+    def test_declared_peer_must_accept_prefixes(self) -> None:
+        after = self._after(
+            bgp={"10.0.1.0": ESTABLISHED, "10.0.1.2": BgpSessionState("Established", 0)}
+        )
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("BGP peer 10.0.1.2 accepts no prefixes",)
+
+    def test_unknown_prefix_count_is_not_a_failure(self) -> None:
+        after = self._after(
+            bgp={"10.0.1.0": ESTABLISHED, "10.0.1.2": BgpSessionState("Established")}
+        )
+        assert evaluate_health(_snapshot(), after, expected=self.EXPECTED).healthy
+
+    def test_removed_peer_may_disappear(self) -> None:
+        before = _snapshot(
+            {"10.0.1.0": ESTABLISHED, "10.0.1.2": ESTABLISHED, "10.0.1.4": ESTABLISHED}
+        )
+        assert evaluate_health(before, self._after(), expected=self.EXPECTED).healthy
+
+    def test_enabled_interface_must_be_up(self) -> None:
+        after = self._after(interfaces={"Gi2": UP, "Gi3": DOWN})
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("Interface Gi3 is down/down, expected up/up",)
+
+    def test_enabled_interface_must_be_reported(self) -> None:
+        after = self._after(interfaces={"Gi2": UP})
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("Interface Gi3 is not reported by the device",)
+
+    def test_disabled_interface_may_go_down(self) -> None:
+        before = _snapshot(interfaces={"Gi4": UP})
+        assert evaluate_health(before, self._after(), expected=self.EXPECTED).healthy
+
+    def test_undeclared_interfaces_are_checked_for_regressions(self) -> None:
+        before = _snapshot(interfaces={"Management0": UP})
+        after = self._after(interfaces={"Gi2": UP, "Gi3": UP, "Management0": DOWN})
+        verdict = evaluate_health(before, after, expected=self.EXPECTED)
+        assert verdict.problems == ("Interface Management0 went from up/up to down/down",)
+
+    def test_ping_loss_still_counts(self) -> None:
+        after = self._after(ping={"10.0.1.0": 40.0})
+        verdict = evaluate_health(_snapshot(), after, expected=self.EXPECTED)
+        assert verdict.problems == ("Ping to 10.0.1.0: 40% packet loss",)
+
+
+def test_expectations_from_intent_round_trip() -> None:
+    intent = DeviceIntent.model_validate(
+        {
+            "hostname": "leaf-1",
+            "interfaces": [{"name": "Gi2"}, {"name": "Gi4", "enabled": False}],
+            "bgp": {
+                "asn": 65101,
+                "router_id": "10.255.1.1",
+                "neighbors": [{"peer_ip": "10.0.1.0", "remote_asn": 65000}],
+            },
+        }
+    )
+    expected = HealthExpectations.from_intent(intent)
+    assert expected == HealthExpectations(("10.0.1.0",), {"Gi2": True, "Gi4": False})
+    assert HealthExpectations.from_json(expected.to_json()) == expected
+    no_bgp = DeviceIntent.model_validate({"hostname": "leaf-1"})
+    assert HealthExpectations.from_intent(no_bgp) == HealthExpectations()

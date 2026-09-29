@@ -72,4 +72,5 @@ class Base(DeclarativeBase):
     type_annotation_map: dict[Any, Any] = {  # noqa: RUF012 - SQLAlchemy API
         datetime: TZDateTime(),
         list[str]: JSONType,
+        dict[str, Any]: JSONType,
     }

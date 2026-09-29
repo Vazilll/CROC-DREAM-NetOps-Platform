@@ -103,6 +103,7 @@ def settings(tmp_path: Path, intent_repo: Path, lab_path: Path) -> Settings:
             for role, token in TOKENS.items()
         },
         auth_profiles={"lab": {"username": "admin", "password": "admin"}},
+        post_check_interval_seconds=0,  # retries without waiting
     )
 
 

@@ -13,7 +13,7 @@ from netops.enums import DeviceStatus, DriftStatus, TargetStatus
 from netops.errors import PipelineError
 from netops.intent import InventoryDevice
 from netops.models import Device, DriftRecord, Job, JobTarget
-from netops.network.base import ChangePlan
+from netops.network.base import ChangePlan, HealthExpectations
 from netops.pipeline.deployment import DeploymentExecutor
 from netops.pipeline.planning import ChangePlanner, DevicePlan, load_intent, persist_plan
 from netops.pipeline.recorder import JobRecorder
@@ -106,8 +106,18 @@ class DeployPipeline(_BasePipeline):
             rollback=row.rollback_config or "",
             intended=row.intended_snapshot.content,
         )
+        expectations = (
+            HealthExpectations.from_json(row.health_expectations)
+            if row.health_expectations is not None
+            else None
+        )
         return executor.deploy(
-            row, device, target, plan, expected_running_sha256=row.running_snapshot.sha256
+            row,
+            device,
+            target,
+            plan,
+            expectations=expectations,
+            expected_running_sha256=row.running_snapshot.sha256,
         )
 
 
@@ -189,4 +199,6 @@ class DriftRemediationPipeline(_BasePipeline):
         if plan.target is None:  # unreachable: a plan without errors always has a target
             raise PipelineError(f"{device.hostname}: no management target")
         executor = DeploymentExecutor(self._session, self._toolchain, self._recorder)
-        executor.deploy(row, device, plan.target, plan.change_plan())
+        executor.deploy(
+            row, device, plan.target, plan.change_plan(), expectations=plan.expectations
+        )

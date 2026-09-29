@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from netops.enums import Platform
 from netops.intent.models import DeviceIntent, InventoryDevice
@@ -105,6 +105,35 @@ class HealthSnapshot:
     ping_loss_percent: Mapping[str, float] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class HealthExpectations:
+    """What the intent declares for a device, used to judge the post-check.
+
+    ``interfaces`` maps every declared interface to whether it is enabled.
+    """
+
+    bgp_peers: tuple[str, ...] = ()
+    interfaces: Mapping[str, bool] = field(default_factory=dict)
+
+    @classmethod
+    def from_intent(cls, intent: DeviceIntent) -> HealthExpectations:
+        peers = tuple(str(n.peer_ip) for n in intent.bgp.neighbors) if intent.bgp else ()
+        return cls(
+            bgp_peers=peers,
+            interfaces={interface.name: interface.enabled for interface in intent.interfaces},
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {"bgp_peers": list(self.bgp_peers), "interfaces": dict(self.interfaces)}
+
+    @classmethod
+    def from_json(cls, data: Mapping[str, Any]) -> HealthExpectations:
+        return cls(
+            bgp_peers=tuple(data.get("bgp_peers", ())),
+            interfaces=dict(data.get("interfaces", {})),
+        )
+
+
 @runtime_checkable
 class ConfigRenderer(Protocol):
     def render(self, device: InventoryDevice, intent: DeviceIntent) -> str:
@@ -147,5 +176,9 @@ class ConfigDeployer(Protocol):
 
 @runtime_checkable
 class HealthProbe(Protocol):
-    def snapshot(self, target: DeviceTarget) -> HealthSnapshot:
-        """Run ``show ip bgp summary``, ``show ip interface brief`` and pings."""
+    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
+        """Run ``show ip bgp summary``, ``show ip interface brief`` and pings.
+
+        ``expected`` lists the declared BGP peers, which are also the adjacent
+        nodes to ping (5 packets each); it is ``None`` when the intent is unknown.
+        """

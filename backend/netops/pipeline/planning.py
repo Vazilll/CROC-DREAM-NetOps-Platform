@@ -12,7 +12,7 @@ from netops.enums import SnapshotKind
 from netops.errors import PipelineError
 from netops.intent import IntentSnapshot, IntentValidationError, InventoryDevice
 from netops.models import ConfigSnapshot, Device, Job, JobTarget
-from netops.network.base import ChangePlan, ConfigDiff, DeviceTarget
+from netops.network.base import ChangePlan, ConfigDiff, DeviceTarget, HealthExpectations
 from netops.pipeline.recorder import JobRecorder
 from netops.toolchain import Toolchain
 
@@ -40,6 +40,7 @@ class DevicePlan:
 
     device: Device
     target: DeviceTarget | None = None
+    expectations: HealthExpectations | None = None
     intended: str | None = None
     running: str | None = None
     diff: ConfigDiff | None = None
@@ -85,6 +86,7 @@ class ChangePlanner:
         if intent is None:
             plan.fail(f"No intent for {device.hostname} in the repository")
             return plan
+        plan.expectations = HealthExpectations.from_intent(intent)
         spec = InventoryDevice.model_validate(device)
         try:
             plan.target = self._toolchain.target_for(spec)
@@ -157,6 +159,8 @@ def persist_plan(session: Session, job: Job, row: JobTarget, plan: DevicePlan) -
     if plan.diff is not None:
         row.remediation_config = plan.diff.remediation
         row.rollback_config = plan.diff.rollback
+    if plan.expectations is not None:
+        row.health_expectations = plan.expectations.to_json()
 
 
 def _snapshot(

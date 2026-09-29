@@ -1,14 +1,21 @@
 """Evaluation of pre/post deployment health checks (spec 2.6).
 
-The comparison is regression-based: a deployment is considered harmful if
-something that worked before the change is broken after it.
+When the intent is known, the post-check verifies what it declares: every
+declared BGP peer is Established and accepts prefixes, every enabled
+interface is up/up. Peers the intent removes are expected to disappear, and
+disabled interfaces are expected to go down.
+
+Interfaces the intent does not mention, and everything when the intent is
+unknown, are judged by regression: what was up before the change must stay up.
+Ping loss above the threshold to any probed neighbor is always a failure.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 
-from netops.network.base import HealthSnapshot
+from netops.network.base import HealthExpectations, HealthSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,39 +28,73 @@ class HealthVerdict:
 
 
 def evaluate_health(
-    before: HealthSnapshot, after: HealthSnapshot, *, max_ping_loss_percent: float = 20.0
+    before: HealthSnapshot,
+    after: HealthSnapshot,
+    *,
+    expected: HealthExpectations | None = None,
+    max_ping_loss_percent: float = 20.0,
 ) -> HealthVerdict:
-    """Apply the degradation criteria of the spec.
+    if expected is not None:
+        bgp = _declared_bgp(expected, after)
+        declared_interfaces = expected.interfaces
+    else:
+        bgp = _bgp_regressions(before, after)
+        declared_interfaces = {}
+    problems = [
+        *bgp,
+        *_interfaces(before, after, declared_interfaces),
+        *_ping(after, max_ping_loss_percent),
+    ]
+    return HealthVerdict(tuple(problems))
 
-    * a BGP session that was Established is no longer Established, or stopped
-      accepting prefixes;
-    * an interface that was up/up is no longer up/up;
-    * ping loss to any probed neighbor exceeds ``max_ping_loss_percent``.
-    """
-    problems: list[str] = []
 
+def _declared_bgp(expected: HealthExpectations, after: HealthSnapshot) -> Iterator[str]:
+    for peer in sorted(expected.bgp_peers):
+        session = after.bgp_sessions.get(peer)
+        if session is None:
+            yield f"BGP peer {peer} is not reported by the device"
+        elif not session.established:
+            yield f"BGP peer {peer} is {session.state}, expected Established"
+        elif session.prefixes_accepted == 0:
+            yield f"BGP peer {peer} accepts no prefixes"
+
+
+def _bgp_regressions(before: HealthSnapshot, after: HealthSnapshot) -> Iterator[str]:
     for peer, was in sorted(before.bgp_sessions.items()):
         if not was.established:
             continue
         now = after.bgp_sessions.get(peer)
         if now is None:
-            problems.append(f"BGP peer {peer} disappeared (was Established)")
+            yield f"BGP peer {peer} disappeared (was Established)"
         elif not now.established:
-            problems.append(f"BGP peer {peer} went from Established to {now.state}")
+            yield f"BGP peer {peer} went from Established to {now.state}"
         elif (was.prefixes_accepted or 0) > 0 and now.prefixes_accepted == 0:
-            problems.append(f"BGP peer {peer} no longer accepts any prefixes")
+            yield f"BGP peer {peer} no longer accepts any prefixes"
 
-    for name, was_state in sorted(before.interfaces.items()):
-        if not was_state.is_up:
+
+def _interfaces(
+    before: HealthSnapshot, after: HealthSnapshot, declared: Mapping[str, bool]
+) -> Iterator[str]:
+    for name, enabled in sorted(declared.items()):
+        if not enabled:
             continue
-        now_state = after.interfaces.get(name)
-        if now_state is None:
-            problems.append(f"Interface {name} disappeared (was up/up)")
-        elif not now_state.is_up:
-            problems.append(f"Interface {name} went from up/up to {now_state}")
+        state = after.interfaces.get(name)
+        if state is None:
+            yield f"Interface {name} is not reported by the device"
+        elif not state.is_up:
+            yield f"Interface {name} is {state}, expected up/up"
 
+    for name, was in sorted(before.interfaces.items()):
+        if name in declared or not was.is_up:
+            continue
+        now = after.interfaces.get(name)
+        if now is None:
+            yield f"Interface {name} disappeared (was up/up)"
+        elif not now.is_up:
+            yield f"Interface {name} went from up/up to {now}"
+
+
+def _ping(after: HealthSnapshot, max_loss: float) -> Iterator[str]:
     for destination, loss in sorted(after.ping_loss_percent.items()):
-        if loss > max_ping_loss_percent:
-            problems.append(f"Ping to {destination}: {loss:g}% packet loss")
-
-    return HealthVerdict(tuple(problems))
+        if loss > max_loss:
+            yield f"Ping to {destination}: {loss:g}% packet loss"

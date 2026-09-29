@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
+import yaml
 from sqlalchemy.orm import Session
 
 from netops.enums import DeviceStatus, IntentSource, JobStatus, TargetStatus
@@ -15,6 +16,7 @@ from netops.network import (
     BgpSessionState,
     ChangePlan,
     DeviceTarget,
+    HealthExpectations,
     HealthSnapshot,
     InterfaceState,
     OfflineLab,
@@ -23,27 +25,42 @@ from netops.services import JobService
 from tests.conftest import RunJob
 from tests.integration.helpers import append_to_running_config, change_uplink_description
 
-HEALTHY = HealthSnapshot(
-    bgp_sessions={"10.0.1.0": BgpSessionState("Established", 5)},
-    interfaces={"GigabitEthernet2": InterfaceState("up", "up")},
-    ping_loss_percent={"10.0.1.0": 0.0},
-)
-BGP_DOWN = HealthSnapshot(
-    bgp_sessions={"10.0.1.0": BgpSessionState("Idle")},
-    interfaces={"GigabitEthernet2": InterfaceState("up", "up")},
-)
+# Both leaves of the fixture fabric: every declared peer Established, links up.
+LEAF_PEERS = ("10.0.1.0", "10.0.1.2", "10.0.2.0", "10.0.2.2")
+UP = InterfaceState("up", "up")
+LINKS = {"Loopback0": UP, "GigabitEthernet2": UP, "GigabitEthernet3": UP}
+
+
+def _fabric(**states: str) -> HealthSnapshot:
+    """A leaf snapshot where peers are Established unless overridden by name."""
+    sessions = {
+        peer: BgpSessionState(states.get(peer.replace(".", "_"), "Established"), 5)
+        for peer in LEAF_PEERS
+    }
+    return HealthSnapshot(
+        bgp_sessions=sessions,
+        interfaces=LINKS,
+        ping_loss_percent=dict.fromkeys(LEAF_PEERS, 0.0),
+    )
+
+
+HEALTHY = _fabric()
+BGP_DOWN = _fabric(**{"10_0_1_0": "Idle"})
 
 
 class ScriptedProbe:
-    """Returns the given snapshots in order; an exception instance is raised instead."""
+    """Returns the given results in order and then keeps repeating the last one.
+
+    An exception instance is raised instead of being returned.
+    """
 
     def __init__(self, *results: HealthSnapshot | Exception) -> None:
-        self._results: Iterator[HealthSnapshot | Exception] = iter(results)
-        self.calls = 0
+        self._results = list(results)
+        self.expectations: list[HealthExpectations | None] = []
 
-    def snapshot(self, target: DeviceTarget) -> HealthSnapshot:
-        self.calls += 1
-        result = next(self._results, HEALTHY)
+    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
+        self.expectations.append(expected)
+        result = self._results.pop(0) if len(self._results) > 1 else self._results[0]
         if isinstance(result, Exception):
             raise result
         return result
@@ -121,7 +138,9 @@ def test_post_check_failure_rolls_back_and_stops_the_rollout(
     assert status is JobStatus.FAILED
     outcome = _outcome(session, deploy_id)
     assert outcome["leaf-1.croc.lab"][0] is TargetStatus.ROLLED_BACK
-    assert "10.0.1.0 went from Established to Idle" in (outcome["leaf-1.croc.lab"][1] or "")
+    assert outcome["leaf-1.croc.lab"][1] == (
+        "Post-check failed: BGP peer 10.0.1.0 is Idle, expected Established"
+    )
     assert outcome["leaf-2.croc.lab"] == (
         TargetStatus.SKIPPED,
         "Rollout stopped after the failure on leaf-1.croc.lab",
@@ -364,10 +383,132 @@ class TestRemediationFailures:
         job = job_service.create_drift_remediation(drifted.id, requested_by="tester")
         lab = FaultyLab(lab_path)
 
-        status = run_job(job.id, deployer=lab, health_probe=ScriptedProbe(HEALTHY, BGP_DOWN))
+        leaf2_down = _fabric(**{"10_0_2_0": "Active"})
+        status = run_job(job.id, deployer=lab, health_probe=ScriptedProbe(HEALTHY, leaf2_down))
 
         assert status is JobStatus.FAILED
         assert lab.calls == ["apply", "rollback"]
         assert _outcome(session, job.id)["leaf-2.croc.lab"][0] is TargetStatus.ROLLED_BACK
         # Still drifted: the rollback restored the unauthorized configuration.
         assert _status(session, drifted) is DeviceStatus.DRIFT_DETECTED
+
+
+class TestPostCheckRules:
+    """Spec 2.6: declared peers Established with prefixes, enabled ports up/up."""
+
+    def test_bgp_is_given_time_to_converge(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        deploy_id = _deploy(job_service, approved_dry_run)
+        probe = ScriptedProbe(HEALTHY, BGP_DOWN, BGP_DOWN, HEALTHY)
+
+        assert run_job(deploy_id, health_probe=probe) is JobStatus.SUCCESS
+        logs = [log.message for log in session.get_one(Job, deploy_id).logs]
+        assert any(message.startswith("Attempt 1/6 failed") for message in logs)
+        assert any(message.startswith("Attempt 2/6 failed") for message in logs)
+
+    def test_rollback_after_the_last_attempt(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        deploy_id = _deploy(job_service, approved_dry_run)
+        probe = ScriptedProbe(HEALTHY, BGP_DOWN)
+
+        assert run_job(deploy_id, health_probe=probe, post_check_attempts=3) is JobStatus.FAILED
+        # pre-check + 3 post-check attempts on leaf-1, then the rollout stops
+        assert len(probe.expectations) == 4
+        assert _outcome(session, deploy_id)["leaf-1.croc.lab"][0] is TargetStatus.ROLLED_BACK
+
+    def test_expectations_come_from_the_dry_run_intent(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        dry_run_target = session.get_one(Job, approved_dry_run.id).targets[0]
+        assert dry_run_target.health_expectations == {
+            "bgp_peers": ["10.0.1.0", "10.0.1.2"],
+            "interfaces": {
+                "Loopback0": True,
+                "GigabitEthernet2": True,
+                "GigabitEthernet3": True,
+                "GigabitEthernet4": False,
+            },
+        }
+        deploy_id = _deploy(job_service, approved_dry_run)
+        probe = ScriptedProbe(HEALTHY)
+
+        run_job(deploy_id, health_probe=probe)
+        assert probe.expectations[0] == HealthExpectations(
+            bgp_peers=("10.0.1.0", "10.0.1.2"),
+            interfaces=dry_run_target.health_expectations["interfaces"],
+        )
+
+    def test_new_peer_that_never_comes_up_is_rolled_back(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        """A regression check alone would miss this: the peer was never up."""
+        without_second_spine = HealthSnapshot(
+            bgp_sessions={"10.0.1.0": BgpSessionState("Established", 5)},
+            interfaces=LINKS,
+        )
+        deploy_id = _deploy(job_service, approved_dry_run)
+
+        run_job(deploy_id, health_probe=ScriptedProbe(without_second_spine))
+        status, error = _outcome(session, deploy_id)["leaf-1.croc.lab"]
+        assert status is TargetStatus.ROLLED_BACK
+        assert "BGP peer 10.0.1.2 is not reported by the device" in (error or "")
+
+    def test_peer_without_prefixes_is_a_failure(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        no_prefixes = HealthSnapshot(
+            bgp_sessions={
+                peer: BgpSessionState("Established", 0 if peer == "10.0.1.2" else 5)
+                for peer in LEAF_PEERS
+            },
+            interfaces=LINKS,
+        )
+        deploy_id = _deploy(job_service, approved_dry_run)
+
+        run_job(deploy_id, health_probe=ScriptedProbe(HEALTHY, no_prefixes))
+        assert "BGP peer 10.0.1.2 accepts no prefixes" in (
+            _outcome(session, deploy_id)["leaf-1.croc.lab"][1] or ""
+        )
+
+    def test_intentionally_removed_peer_is_not_a_failure(
+        self,
+        devices: dict[str, Device],
+        intent_repo: Path,
+        job_service: JobService,
+        run_job: RunJob,
+        session: Session,
+    ) -> None:
+        path = intent_repo / "devices" / "leaf-1.croc.lab.yaml"
+        data = yaml.safe_load(path.read_text())
+        data["bgp"]["neighbors"] = data["bgp"]["neighbors"][:1]  # decommission spine-2
+        path.write_text(yaml.safe_dump(data))
+        dry_run = job_service.create_dry_run(
+            [devices["leaf-1.croc.lab"].id], IntentSource.GIT_MAIN, requested_by="tester"
+        )
+        run_job(dry_run.id)
+        deploy_id = _deploy(job_service, dry_run)
+        peer_gone = HealthSnapshot(
+            bgp_sessions={"10.0.1.0": BgpSessionState("Established", 5)}, interfaces=LINKS
+        )
+
+        assert run_job(deploy_id, health_probe=ScriptedProbe(HEALTHY, peer_gone)) is (
+            JobStatus.SUCCESS
+        )
+
+    def test_without_expectations_regressions_still_count(
+        self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
+    ) -> None:
+        """Targets recorded before expectations existed fall back to regression checks."""
+        deploy_id = _deploy(job_service, approved_dry_run)
+        for target in session.get_one(Job, deploy_id).targets:
+            target.health_expectations = None
+        session.commit()
+        probe = ScriptedProbe(HEALTHY, BGP_DOWN)
+
+        assert run_job(deploy_id, health_probe=probe) is JobStatus.FAILED
+        assert probe.expectations[0] is None
+        assert "10.0.1.0 went from Established to Idle" in (
+            _outcome(session, deploy_id)["leaf-1.croc.lab"][1] or ""
+        )

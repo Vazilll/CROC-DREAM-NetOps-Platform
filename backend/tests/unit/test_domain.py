@@ -127,3 +127,15 @@ def test_postgres_engine_checks_connections() -> None:
     engine = build_engine("postgresql+psycopg://user:pw@db.invalid/netops")
     assert engine.pool._pre_ping is True  # type: ignore[attr-defined]
     engine.dispose()
+
+
+def test_post_check_retries_must_fit_the_confirm_timer() -> None:
+    fine = Settings(_env_file=None, post_check_attempts=6, post_check_interval_seconds=10)  # type: ignore[call-arg]
+    assert fine.post_check_attempts == 6
+    with pytest.raises(ValueError, match="more than half"):
+        Settings(  # type: ignore[call-arg]
+            _env_file=None,
+            commit_confirm_timeout_seconds=60,
+            post_check_attempts=10,
+            post_check_interval_seconds=10,
+        )

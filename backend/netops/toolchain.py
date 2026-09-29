@@ -36,6 +36,8 @@ class Toolchain:
     credentials: Mapping[str, Credentials]
     confirm_timeout_seconds: int = 180
     max_ping_loss_percent: float = 20.0
+    post_check_attempts: int = 1
+    post_check_interval_seconds: float = 0.0
 
     def target_for(self, device: InventoryDevice) -> DeviceTarget:
         credentials = self.credentials.get(device.auth_profile)
@@ -72,4 +74,6 @@ def build_toolchain(settings: Settings) -> Toolchain:
         },
         confirm_timeout_seconds=settings.commit_confirm_timeout_seconds,
         max_ping_loss_percent=settings.max_ping_loss_percent,
+        post_check_attempts=settings.post_check_attempts,
+        post_check_interval_seconds=settings.post_check_interval_seconds,
     )

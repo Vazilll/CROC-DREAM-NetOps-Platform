@@ -5,7 +5,15 @@ from pathlib import Path
 import pytest
 
 from netops.enums import Platform
-from netops.network import ChangePlan, Credentials, DeviceTarget, OfflineLab
+from netops.network import (
+    ChangePlan,
+    Credentials,
+    DeviceTarget,
+    HealthExpectations,
+    HealthSnapshot,
+    OfflineLab,
+    evaluate_health,
+)
 
 PLAN = ChangePlan(
     remediation="hostname new\n", rollback="hostname old\n", intended="hostname new\n"
@@ -48,13 +56,25 @@ def test_unreachable_device(lab: OfflineLab) -> None:
     with pytest.raises(ConnectionError):
         lab.apply(_target("down"), PLAN, confirm_timeout=180)
     with pytest.raises(ConnectionError):
-        lab.snapshot(_target("down"))
+        lab.snapshot(_target("down"), None)
 
 
-def test_health_snapshot_is_empty(lab: OfflineLab) -> None:
-    snapshot = lab.snapshot(_target("up"))
+def test_health_snapshot_without_expectations_is_empty(lab: OfflineLab) -> None:
+    snapshot = lab.snapshot(_target("up"), None)
     assert not snapshot.bgp_sessions
     assert not snapshot.interfaces
+
+
+def test_health_snapshot_satisfies_expectations(lab: OfflineLab) -> None:
+    expected = HealthExpectations(
+        bgp_peers=("10.0.1.1",), interfaces={"Ethernet1": True, "Ethernet9": False}
+    )
+    snapshot = lab.snapshot(_target("up"), expected)
+    assert snapshot.bgp_sessions["10.0.1.1"].established
+    assert snapshot.interfaces["Ethernet1"].is_up
+    assert not snapshot.interfaces["Ethernet9"].is_up
+    assert snapshot.ping_loss_percent == {"10.0.1.1": 0.0}
+    assert evaluate_health(HealthSnapshot(), snapshot, expected=expected).healthy
 
 
 def test_credentials_are_not_printed() -> None:

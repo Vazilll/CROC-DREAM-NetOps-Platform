@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -100,6 +100,8 @@ class JobTarget(Base):
     )
     remediation_config: Mapped[str | None] = mapped_column(Text)
     rollback_config: Mapped[str | None] = mapped_column(Text)
+    # HealthExpectations.to_json() of the intent the patch was computed from.
+    health_expectations: Mapped[dict[str, Any] | None]
 
     job: Mapped[Job] = relationship(back_populates="targets")
     device: Mapped[Device | None] = relationship()

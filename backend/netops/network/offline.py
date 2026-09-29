@@ -5,7 +5,17 @@ from __future__ import annotations
 from collections.abc import Sequence
 from pathlib import Path
 
-from netops.network.base import ChangePlan, DeviceTarget, FetchResult, HealthSnapshot
+from netops.network.base import (
+    BgpSessionState,
+    ChangePlan,
+    DeviceTarget,
+    FetchResult,
+    HealthExpectations,
+    HealthSnapshot,
+    InterfaceState,
+)
+
+_ADMIN_DOWN = InterfaceState("administratively down", "down")
 
 
 class OfflineLab:
@@ -14,7 +24,9 @@ class OfflineLab:
     * a missing file means the device is unreachable;
     * ``apply`` stages the intended config, ``confirm`` writes it to the file and
       ``rollback`` discards it — the same semantics as ``commit confirmed``;
-    * health snapshots are empty, so post-checks always pass.
+    * health snapshots report exactly what the intent expects (all declared
+      peers Established, enabled interfaces up/up, no ping loss), so
+      post-checks pass.
     """
 
     SUFFIX = ".cfg"
@@ -49,9 +61,21 @@ class OfflineLab:
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
         self._staged.pop(target.hostname, None)
 
-    def snapshot(self, target: DeviceTarget) -> HealthSnapshot:
+    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
         self._ensure_reachable(target)
-        return HealthSnapshot()
+        if expected is None:
+            return HealthSnapshot()
+        return HealthSnapshot(
+            bgp_sessions={
+                peer: BgpSessionState("Established", prefixes_accepted=1)
+                for peer in expected.bgp_peers
+            },
+            interfaces={
+                name: InterfaceState("up", "up") if enabled else _ADMIN_DOWN
+                for name, enabled in expected.interfaces.items()
+            },
+            ping_loss_percent=dict.fromkeys(expected.bgp_peers, 0.0),
+        )
 
     def _ensure_reachable(self, target: DeviceTarget) -> None:
         if not self._path(target).is_file():

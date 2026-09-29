@@ -5,9 +5,9 @@ from __future__ import annotations
 import hmac
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import BaseModel, Field, SecretStr
+from pydantic import BaseModel, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from netops.enums import UserRole
@@ -51,6 +51,10 @@ class Settings(BaseSettings):
 
     commit_confirm_timeout_seconds: int = Field(default=180, ge=30, le=3600)
     max_ping_loss_percent: float = Field(default=20.0, ge=0, le=100)
+    # BGP needs time to converge after a change: the post-check is retried
+    # until it passes or the attempts run out, then the change is rolled back.
+    post_check_attempts: int = Field(default=6, ge=1, le=60)
+    post_check_interval_seconds: float = Field(default=10.0, ge=0)
 
     drift_scan_interval_seconds: int = Field(default=900, ge=60)
     job_timeout_seconds: int = Field(default=3600, ge=60)
@@ -64,6 +68,17 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
+
+    @model_validator(mode="after")
+    def _post_check_fits_confirm_timer(self) -> Self:
+        # Leave at least half of the timer for the probes themselves and the confirm.
+        window = (self.post_check_attempts - 1) * self.post_check_interval_seconds
+        if window > self.commit_confirm_timeout_seconds / 2:
+            raise ValueError(
+                f"Post-check retries take {window:g}s, more than half of the "
+                f"{self.commit_confirm_timeout_seconds}s commit-confirm timer"
+            )
+        return self
 
     def authenticate(self, token: str) -> ApiPrincipal | None:
         """Resolve a bearer token, comparing in constant time."""
