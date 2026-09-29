@@ -1,0 +1,91 @@
+# CROC DREAM NetOps Platform — the whole stack with one command:
+#
+#   docker compose up --build
+#
+# API and Swagger: http://localhost:8000/docs
+# Backend settings (tokens, SSH profiles, ...) come from backend/.env, see backend/.env.example.
+# Host ports and data directories can be overridden with the variables below (e.g. in ./.env).
+name: netops
+
+x-backend: &backend
+  build: ./backend
+  image: netops-backend
+  env_file:
+    - path: backend/.env
+      required: false
+  environment:
+    NETOPS_DATABASE_URL: postgresql+psycopg://netops:netops@postgres:5432/netops
+    NETOPS_REDIS_URL: redis://redis:6379/0
+    NETOPS_INTENT_REPO_PATH: /data/intent
+    NETOPS_TEMPLATES_PATH: /data/templates
+    NETOPS_OFFLINE_LAB_PATH: /data/lab
+  volumes:
+    - ${INTENT_REPO:-./intent}:/data/intent:ro
+    - ${TEMPLATES:-./templates}:/data/templates:ro
+    - ${OFFLINE_LAB:-./lab/running}:/data/lab
+  restart: unless-stopped
+  depends_on:
+    migrate:
+      condition: service_completed_successfully
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: netops
+      POSTGRES_PASSWORD: netops
+      POSTGRES_DB: netops
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
+    volumes: [postgres-data:/var/lib/postgresql/data]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U netops"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["${REDIS_PORT:-6379}:6379"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  # Applies Alembic migrations once before the API, worker and Beat start.
+  migrate:
+    <<: *backend
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    <<: *backend
+    command: uvicorn netops.main:app --host 0.0.0.0 --port 8000
+    ports: ["${API_PORT:-8000}:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
+      interval: 10s
+      retries: 5
+
+  worker:
+    <<: *backend
+    command: celery -A netops.worker.tasks worker --loglevel=INFO --concurrency=4
+
+  beat:
+    <<: *backend
+    command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
+
+  # The React UI joins here once its image exists; monitoring (Prometheus,
+  # Grafana) will be added later as well. For example:
+  # frontend:
+  #   build: ./frontend
+  #   ports: ["${FRONTEND_PORT:-5173}:80"]
+  #   depends_on: [api]
+
+volumes:
+  postgres-data:
