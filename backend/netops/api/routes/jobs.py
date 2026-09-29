@@ -1,0 +1,94 @@
+from __future__ import annotations
+
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Query, status
+
+from netops.api.deps import JobServiceDep, Operator, Viewer
+from netops.enums import JobStatus, JobType
+from netops.models import Job
+from netops.schemas.jobs import (
+    DeployRequest,
+    DeviceDiffRead,
+    DryRunRequest,
+    JobAccepted,
+    JobDiffRead,
+    JobRead,
+    JobSummary,
+)
+
+router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+
+@router.post(
+    "/dry-run",
+    response_model=JobAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Start a dry-run: render intent, collect running-config and compute the diff",
+)
+def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
+    job = service.create_dry_run(
+        request.device_ids, request.intent_source, requested_by=user.username
+    )
+    return JobAccepted(job_id=job.id, status=job.status)
+
+
+@router.post(
+    "/deploy",
+    response_model=JobAccepted,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Approve a successful dry-run and deploy it transactionally",
+)
+def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
+    job = service.create_deploy(
+        request.job_id, confirmed_by=request.confirmed_by, requested_by=user.username
+    )
+    return JobAccepted(job_id=job.id, status=job.status)
+
+
+@router.get("", response_model=list[JobSummary], summary="Job history")
+def list_jobs(
+    service: JobServiceDep,
+    _: Viewer,
+    job_type: Annotated[JobType | None, Query(alias="type")] = None,
+    status_filter: Annotated[JobStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[Job]:
+    return list(
+        service.list_jobs(job_type=job_type, status=status_filter, limit=limit, offset=offset)
+    )
+
+
+@router.get("/{job_id}", response_model=JobRead, summary="Job status, progress and logs")
+def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
+    return service.get(job_id)
+
+
+@router.get(
+    "/{job_id}/diff",
+    response_model=JobDiffRead,
+    summary="Running vs intended config and the remediation/rollback patches",
+)
+def get_job_diff(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> JobDiffRead:
+    job = service.get_with_diff(job_id)
+    return JobDiffRead(
+        job_id=job.id,
+        job_type=job.type,
+        devices=[
+            DeviceDiffRead(
+                device_id=target.device_id,
+                hostname=target.hostname,
+                status=target.status,
+                error=target.error,
+                running_config=target.running_snapshot.content if target.running_snapshot else None,
+                intended_config=(
+                    target.intended_snapshot.content if target.intended_snapshot else None
+                ),
+                remediation_patch=target.remediation_config,
+                rollback_patch=target.rollback_config,
+            )
+            for target in job.targets
+        ],
+    )

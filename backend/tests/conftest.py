@@ -7,9 +7,11 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from netops.api import create_app
 from netops.db import Base, build_engine, build_session_factory
 from netops.enums import JobStatus, UserRole
 from netops.intent import IntentRepository
@@ -60,6 +62,10 @@ class RecordingDispatcher:
         if self.error is not None:
             raise self.error
         self.job_ids.append(job_id)
+
+
+def auth(role: UserRole) -> dict[str, str]:
+    return {"Authorization": f"Bearer {TOKENS[role]}"}
 
 
 @pytest.fixture
@@ -162,6 +168,15 @@ def run_job(
         return status
 
     return run
+
+
+@pytest.fixture
+def client(
+    settings: Settings, engine: Engine, dispatcher: RecordingDispatcher
+) -> Iterator[TestClient]:
+    app = create_app(settings, engine=engine, dispatcher=dispatcher)
+    with TestClient(app) as client:
+        yield client
 
 
 @pytest.fixture
