@@ -17,6 +17,11 @@ build/
 *.sqlite
 celerybeat-schedule*
 
+# Node / Frontend
+node_modules/
+frontend/dist/
+frontend/.cache/
+
 # OS / editors
 .DS_Store
 .idea/
