@@ -60,6 +60,11 @@ class Settings(BaseSettings):
     # {"lab": {"username": "admin", "password": "admin"}}
     auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
 
+    # Browser origins allowed to call the API (the Vite dev server by default).
+    cors_origins: list[str] = Field(
+        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+    )
+
     def authenticate(self, token: str) -> ApiPrincipal | None:
         """Resolve a bearer token, comparing in constant time."""
         candidate = token.encode()

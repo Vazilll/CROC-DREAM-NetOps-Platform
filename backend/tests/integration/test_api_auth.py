@@ -84,3 +84,29 @@ def test_readiness_reports_database_outage(settings: Settings, tmp_path: Path) -
         response = client.get("/readyz")
     assert response.status_code == 503
     assert response.json() == {"status": "unavailable", "database": "unreachable"}
+
+
+def test_cors_allows_the_frontend_origin(client: TestClient) -> None:
+    preflight = client.options(
+        "/api/v1/devices",
+        headers={
+            "Origin": "http://localhost:5173",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "Authorization",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "http://localhost:5173"
+    assert "authorization" in preflight.headers["access-control-allow-headers"].lower()
+
+    response = client.get(
+        "/api/v1/devices", headers={"Origin": "http://localhost:5173"} | auth(UserRole.VIEWER)
+    )
+    assert response.headers["access-control-allow-origin"] == "http://localhost:5173"
+
+
+def test_cors_rejects_unknown_origins(client: TestClient) -> None:
+    response = client.get(
+        "/api/v1/devices", headers={"Origin": "https://evil.example"} | auth(UserRole.VIEWER)
+    )
+    assert "access-control-allow-origin" not in response.headers

@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from netops.enums import DeviceStatus, IntentSource, JobStatus, JobType
 from netops.errors import ConflictError, NotFoundError, ServiceUnavailableError
-from netops.models import Device, Job, JobTarget
+from netops.models import Device, Job, JobLog, JobTarget
 from netops.pipeline.recorder import JobRecorder
 
 logger = logging.getLogger(__name__)
@@ -43,6 +43,17 @@ class JobService:
         if job is None:
             raise NotFoundError(f"Job {job_id} not found")
         return job
+
+    def logs(self, job_id: uuid.UUID, *, after_id: int = 0, limit: int = 500) -> Sequence[JobLog]:
+        """Log lines newer than ``after_id``, for incremental polling by the UI."""
+        if self._session.get(Job, job_id) is None:
+            raise NotFoundError(f"Job {job_id} not found")
+        return self._session.scalars(
+            select(JobLog)
+            .where(JobLog.job_id == job_id, JobLog.id > after_id)
+            .order_by(JobLog.id)
+            .limit(limit)
+        ).all()
 
     def get_with_diff(self, job_id: uuid.UUID) -> Job:
         job = self._session.scalar(

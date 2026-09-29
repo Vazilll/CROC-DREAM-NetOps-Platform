@@ -40,6 +40,7 @@ class JobTargetRead(BaseModel):
 class JobLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: int = Field(description="Monotonic; pass as after_id to fetch only newer lines")
     created_at: datetime
     level: LogLevel
     step: str

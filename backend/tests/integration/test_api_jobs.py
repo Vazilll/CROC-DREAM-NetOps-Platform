@@ -275,3 +275,31 @@ class TestHistory:
         assert client.get(f"/api/v1/jobs/{missing}", headers=VIEWER).status_code == 404
         assert client.get(f"/api/v1/jobs/{missing}/diff", headers=VIEWER).status_code == 404
         assert client.get("/api/v1/jobs/not-a-uuid", headers=VIEWER).status_code == 422
+
+
+class TestIncrementalLogs:
+    def test_only_newer_lines_are_returned(
+        self, client: TestClient, devices: dict[str, Device], run_job: RunJob
+    ) -> None:
+        job_id = _dry_run(client, devices["spine-1.croc.lab"].id)
+        run_job(job_id)
+
+        everything = client.get(f"/api/v1/jobs/{job_id}/logs", headers=VIEWER).json()
+        ids = [line["id"] for line in everything]
+        assert ids == sorted(ids)
+        assert everything[0]["message"] == "DRY_RUN job started"
+
+        newer = client.get(
+            f"/api/v1/jobs/{job_id}/logs", params={"after_id": ids[2]}, headers=VIEWER
+        ).json()
+        assert [line["id"] for line in newer] == ids[3:]
+        page = client.get(f"/api/v1/jobs/{job_id}/logs", params={"limit": 2}, headers=VIEWER).json()
+        assert [line["id"] for line in page] == ids[:2]
+        after_last = client.get(
+            f"/api/v1/jobs/{job_id}/logs", params={"after_id": ids[-1]}, headers=VIEWER
+        )
+        assert after_last.json() == []
+
+    def test_unknown_job(self, client: TestClient) -> None:
+        response = client.get(f"/api/v1/jobs/{uuid.uuid4()}/logs", headers=VIEWER)
+        assert response.status_code == 404

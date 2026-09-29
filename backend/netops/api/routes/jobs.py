@@ -7,13 +7,14 @@ from fastapi import APIRouter, Query, status
 
 from netops.api.deps import JobServiceDep, Operator, Viewer
 from netops.enums import JobStatus, JobType
-from netops.models import Job
+from netops.models import Job, JobLog
 from netops.schemas.jobs import (
     DeployRequest,
     DeviceDiffRead,
     DryRunRequest,
     JobAccepted,
     JobDiffRead,
+    JobLogRead,
     JobRead,
     JobSummary,
 )
@@ -64,6 +65,21 @@ def list_jobs(
 @router.get("/{job_id}", response_model=JobRead, summary="Job status, progress and logs")
 def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
     return service.get(job_id)
+
+
+@router.get(
+    "/{job_id}/logs",
+    response_model=list[JobLogRead],
+    summary="Job log lines after a given id (incremental polling)",
+)
+def get_job_logs(
+    job_id: uuid.UUID,
+    service: JobServiceDep,
+    _: Viewer,
+    after_id: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 500,
+) -> list[JobLog]:
+    return list(service.logs(job_id, after_id=after_id, limit=limit))
 
 
 @router.get(

@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Engine
 
 from netops import __version__
@@ -53,6 +54,12 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.container = container
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins,
+        allow_methods=["*"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     register_error_handlers(app)
     app.include_router(system.router)
     app.include_router(api_v1)
