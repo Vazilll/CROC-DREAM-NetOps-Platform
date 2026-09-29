@@ -48,6 +48,11 @@ def test_me(client: TestClient, role: UserRole) -> None:
         ("PATCH", "/api/v1/devices/1", UserRole.ADMIN),
         ("DELETE", "/api/v1/devices/1", UserRole.ADMIN),
         ("POST", "/api/v1/inventory/sync", UserRole.ADMIN),
+        ("GET", "/api/v1/users", UserRole.ADMIN),
+        ("POST", "/api/v1/users", UserRole.ADMIN),
+        ("PATCH", "/api/v1/users/1", UserRole.ADMIN),
+        ("POST", "/api/v1/users/1/token", UserRole.ADMIN),
+        ("DELETE", "/api/v1/users/1", UserRole.ADMIN),
     ],
 )
 def test_rbac_matrix(client: TestClient, method: str, url: str, minimum: UserRole) -> None:
