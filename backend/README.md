@@ -16,8 +16,9 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Пайплайн: pre-flight lint → dry-run → ручное подтверждение → pre-check → apply (commit confirmed) → post-check → confirm/rollback | `netops/pipeline/` |
 | Drift Engine: Celery Beat каждые 15 минут, классификация `IN_SYNC / DRIFT_DETECTED / UNREACHABLE`, устранение дрейфа | `netops/pipeline/pipelines.py`, `netops/services/jobs.py` |
 | Нормализация конфигов (баннеры, счётчики байт, сертификаты, отступы) | `netops/network/normalization.py` |
-| Критерии аварийной деградации (BGP, интерфейсы, потери ping > 20 %) | `netops/network/health.py` |
-| RBAC: viewer / operator / admin | `netops/api/deps.py` |
+| Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
+| RBAC: viewer / operator / admin, управление пользователями и токенами | `netops/api/deps.py`, `netops/services/users.py` |
+| Общий docker-compose: бэкенд, PostgreSQL, Redis, миграции, воркер, Beat | `../docker-compose.yml` |
 | OpenAPI/Swagger | `/docs`, `/openapi.json` |
 
 ## Быстрый старт
@@ -39,15 +40,24 @@ uv run celery -A netops.worker.tasks worker --loglevel=INFO
 uv run celery -A netops.worker.tasks beat --loglevel=INFO
 ```
 
-Всё сразу в Docker (Postgres, Redis, API, воркер, Beat): `docker compose -f docker-compose.dev.yml up --build`.
-Общий `docker-compose.yml` для всей платформы собирает Даня; этот файл — только для разработки бэкенда.
+Всю платформу поднимает `docker-compose.yml` в корне репозитория (из корня):
 
-Swagger: <http://localhost:8000/docs>. Авторизация — заголовок `Authorization: Bearer <token>`.
+```bash
+docker compose up --build
+```
+
+Сначала отрабатывает одноразовый сервис `migrate` (`alembic upgrade head`), затем стартуют API,
+воркер и Beat. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
+офлайн-стендом можно переопределить переменными `API_PORT`, `POSTGRES_PORT`, `INTENT_REPO`,
+`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд и мониторинг
+добавятся туда же позже.
+
+Swagger: <http://localhost:8000/docs>. Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
 ## Проверки
 
 ```bash
-uv run pytest --cov=netops   # 240+ тестов, SQLite, без Redis и сети
+uv run pytest --cov=netops   # 285 тестов, SQLite, без Redis и сети
 uv run ruff check .
 uv run black --check .
 uv run mypy                  # strict
@@ -70,9 +80,12 @@ uv run mypy                  # strict
 | `NORMALIZATION_RULES_PATH` | необязательный YAML с дополнительными правилами нормализации |
 | `NETWORK_DRIVER` | пока только `offline` (см. ниже) |
 | `COMMIT_CONFIRM_TIMEOUT_SECONDS` | таймер `commit confirmed`, по умолчанию 180 |
+| `POST_CHECK_ATTEMPTS`, `POST_CHECK_INTERVAL_SECONDS` | повторы post-check, пока сходится BGP: по умолчанию 6 × 10 с (не больше половины таймера) |
+| `MAX_PING_LOSS_PERCENT` | допустимые потери ping, по умолчанию 20 |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | период фонового скана, по умолчанию 900 (15 минут) |
-| `API_TOKENS` | JSON `{"<token>": {"username": ..., "role": "viewer\|operator\|admin"}}` |
+| `API_TOKENS` | начальные токены `{"<token>": {"username": ..., "role": "viewer\|operator\|admin"}}`: нужны хотя бы для первого администратора, остальных пользователей он заводит через API |
 | `AUTH_PROFILES` | JSON `{"lab": {"username": ..., "password": ...}}`: SSH-учётки для `Device.auth_profile` |
+| `CORS_ORIGINS` | адреса фронтенда, которым разрешены запросы из браузера; по умолчанию Vite `http://localhost:5173` |
 
 ## API
 
@@ -86,12 +99,16 @@ uv run mypy                  # strict
 | POST | `/api/v1/jobs/dry-run` | operator | `{"device_ids": [1, 2], "intent_source": "git_main"}` → `job_id` |
 | GET | `/api/v1/jobs?type=&status=` | viewer | история задач |
 | GET | `/api/v1/jobs/{id}` | viewer | статус, прогресс (%), устройства, логи шагов |
+| GET | `/api/v1/jobs/{id}/logs?after_id=` | viewer | только новые строки лога — для живого экрана деплоя |
 | GET | `/api/v1/jobs/{id}/diff` | viewer | `running_config`, `intended_config`, `remediation_patch`, `rollback_patch` по каждому устройству |
 | POST | `/api/v1/jobs/deploy` | operator | `{"job_id": "<dry-run>", "confirmed_by": "..."}` → `job_id` деплоя |
 | POST | `/api/v1/drift/scan` | operator | внеочередной скан (`{"device_ids": [...]}` или все) |
 | GET | `/api/v1/drift/report?since=&until=&status=` | viewer | последняя проверка каждого устройства |
 | POST | `/api/v1/drift/remediate` | operator | `{"device_id": 1}` → `job_id` |
 | GET | `/api/v1/auth/me` | viewer | текущий пользователь и роль (для UI) |
+| GET/POST | `/api/v1/users` | admin | пользователи; при создании выдаётся токен (показывается один раз) |
+| GET/PATCH/DELETE | `/api/v1/users/{id}` | admin | роль, блокировка (`is_active`), удаление; себя изменить нельзя |
+| POST | `/api/v1/users/{id}/token` | admin | выпустить новый токен, старый перестаёт работать |
 | GET | `/healthz`, `/readyz` | — | liveness / readiness (БД) |
 
 Ошибки: `404` — нет сущности, `409` — конфликт состояния (dry-run не успешен, устройство уже
@@ -112,6 +129,17 @@ uv run mypy                  # strict
 - **DRIFT_REMEDIATE** — пересчитывает компенсирующий патч на текущем running-config и
   прогоняет его через тот же транзакционный деплой.
 
+**Post-check** (правила Health-Check из раздела 2.6). При dry-run из intent запоминается, что
+заявлено для устройства: BGP-соседи и интерфейсы. После применения:
+
+- каждый заявленный сосед — `Established` и принимает префиксы (`Prefixes Accepted > 0`);
+- каждый включённый заявленный интерфейс — `up/up`; выключенные (`enabled: false`) могут лежать;
+- интерфейсы, которых нет в intent, проверяются на регрессию: был `up/up` — должен остаться;
+- потери ping до соседей не больше 20 %.
+
+Сосед, удалённый из intent, может пропасть — это не авария. Пока BGP сходится, проверка
+повторяется (`POST_CHECK_ATTEMPTS` раз); не прошла последняя попытка — откат.
+
 Задача `FAILED`, если упало хотя бы одно устройство. Зависшие задачи (воркер умер, сообщение
 потерялось) через `JOB_TIMEOUT_SECONDS` переводятся в `FAILED` фоновой задачей Beat, устройства
 освобождаются. Статус устройства `UNKNOWN` (добавлен к статусам ТЗ) — ещё не проверялось или
@@ -122,7 +150,8 @@ uv run mypy                  # strict
 **Максим (Scrapli/Nornir).** Пайплайн работает с сетью только через протоколы из
 `netops/network/base.py`: `ConfigCollector` (параллельный сбор running-config),
 `ConfigDeployer` (`apply` с commit confirmed / `confirm` / `rollback`) и `HealthProbe`
-(снимок BGP, интерфейсов, ping). Реализацию достаточно зарегистрировать в `build_toolchain()`
+(снимок BGP, интерфейсов, ping). В `HealthProbe.snapshot` приходят ожидания из intent: список
+заявленных соседей — это и адреса, которые нужно пинговать (5 пакетов). Реализацию достаточно зарегистрировать в `build_toolchain()`
 (`netops/toolchain.py`) под новым значением `NETOPS_NETWORK_DRIVER`, оркестрацию менять не нужно.
 Пока используется `OfflineLab` — «стенд на файлах»: running-config читается из
 `<OFFLINE_LAB_PATH>/<hostname>.cfg`, confirm записывает туда intended config. Так можно
@@ -154,10 +183,11 @@ cisco_iosxe:
 
 - Драйвер Scrapli/Nornir и реальные health-check команды (Максим) — пока `OfflineLab`.
 - Реальные шаблоны Jinja2 (Тимофей) — в репозитории только тестовые.
-- Проверка «каждый заявленный BGP-сосед в Established» после деплоя: сейчас оценивается только
-  регрессия относительно pre-check (сессия была Established и перестала).
-- Пользователи и токены задаются в настройках; управление учётками через API и принудительный
-  накат rollback администратором — следующий шаг.
+- Метрики для Prometheus и Grafana — отложены; фронтенд в `docker-compose.yml` — когда будет
+  образ React-приложения.
+- Из раздела 2.7 для администратора пока нет «утверждения опасных изменений» и
+  «принудительного наката команд отката» — вынести на обсуждение, что считать опасным изменением.
+- LLM-ассистент (Максим): ключ модели нельзя отдавать в браузер, поэтому вызов лучше делать
+  через бэкенд — эндпоинт добавим, когда будет выбран провайдер.
 - `intent_source` поддерживает только `git_main` (читается рабочая копия в `INTENT_REPO_PATH`,
   `git pull` выполняется снаружи).
-- Docker-образ и `docker-compose.dev.yml` написаны, но не собирались (на машине не был запущен Docker).
