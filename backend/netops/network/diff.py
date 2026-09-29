@@ -1,0 +1,40 @@
+"""Hierarchical diff via hier_config (spec 2.4, stage 2 and 2.5)."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from types import MappingProxyType
+
+from hier_config import HConfig, WorkflowRemediation, get_hconfig
+from hier_config import Platform as HierPlatform
+
+from netops.enums import Platform
+from netops.network.base import ConfigDiff
+
+HIER_CONFIG_PLATFORMS: Mapping[Platform, HierPlatform] = MappingProxyType(
+    {
+        Platform.CISCO_IOSXE: HierPlatform.CISCO_IOS,
+        Platform.ARISTA_EOS: HierPlatform.ARISTA_EOS,
+        Platform.HUAWEI_VRP: HierPlatform.HUAWEI_VRP,
+    }
+)
+
+
+class HierConfigDiffEngine:
+    def compare(self, platform: Platform, running: str, intended: str) -> ConfigDiff:
+        hier_platform = HIER_CONFIG_PLATFORMS[platform]
+        running_config = get_hconfig(hier_platform, running)
+        intended_config = get_hconfig(hier_platform, intended)
+        workflow = WorkflowRemediation(running_config, intended_config)
+        return ConfigDiff(
+            remediation=_as_patch(workflow.remediation_config),
+            rollback=_as_patch(workflow.rollback_config),
+            unauthorized_lines=tuple(running_config.difference(intended_config).dump_simple()),
+            missing_lines=tuple(intended_config.difference(running_config).dump_simple()),
+        )
+
+
+def _as_patch(config: HConfig) -> str:
+    # Explicit "exit" lines make the patch safe to paste into any config mode.
+    lines = config.dump_simple(sectional_exiting=True)
+    return "\n".join(lines) + "\n" if lines else ""
