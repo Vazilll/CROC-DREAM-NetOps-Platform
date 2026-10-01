@@ -1,7 +1,7 @@
 // API client for CROC DREAM NetOps Platform
 
-export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp';
-export type DeviceRole = 'spine' | 'leaf' | 'border';
+export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp' | 'juniper_junos' | 'eltex_mes' | 'yadro_kornfe';
+export type DeviceRole = 'spine' | 'leaf' | 'border' | 'border_firewall';
 export type DeviceStatus = 'UNKNOWN' | 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE' | 'IN_PROGRESS';
 export type DriftStatus = 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE';
 export type JobType = 'DRY_RUN' | 'DEPLOY' | 'DRIFT_SCAN' | 'DRIFT_REMEDIATE';

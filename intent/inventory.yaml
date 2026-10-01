@@ -19,3 +19,13 @@ devices:
     platform: cisco_iosxe
     role: leaf
     auth_profile: lab
+  - hostname: fw-1.croc.lab
+    management_ip: 172.20.20.1
+    platform: juniper_junos
+    role: border_firewall
+    auth_profile: lab
+  - hostname: fw-2.croc.lab
+    management_ip: 172.20.20.2
+    platform: juniper_junos
+    role: border_firewall
+    auth_profile: lab

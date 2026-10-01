@@ -15,7 +15,7 @@ import jinja2
 from netops.errors import NetOpsError
 from netops.intent.models import DeviceIntent, InventoryDevice
 
-SECTIONS = ("base", "interfaces", "acls", "bgp")
+SECTIONS = ("base", "interfaces", "acls", "bgp", "vxlan")
 
 
 class RenderError(NetOpsError):

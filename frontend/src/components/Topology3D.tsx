@@ -8,8 +8,10 @@ import {
   Maximize2,
   Minimize2,
   ExternalLink,
+  Shield,
+  Layers,
 } from 'lucide-react';
-import type { Device } from '../api';
+import type { Device, DeviceRole } from '../api';
 
 interface Topology3DProps {
   devices: Device[];
@@ -21,7 +23,7 @@ interface Topology3DProps {
 interface Node3DData {
   id: number;
   hostname: string;
-  role: 'spine' | 'leaf' | 'border';
+  role: DeviceRole;
   platform: string;
   ip: string;
   status: string;
@@ -42,14 +44,17 @@ export const Topology3D: React.FC<Topology3DProps> = ({
   const [autoRotate, setAutoRotate] = useState(true);
   const [burstMode, setBurstMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [overlayMode, setOverlayMode] = useState(false);
 
   // Mutable refs so the animation loop reads live values without re-creating the scene.
   const autoRotateRef = useRef(autoRotate);
   const burstModeRef = useRef(burstMode);
   const isJobRunningRef = useRef(isJobRunning);
+  const overlayModeRef = useRef(overlayMode);
   useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
   useEffect(() => { burstModeRef.current = burstMode; }, [burstMode]);
   useEffect(() => { isJobRunningRef.current = isJobRunning; }, [isJobRunning]);
+  useEffect(() => { overlayModeRef.current = overlayMode; }, [overlayMode]);
 
   // References for Three.js animation loop
   const sceneRef = useRef<THREE.Scene | null>(null);
@@ -118,12 +123,14 @@ export const Topology3D: React.FC<Topology3DProps> = ({
     grid.position.y = -4.5;
     scene.add(grid);
 
-    // 5. Node Positions (2 Spine at top, 2 Leaf at bottom)
+    // 5. Node Positions (2 Border Firewalls, 2 Spine, 2 Leaf)
     const positions: Record<string, THREE.Vector3> = {
-      'spine-1.croc.lab': new THREE.Vector3(-3.2, 2.2, 0),
-      'spine-2.croc.lab': new THREE.Vector3(3.2, 2.2, 0),
-      'leaf-1.croc.lab': new THREE.Vector3(-3.2, -2.2, 0),
-      'leaf-2.croc.lab': new THREE.Vector3(3.2, -2.2, 0),
+      'fw-1.croc.lab': new THREE.Vector3(-2.2, 3.8, 0),
+      'fw-2.croc.lab': new THREE.Vector3(2.2, 3.8, 0),
+      'spine-1.croc.lab': new THREE.Vector3(-3.2, 1.4, 0),
+      'spine-2.croc.lab': new THREE.Vector3(3.2, 1.4, 0),
+      'leaf-1.croc.lab': new THREE.Vector3(-3.2, -2.4, 0),
+      'leaf-2.croc.lab': new THREE.Vector3(3.2, -2.4, 0),
     };
 
     const nodesMap = new Map<number, Node3DData>();
@@ -131,14 +138,20 @@ export const Topology3D: React.FC<Topology3DProps> = ({
 
     devices.forEach((dev) => {
       const pos = positions[dev.hostname] || new THREE.Vector3(0, 0, 0);
+      const isFirewall =
+        dev.role === 'border' ||
+        dev.role === 'border_firewall' ||
+        dev.hostname.startsWith('fw');
       const isSpine = dev.role === 'spine';
-      const nodeColor = isSpine ? 0x8b5cf6 : 0x06b6d4; // purple for spine, cyan for leaf
+      const nodeColor = isFirewall ? 0xf43f5e : isSpine ? 0x8b5cf6 : 0x06b6d4;
 
       const group = new THREE.Group();
       group.position.copy(pos);
 
       // Core Mesh
-      const geometry = isSpine
+      const geometry = isFirewall
+        ? new THREE.DodecahedronGeometry(0.85, 0)
+        : isSpine
         ? new THREE.OctahedronGeometry(0.85, 0)
         : new THREE.BoxGeometry(1.1, 1.1, 1.1);
 
@@ -210,10 +223,17 @@ export const Topology3D: React.FC<Topology3DProps> = ({
     });
 
     // 6. CLOS Fiber Optical Links (Every Leaf connects to every Spine)
+    const firewalls = devices.filter(
+      (d) =>
+        d.role === 'border' ||
+        d.role === 'border_firewall' ||
+        d.hostname.startsWith('fw'),
+    );
     const spines = devices.filter((d) => d.role === 'spine');
     const leaves = devices.filter((d) => d.role === 'leaf');
     const links: { start: THREE.Vector3; end: THREE.Vector3 }[] = [];
 
+    // Underlay Fabric: Spines <-> Leaves
     leaves.forEach((leaf) => {
       spines.forEach((spine) => {
         const start = positions[leaf.hostname];
@@ -221,7 +241,6 @@ export const Topology3D: React.FC<Topology3DProps> = ({
         if (start && end) {
           links.push({ start, end });
 
-          // Draw Glowing Fiber Link
           const curve = new THREE.LineCurve3(start, end);
           const tubeGeo = new THREE.TubeGeometry(curve, 20, 0.04, 8, false);
           const tubeMat = new THREE.MeshBasicMaterial({
@@ -234,6 +253,54 @@ export const Topology3D: React.FC<Topology3DProps> = ({
         }
       });
     });
+
+    // Perimeter Security: Firewalls <-> Spines
+    firewalls.forEach((fw) => {
+      spines.forEach((spine) => {
+        const start = positions[fw.hostname];
+        const end = positions[spine.hostname];
+        if (start && end) {
+          links.push({ start, end });
+
+          const curve = new THREE.LineCurve3(start, end);
+          const tubeGeo = new THREE.TubeGeometry(curve, 20, 0.04, 8, false);
+          const tubeMat = new THREE.MeshBasicMaterial({
+            color: 0xf43f5e,
+            transparent: true,
+            opacity: 0.45,
+          });
+          const tube = new THREE.Mesh(tubeGeo, tubeMat);
+          scene.add(tube);
+        }
+      });
+    });
+
+    // Overlay VXLAN Data-Plane Tunnels: Leaves <-> Leaves
+    if (leaves.length >= 2) {
+      for (let i = 0; i < leaves.length; i++) {
+        for (let j = i + 1; j < leaves.length; j++) {
+          const l1 = positions[leaves[i].hostname];
+          const l2 = positions[leaves[j].hostname];
+          if (l1 && l2) {
+            const mid = new THREE.Vector3(
+              (l1.x + l2.x) / 2,
+              Math.min(l1.y, l2.y) - 1.1,
+              0.6,
+            );
+            const curve = new THREE.QuadraticBezierCurve3(l1, mid, l2);
+            const tubeGeo = new THREE.TubeGeometry(curve, 32, 0.055, 8, false);
+            const tubeMat = new THREE.MeshBasicMaterial({
+              color: 0x10b981,
+              transparent: true,
+              opacity: 0.7,
+            });
+            const vxlanTube = new THREE.Mesh(tubeGeo, tubeMat);
+            scene.add(vxlanTube);
+            links.push({ start: l1, end: l2 });
+          }
+        }
+      }
+    }
 
     // 7. Dynamic Data Packets (Photons traveling along links)
     const packets: { particle: THREE.Mesh; start: THREE.Vector3; end: THREE.Vector3; progress: number; speed: number }[] = [];
@@ -424,13 +491,26 @@ export const Topology3D: React.FC<Topology3DProps> = ({
             </span>
           </h3>
           <p className="text-[11px] text-slate-400">
-            2x Spine (Arista EOS) • 2x Leaf (Cisco IOS-XE) • eBGP Fabric
+            2x Border FW (Juniper) • 2x Spine (Arista) • 2x Leaf (Cisco) • VXLAN EVPN
           </p>
         </div>
       </div>
 
       {/* Control Buttons (Top Right) */}
       <div className="absolute top-4 right-4 z-10 flex items-center space-x-2">
+        <button
+          onClick={() => setOverlayMode(!overlayMode)}
+          className={`px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur border transition flex items-center space-x-1.5 shadow-sm ${
+            overlayMode
+              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-emerald-500/20'
+              : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
+          }`}
+          title="Переключить визуализацию Underlay (L3 CLOS) / Overlay (VXLAN EVPN)"
+        >
+          <Layers className="w-3.5 h-3.5" />
+          <span>{overlayMode ? 'Overlay: VXLAN' : 'Underlay: CLOS'}</span>
+        </button>
+
         <button
           onClick={() => setBurstMode(!burstMode)}
           className={`px-3 py-1.5 rounded-xl text-xs font-semibold backdrop-blur border transition flex items-center space-x-1.5 shadow-sm ${
@@ -500,7 +580,11 @@ export const Topology3D: React.FC<Topology3DProps> = ({
         <div className="absolute bottom-4 left-4 z-10 bg-slate-900/95 border border-indigo-500/40 backdrop-blur-md p-4 rounded-2xl shadow-2xl text-xs space-y-3 min-w-[300px]">
           <div className="flex items-center justify-between pb-2 border-b border-slate-800">
             <div className="flex items-center space-x-2">
-              <Server className="w-4 h-4 text-indigo-400" />
+              {selectedNode.role === 'border' || selectedNode.role === 'border_firewall' ? (
+                <Shield className="w-4 h-4 text-rose-400" />
+              ) : (
+                <Server className="w-4 h-4 text-indigo-400" />
+              )}
               <span className="font-bold text-white font-mono">{selectedNode.hostname}</span>
             </div>
             <button
@@ -538,6 +622,10 @@ export const Topology3D: React.FC<Topology3DProps> = ({
       {/* Legend & Help Indicator (Bottom Right) */}
       <div className="absolute bottom-4 right-4 z-10 flex items-center space-x-3 bg-slate-900/80 border border-slate-800/80 backdrop-blur px-3 py-1.5 rounded-xl text-[11px] text-slate-400 pointer-events-none">
         <div className="flex items-center space-x-1.5">
+          <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+          <span>Firewall (Juniper)</span>
+        </div>
+        <div className="flex items-center space-x-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
           <span>Spine (Arista)</span>
         </div>
@@ -547,7 +635,7 @@ export const Topology3D: React.FC<Topology3DProps> = ({
         </div>
         <div className="flex items-center space-x-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
-          <span>In Sync</span>
+          <span>VXLAN / Sync</span>
         </div>
         <div className="flex items-center space-x-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />

@@ -34,7 +34,7 @@ class ScrapliNetworkDriver:
 
     def _get_connection(self, target: DeviceTarget):
         try:
-            from scrapli.driver.core import EOSDriver, IOSXEDriver
+            from scrapli.driver.core import EOSDriver, IOSXEDriver  # noqa: PLC0415
         except ImportError:
             raise RuntimeError("Scrapli is not installed in the environment.") from None
 
@@ -76,7 +76,11 @@ class ScrapliNetworkDriver:
             return response.result
 
     def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None:
-        lines = [line.strip() for line in plan.remediation.splitlines() if line.strip() and not line.startswith("!")]
+        lines = [
+            line.strip()
+            for line in plan.remediation.splitlines()
+            if line.strip() and not line.startswith("!")
+        ]
         if not lines:
             return
 
@@ -107,12 +111,16 @@ class ScrapliNetworkDriver:
                 conn.send_command("abort")
 
             rollback_lines = [
-                line.strip() for line in plan.rollback.splitlines() if line.strip() and not line.startswith("!")
+                line.strip()
+                for line in plan.rollback.splitlines()
+                if line.strip() and not line.startswith("!")
             ]
             if rollback_lines:
                 conn.send_configs(rollback_lines)
 
-    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
+    def snapshot(
+        self, target: DeviceTarget, expected: HealthExpectations | None
+    ) -> HealthSnapshot:
         bgp_sessions: dict[str, BgpSessionState] = {}
         interfaces: dict[str, InterfaceState] = {}
         ping_losses: dict[str, float] = {}
@@ -120,11 +128,16 @@ class ScrapliNetworkDriver:
         with self._get_connection(target) as conn:
             bgp_out = conn.send_command("show ip bgp summary").result
             for line in bgp_out.splitlines():
-                match = re.search(r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(\d+|Active|Idle|Connect)$", line.strip())
+                match = re.search(
+                    r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(\d+|Active|Idle|Connect)$",
+                    line.strip(),
+                )
                 if match:
                     peer_ip, state_or_pfx = match.groups()
                     if state_or_pfx.isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(state_or_pfx))
+                        bgp_sessions[peer_ip] = BgpSessionState(
+                            "Established", prefixes_accepted=int(state_or_pfx)
+                        )
                     else:
                         bgp_sessions[peer_ip] = BgpSessionState(state_or_pfx, prefixes_accepted=0)
 
@@ -132,13 +145,16 @@ class ScrapliNetworkDriver:
             for line in int_out.splitlines():
                 parts = line.split()
                 if target.platform == Platform.CISCO_IOSXE and len(parts) >= 6:
-                    if parts[0].startswith("Gigabit") or parts[0].startswith("Loop"):
+                    if parts[0].startswith(("Gigabit", "Loop")):
                         interfaces[parts[0]] = InterfaceState(status=parts[4], protocol=parts[5])
-                elif target.platform == Platform.ARISTA_EOS and len(parts) >= 4:
-                    if parts[0].startswith("Ethernet") or parts[0].startswith("Loop"):
-                        status = "up" if "up" in parts[1].lower() else "down"
-                        proto = "up" if "up" in parts[2].lower() else "down"
-                        interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
+                elif (
+                    target.platform == Platform.ARISTA_EOS
+                    and len(parts) >= 4
+                    and parts[0].startswith(("Ethernet", "Loop"))
+                ):
+                    status = "up" if "up" in parts[1].lower() else "down"
+                    proto = "up" if "up" in parts[2].lower() else "down"
+                    interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
 
             if expected:
                 for peer in expected.bgp_peers:

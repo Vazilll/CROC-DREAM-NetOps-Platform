@@ -1,0 +1,38 @@
+hostname: fw-1.croc.lab
+interfaces:
+  - name: Loopback0
+    description: Perimeter Gateway Router ID
+    ipv4_address: 10.255.0.101/32
+  - name: ge-0/0/1
+    description: Downlink to spine-1
+    ipv4_address: 10.0.10.1/31
+    mtu: 9000
+  - name: ge-0/0/2
+    description: Downlink to spine-2
+    ipv4_address: 10.0.20.1/31
+    mtu: 9000
+bgp:
+  asn: 65500
+  router_id: 10.255.0.101
+  neighbors:
+    - peer_ip: 10.0.10.0
+      remote_asn: 65000
+      description: spine-1
+      announced_prefixes: ["0.0.0.0/0"]
+    - peer_ip: 10.0.20.0
+      remote_asn: 65000
+      description: spine-2
+      announced_prefixes: ["0.0.0.0/0"]
+acls:
+  - name: PROTECT-MGMT
+    rules:
+      - sequence: 10
+        action: permit
+        protocol: tcp
+        source: 172.20.20.0/24
+        destination: any
+      - sequence: 20
+        action: deny
+        protocol: ip
+        source: any
+        destination: any
