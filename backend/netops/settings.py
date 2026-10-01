@@ -66,7 +66,7 @@ class Settings(BaseSettings):
 
     # LLM Risk Assistant settings (Xiaomi MiMo-V2.6-Flash or any OpenAI-compatible API)
     llm_api_key: SecretStr | None = None
-    llm_base_url: str = "https://api.xiaomimimo.com/v1"
+    llm_base_url: str = "https://api.hcnsec.cn/v1"
     llm_model: str = "MiMo-V2.6-Flash"
 
     # Browser origins allowed to call the API (the Vite dev server by default).
