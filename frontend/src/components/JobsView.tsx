@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Activity,
   CheckCircle2,
@@ -8,13 +8,14 @@ import {
   Terminal,
   Play,
   Server,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
 import type { JobDetail, JobSummary, JobStatus } from '../api';
 
 interface JobsViewProps {
   jobs: JobSummary[];
-  loading: boolean;
+  loading?: boolean;
   selectedJobId: string | null;
   onSelectJob: (jobId: string) => void;
   onDeploy: (jobId: string) => void;
@@ -24,7 +25,6 @@ interface JobsViewProps {
 
 export const JobsView: React.FC<JobsViewProps> = ({
   jobs,
-  loading,
   selectedJobId,
   onSelectJob,
   onDeploy,
@@ -32,6 +32,9 @@ export const JobsView: React.FC<JobsViewProps> = ({
   onRefresh,
 }) => {
   const [activeJobDetail, setActiveJobDetail] = useState<JobDetail | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [logFilter, setLogFilter] = useState<'ALL' | 'INFO' | 'WARNING' | 'ERROR'>('ALL');
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -61,32 +64,38 @@ export const JobsView: React.FC<JobsViewProps> = ({
     };
   }, [selectedJobId]);
 
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
+    }
+  }, [activeJobDetail?.logs, autoScroll]);
+
   const getStatusBadge = (status: JobStatus) => {
     switch (status) {
       case 'SUCCESS':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
             <CheckCircle2 className="w-3 h-3" />
             <span>SUCCESS</span>
           </span>
         );
       case 'FAILED':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30">
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/25">
             <AlertTriangle className="w-3 h-3" />
             <span>FAILED</span>
           </span>
         );
       case 'RUNNING':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 animate-pulse">
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 animate-pulse">
             <RotateCw className="w-3 h-3 animate-spin" />
             <span>RUNNING</span>
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
+          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-zinc-800 text-zinc-400 border border-white/[0.08]">
             <Clock className="w-3 h-3" />
             <span>PENDING</span>
           </span>
@@ -109,154 +118,130 @@ export const JobsView: React.FC<JobsViewProps> = ({
       case 'rollback':
         return 'text-rose-400 bg-rose-950/40 border-rose-800/40';
       default:
-        return 'text-slate-400 bg-slate-900 border-slate-800';
+        return 'text-zinc-400 bg-zinc-900 border-white/[0.06]';
     }
   };
+
+  const filteredLogs = activeJobDetail?.logs.filter((log) => {
+    if (logFilter === 'ALL') return true;
+    return log.level === logFilter;
+  }) || [];
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
       {/* Left Column: Job History */}
-      <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+      <div className="lg:col-span-4 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-4">
+        <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
           <div className="flex items-center space-x-2">
-            <Activity className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-sm font-bold text-white">История задач</h2>
+            <Activity className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-white">
+              История Пайплайнов ({jobs.length})
+            </h3>
           </div>
           <button
             onClick={onRefresh}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
-            title="Обновить список"
+            className="p-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/[0.06] transition cursor-pointer"
+            title="Обновить список задач"
           >
-            <RotateCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="space-y-2.5 max-h-[75vh] overflow-y-auto pr-1">
-          {jobs.map((job) => {
-            const isSelected = job.id === selectedJobId;
-            return (
-              <div
-                key={job.id}
-                onClick={() => onSelectJob(job.id)}
-                className={`p-3 rounded-xl border text-xs cursor-pointer transition space-y-2 ${
-                  isSelected
-                    ? 'bg-indigo-950/30 border-indigo-500/50 shadow-sm'
-                    : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono font-bold text-slate-200">{job.type}</span>
-                  {getStatusBadge(job.status)}
-                </div>
-
-                <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                  <span>Прогресс: {job.progress}%</span>
-                  <span className="font-mono text-slate-500">
-                    {new Date(job.created_at).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                {/* Progress bar */}
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-300 ${
-                      job.status === 'FAILED'
-                        ? 'bg-rose-500'
-                        : job.status === 'SUCCESS'
-                        ? 'bg-emerald-500'
-                        : 'bg-indigo-500 animate-pulse'
-                    }`}
-                    style={{ width: `${job.progress}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-          {jobs.length === 0 && (
-            <div className="p-8 text-center text-slate-500 text-xs">
-              {loading ? 'Загрузка задач...' : 'Нет активных или завершенных задач.'}
+        <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
+          {jobs.length === 0 ? (
+            <div className="p-8 text-center text-zinc-500 font-mono text-xs">
+              Задачи еще не запускались
             </div>
+          ) : (
+            jobs.map((j) => {
+              const isSelected = j.id === selectedJobId;
+              return (
+                <div
+                  key={j.id}
+                  onClick={() => onSelectJob(j.id)}
+                  className={`p-3 rounded-xl border text-xs font-mono transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-500/10 border-cyan-500/40 shadow-sm'
+                      : 'bg-zinc-950/40 border-white/[0.04] hover:border-white/[0.1]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white tracking-wide">{j.type}</span>
+                    {getStatusBadge(j.status)}
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-zinc-400">
+                    <span className="truncate">{j.id.slice(0, 13)}...</span>
+                    <span>{new Date(j.created_at).toLocaleTimeString()}</span>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* Right Column: Live Job Execution & Logs */}
-      <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+      {/* Right Column: Active Job Details & Streaming Terminal */}
+      <div className="lg:col-span-8 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-4">
         {activeJobDetail ? (
           <>
-            {/* Job Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            {/* Header info */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
               <div>
-                <div className="flex items-center space-x-2.5">
-                  <h2 className="text-lg font-bold text-white font-mono">{activeJobDetail.type}</h2>
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-bold font-mono text-white">{activeJobDetail.type}</span>
+                  <span className="text-xs text-zinc-500 font-mono">#{activeJobDetail.id.slice(0, 8)}</span>
                   {getStatusBadge(activeJobDetail.status)}
                 </div>
-                <div className="mt-1 flex items-center space-x-3 text-xs text-slate-400 font-mono">
-                  <span>ID: {activeJobDetail.id.slice(0, 8)}...</span>
-                  <span>•</span>
-                  <span>Инициатор: {activeJobDetail.created_by}</span>
-                  <span>•</span>
-                  <span>
-                    Старт:{' '}
-                    {activeJobDetail.started_at
-                      ? new Date(activeJobDetail.started_at).toLocaleTimeString()
-                      : '—'}
-                  </span>
+                <div className="text-[11px] font-mono text-zinc-400 mt-1">
+                  Запуск: {new Date(activeJobDetail.created_at).toLocaleString()} • Автор: {activeJobDetail.created_by}
                 </div>
               </div>
 
-              {/* Actions */}
+              {/* Action buttons */}
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => onOpenDiff(activeJobDetail.id)}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center space-x-1.5 border border-slate-700 transition"
+                  className="px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-200 border border-white/[0.08] text-xs font-mono transition cursor-pointer"
                 >
-                  <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Посмотреть Diff</span>
+                  Просмотр Diff →
                 </button>
 
-                {activeJobDetail.type === 'DRY_RUN' &&
-                  activeJobDetail.status === 'SUCCESS' && (
-                    <button
-                      onClick={() => onDeploy(activeJobDetail.id)}
-                      className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center space-x-1.5 transition shadow-lg shadow-indigo-600/20"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Применить (Deploy)</span>
-                    </button>
-                  )}
+                {activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
+                  <button
+                    onClick={() => onDeploy(activeJobDetail.id)}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  >
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>Применить Деплой</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Target Devices Status */}
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center space-x-1.5">
-                <Server className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Целевые узлы ({activeJobDetail.targets.length})</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Target Devices Execution Matrix */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                Целевые Устройства ({activeJobDetail.targets.length})
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {activeJobDetail.targets.map((t) => (
                   <div
                     key={t.hostname}
-                    className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs"
+                    className="p-2.5 rounded-xl bg-zinc-950/60 border border-white/[0.06] flex items-center justify-between text-xs font-mono"
                   >
-                    <div>
-                      <span className="font-mono font-bold text-slate-200 block">
-                        {t.hostname}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        {t.has_changes ? 'Патч изменений рассчитан' : 'Конфигурация совпадает'}
-                      </span>
+                    <div className="flex items-center space-x-2 truncate">
+                      <Server className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      <span className="text-zinc-200 truncate">{t.hostname}</span>
                     </div>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                      className={`text-[10px] px-1.5 py-0.5 rounded ${
                         t.status === 'SUCCESS'
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : t.status === 'ROLLED_BACK'
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           : t.status === 'FAILED'
                           ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          : 'bg-slate-800 text-slate-400'
+                          : t.status === 'PENDING'
+                          ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse'
+                          : 'bg-zinc-800 text-zinc-400'
                       }`}
                     >
                       {t.status}
@@ -266,62 +251,86 @@ export const JobsView: React.FC<JobsViewProps> = ({
               </div>
             </div>
 
-            {/* Live Step Logs */}
-            <div>
-              <div className="flex items-center justify-between mb-2.5">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+            {/* Terminal Logs Window */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center space-x-2 text-zinc-400">
                   <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Журнал шагов пайплайна ({activeJobDetail.logs.length})</span>
-                </h3>
-                <span className="text-[11px] text-slate-500 font-mono">
-                  {activeJobDetail.status === 'RUNNING' && '● Потоковый опрос воркера'}
-                </span>
+                  <span>ЖУРНАЛ ВЫПОЛНЕНИЯ (LIVE TELEMETRY)</span>
+                </div>
+                <div className="flex items-center space-x-3 text-[11px]">
+                  {/* Log Filter Pills */}
+                  <div className="flex items-center space-x-1 bg-zinc-950 p-0.5 rounded-lg border border-white/[0.06]">
+                    {(['ALL', 'INFO', 'WARNING', 'ERROR'] as const).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => setLogFilter(lvl)}
+                        className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer ${
+                          logFilter === lvl
+                            ? 'bg-zinc-800 text-white font-bold'
+                            : 'text-zinc-500 hover:text-zinc-300'
+                        }`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-zinc-400 hover:text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={autoScroll}
+                      onChange={(e) => setAutoScroll(e.target.checked)}
+                      className="rounded bg-zinc-900 border-white/[0.2] text-cyan-500 focus:ring-0"
+                    />
+                    <span>Auto-scroll</span>
+                  </label>
+                </div>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-[11px] max-h-96 overflow-y-auto space-y-1.5">
-                {activeJobDetail.logs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex items-start space-x-2 py-0.5 text-slate-300 leading-relaxed"
-                  >
-                    <span className="text-slate-600 select-none">
-                      {new Date(log.created_at).toLocaleTimeString()}
-                    </span>
-                    <span
-                      className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${getLogStepColor(
-                        log.step
-                      )}`}
-                    >
-                      {log.step}
-                    </span>
-                    {log.hostname && (
-                      <span className="text-indigo-400 font-semibold">[{log.hostname}]</span>
-                    )}
-                    <span
-                      className={
-                        log.level === 'ERROR'
-                          ? 'text-rose-400 font-semibold'
-                          : log.level === 'WARNING'
-                          ? 'text-amber-400'
-                          : 'text-slate-300'
-                      }
-                    >
-                      {log.message}
-                    </span>
-                  </div>
-                ))}
-                {activeJobDetail.logs.length === 0 && (
-                  <div className="text-slate-600 text-center py-4">
-                    Ожидание логов выполнения...
-                  </div>
+              <div
+                ref={logContainerRef}
+                className="h-[360px] p-3.5 rounded-xl bg-zinc-950 font-mono text-[11px] leading-relaxed text-zinc-300 overflow-y-auto space-y-1.5 border border-white/[0.06]"
+              >
+                {filteredLogs.length === 0 ? (
+                  <div className="text-zinc-600 italic">Логи отсутствуют или отфильтрованы.</div>
+                ) : (
+                  filteredLogs.map((log) => (
+                    <div key={log.id} className="flex items-start space-x-2 hover:bg-white/[0.02] py-0.5 px-1 rounded">
+                      <span className="text-zinc-600 shrink-0">
+                        {new Date(log.created_at).toLocaleTimeString()}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-bold shrink-0 ${
+                          log.level === 'ERROR'
+                            ? 'bg-rose-500/20 text-rose-400'
+                            : log.level === 'WARNING'
+                            ? 'bg-amber-500/20 text-amber-400'
+                            : 'bg-zinc-800 text-zinc-400'
+                        }`}
+                      >
+                        {log.level}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] border shrink-0 ${getLogStepColor(
+                          log.step
+                        )}`}
+                      >
+                        {log.step}
+                      </span>
+                      {log.hostname && (
+                        <span className="text-cyan-400 shrink-0">[{log.hostname}]</span>
+                      )}
+                      <span className="text-zinc-200 break-all">{log.message}</span>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
           </>
         ) : (
-          <div className="p-16 text-center text-slate-500 space-y-3">
-            <Activity className="w-10 h-10 mx-auto opacity-30 text-indigo-400" />
-            <p className="text-sm">Выберите задачу слева для просмотра хода выполнения и логов</p>
+          <div className="p-16 text-center text-zinc-500 font-mono text-xs">
+            Выберите задачу для просмотра телеметрии и деталей выполнения
           </div>
         )}
       </div>

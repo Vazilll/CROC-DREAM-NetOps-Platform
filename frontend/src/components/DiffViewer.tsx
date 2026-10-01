@@ -126,24 +126,31 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Selector Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center space-x-3 w-full md:w-auto">
-          <Terminal className="w-5 h-5 text-indigo-400" />
+          <div className="p-2 rounded-lg bg-zinc-900 border border-white/[0.08]">
+            <Terminal className="w-4 h-4 text-cyan-400" />
+          </div>
           <div>
-            <h2 className="text-sm font-bold text-white">Monaco Diff Viewer & AI Assistant</h2>
-            <p className="text-xs text-slate-400">
-              Двухпанельное иерархическое сравнение (Running vs Intended)
+            <div className="flex items-center space-x-2">
+              <h2 className="text-sm font-bold font-mono text-white">Monaco Diff & LLM Guard</h2>
+              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">
+                hier_config AST
+              </span>
+            </div>
+            <p className="text-xs text-zinc-400">
+              Иерархическое сравнение (Running vs Intended) с расчетом remediate/rollback
             </p>
           </div>
         </div>
 
-        {/* Job selector */}
+        {/* Job selector & Deploy CTA */}
         <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
-          <label className="text-xs text-slate-400">Задача:</label>
+          <label className="text-xs font-mono text-zinc-400">Задача:</label>
           <select
             value={selectedJobId || ''}
             onChange={(e) => onSelectJob(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-indigo-500 font-mono"
+            className="bg-zinc-950 border border-white/[0.08] rounded-xl px-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500 font-mono cursor-pointer"
           >
             {diffJobs.map((j) => (
               <option key={j.id} value={j.id}>
@@ -155,10 +162,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           {selectedJobId && (
             <button
               onClick={() => onDeploy(selectedJobId)}
-              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-indigo-600/20"
+              className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               <Play className="w-3 h-3 fill-current" />
-              <span>Деплой</span>
+              <span>Деплой (Commit Confirmed)</span>
             </button>
           )}
         </div>
@@ -170,8 +177,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           {/* Left: Device Tabs & AI Summary */}
           <div className="lg:col-span-3 space-y-4">
             {/* Device list for this job */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-1.5">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 px-2 py-1 block">
+            <div className="p-3 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-1.5">
+              <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-zinc-400 px-2 py-1 block">
                 Устройства ({diffData.devices.length})
               </span>
               {diffData.devices.map((dev, idx) => {
@@ -184,22 +191,22 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                       setSelectedDeviceIndex(idx);
                       setAiAnalysis(null);
                     }}
-                    className={`w-full text-left p-2.5 rounded-xl border text-xs flex items-center justify-between transition ${
+                    className={`w-full text-left p-2.5 rounded-xl border text-xs font-mono flex items-center justify-between transition cursor-pointer ${
                       isSelected
-                        ? 'bg-indigo-950/40 border-indigo-500/50 text-white font-medium'
-                        : 'bg-slate-950/30 border-slate-800/80 text-slate-400 hover:border-slate-700'
+                        ? 'bg-cyan-500/10 border-cyan-500/40 text-cyan-300 font-medium'
+                        : 'bg-zinc-950/40 border-white/[0.04] text-zinc-400 hover:border-white/[0.1]'
                     }`}
                   >
-                    <div className="flex items-center space-x-2">
-                      <Server className="w-3.5 h-3.5 text-slate-500" />
-                      <span className="font-mono">{dev.hostname}</span>
+                    <div className="flex items-center space-x-2 truncate">
+                      <Server className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+                      <span className="truncate">{dev.hostname}</span>
                     </div>
                     {hasDiff ? (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 shrink-0">
                         Δ Изменения
                       </span>
                     ) : (
-                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">
                         In Sync
                       </span>
                     )}
@@ -209,16 +216,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             </div>
 
             {/* AI Assistant Card */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-1.5">
                   <Bot className="w-4 h-4 text-cyan-400" />
-                  <span className="text-xs font-bold text-white">LLM Risk Assistant</span>
+                  <span className="text-xs font-bold font-mono text-white">LLM Risk Assistant</span>
                 </div>
                 <button
                   onClick={handleAnalyzeWithAI}
                   disabled={analyzingAi}
-                  className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-medium border border-cyan-500/30 transition flex items-center space-x-1"
+                  className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-mono border border-cyan-500/30 transition flex items-center space-x-1 cursor-pointer"
                 >
                   <span>{analyzingAi ? 'Анализ...' : 'Оценить риски'}</span>
                 </button>
@@ -227,11 +234,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               {aiAnalysis ? (
                 <div className="space-y-2.5 text-xs">
                   <div className="flex items-center justify-between">
-                    <span className="text-slate-400 text-[11px]">Уровень риска:</span>
+                    <span className="text-zinc-400 text-[11px] font-mono">Уровень риска:</span>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        aiAnalysis.riskLevel === 'HIGH'
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                        aiAnalysis.riskLevel === 'HIGH' || aiAnalysis.riskLevel === 'CRITICAL'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
                           : aiAnalysis.riskLevel === 'MEDIUM'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
                           : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
@@ -241,14 +248,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                     </span>
                   </div>
 
-                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                  <p className="text-zinc-300 text-[11px] leading-relaxed">
                     {aiAnalysis.summary}
                   </p>
 
-                  <div className="space-y-1 pt-1 border-t border-slate-800">
-                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Факторы риска:</span>
+                  <div className="space-y-1 pt-2 border-t border-white/[0.06]">
+                    <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">Факторы риска:</span>
                     {aiAnalysis.keyPoints.map((pt, i) => (
-                      <div key={i} className="flex items-start space-x-1.5 text-[11px] text-slate-400">
+                      <div key={i} className="flex items-start space-x-1.5 text-[11px] text-zinc-400">
                         <span className="text-cyan-400 mt-0.5">•</span>
                         <span>{pt}</span>
                       </div>
@@ -256,10 +263,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   </div>
 
                   {aiAnalysis.recommendations && aiAnalysis.recommendations.length > 0 && (
-                    <div className="space-y-1 pt-1 border-t border-slate-800">
-                      <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Рекомендации:</span>
+                    <div className="space-y-1 pt-2 border-t border-white/[0.06]">
+                      <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 block">Рекомендации:</span>
                       {aiAnalysis.recommendations.map((rec, i) => (
-                        <div key={i} className="flex items-start space-x-1.5 text-[11px] text-slate-300">
+                        <div key={i} className="flex items-start space-x-1.5 text-[11px] text-zinc-300">
                           <span className="text-emerald-400 mt-0.5">✓</span>
                           <span>{rec}</span>
                         </div>
@@ -268,14 +275,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   )}
 
                   {aiAnalysis.provider && (
-                    <div className="pt-1 flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-800/60">
-                      <span>Провайдер анализа:</span>
-                      <span className="font-mono text-cyan-400/80">{aiAnalysis.provider}</span>
+                    <div className="pt-2 flex items-center justify-between text-[10px] font-mono text-zinc-500 border-t border-white/[0.06]">
+                      <span>Анализатор:</span>
+                      <span className="text-cyan-400">{aiAnalysis.provider}</span>
                     </div>
                   )}
                 </div>
               ) : (
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-zinc-500 leading-relaxed">
                   Нажмите «Оценить риски» для автоматического аудита сгенерированных CLI-команд через языковую модель.
                 </p>
               )}
@@ -283,16 +290,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
 
           {/* Right: Monaco Editor Area */}
-          <div className="lg:col-span-9 bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden flex flex-col min-h-[620px]">
+          <div className="lg:col-span-9 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] overflow-hidden flex flex-col min-h-[620px]">
             {/* View Mode Bar */}
-            <div className="px-4 py-2.5 bg-slate-950/80 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+            <div className="px-3 py-2 bg-zinc-950/80 rounded-xl border border-white/[0.06] flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => setActiveViewMode('diff')}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  className={`px-3 py-1 rounded-lg text-xs font-mono transition flex items-center space-x-1.5 cursor-pointer ${
                     activeViewMode === 'diff'
-                      ? 'bg-indigo-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      ? 'bg-zinc-800 text-cyan-300 border border-cyan-500/40'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   <Code2 className="w-3.5 h-3.5" />
@@ -301,10 +308,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
                 <button
                   onClick={() => setActiveViewMode('remediation')}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  className={`px-3 py-1 rounded-lg text-xs font-mono transition flex items-center space-x-1.5 cursor-pointer ${
                     activeViewMode === 'remediation'
-                      ? 'bg-emerald-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      ? 'bg-zinc-800 text-emerald-300 border border-emerald-500/40'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   <FileCheck className="w-3.5 h-3.5" />
@@ -313,10 +320,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
                 <button
                   onClick={() => setActiveViewMode('rollback')}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition flex items-center space-x-1.5 ${
+                  className={`px-3 py-1 rounded-lg text-xs font-mono transition flex items-center space-x-1.5 cursor-pointer ${
                     activeViewMode === 'rollback'
-                      ? 'bg-rose-600 text-white'
-                      : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                      ? 'bg-zinc-800 text-rose-300 border border-rose-500/40'
+                      : 'text-zinc-400 hover:text-zinc-200'
                   }`}
                 >
                   <Undo2 className="w-3.5 h-3.5" />
@@ -325,14 +332,14 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               </div>
 
               {activeDeviceDiff && (
-                <div className="text-xs text-slate-400 font-mono">
+                <div className="text-xs text-zinc-400 font-mono">
                   {activeDeviceDiff.hostname}
                 </div>
               )}
             </div>
 
             {/* Monaco Container */}
-            <div className="flex-1 w-full h-[560px]">
+            <div className="flex-1 w-full h-[560px] rounded-xl overflow-hidden border border-white/[0.04]">
               {activeDeviceDiff ? (
                 activeViewMode === 'diff' ? (
                   <DiffEditor
@@ -383,7 +390,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   />
                 )
               ) : (
-                <div className="p-16 text-center text-slate-500">
+                <div className="p-16 text-center text-zinc-500 font-mono">
                   Выберите устройство для просмотра различий.
                 </div>
               )}
@@ -391,8 +398,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
         </div>
       ) : (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-16 text-center text-slate-500 space-y-3">
-          <Code2 className="w-10 h-10 mx-auto opacity-30 text-indigo-400" />
+        <div className="p-16 rounded-2xl bg-[#0c0e14] border border-white/[0.08] text-center text-zinc-500 space-y-3 font-mono">
+          <Code2 className="w-8 h-8 mx-auto opacity-30 text-cyan-400" />
           <p className="text-sm">
             {loading ? 'Загрузка диффа...' : 'Нет доступных диффов. Запустите Холостой прогон (Dry Run).'}
           </p>

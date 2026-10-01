@@ -9,10 +9,11 @@ import { DriftView } from './components/DriftView';
 import { ChaosLabView } from './components/ChaosLabView';
 import { Topology3D } from './components/Topology3D';
 import { DeviceDetailModal } from './components/DeviceDetailModal';
+import { SlidesPresentation } from './components/SlidesPresentation';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export function App() {
-  const [activeTab, setActiveTab] = useState<string>('devices');
+  const [activeTab, setActiveTab] = useState<string>('slides');
   const [userRole, setUserRole] = useState<UserRole>('admin');
   const [devices, setDevices] = useState<Device[]>([]);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -161,7 +162,7 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[#08090c] text-zinc-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -172,21 +173,31 @@ export function App() {
 
       {/* Toast Notification */}
       {toast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-3 px-4 py-3 rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl animate-fade-in text-xs">
+        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-3 px-4 py-3 rounded-xl bg-zinc-900 border border-white/[0.1] shadow-2xl animate-fade-in text-xs">
           {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
           {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
-          {toast.type === 'info' && <Info className="w-4 h-4 text-indigo-400" />}
-          <span className="text-slate-200">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="text-slate-400 hover:text-slate-200">
+          {toast.type === 'info' && <Info className="w-4 h-4 text-cyan-400" />}
+          <span className="text-zinc-200">{toast.message}</span>
+          <button onClick={() => setToast(null)} className="text-zinc-400 hover:text-zinc-200 cursor-pointer">
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 md:p-6 space-y-6">
+        {activeTab === 'slides' && (
+          <SlidesPresentation
+            onLaunchDemo={() => {
+              setActiveTab('3d');
+              handleRunDryRun(devices.map((d) => d.id));
+            }}
+            onOpenTab={(tab) => setActiveTab(tab)}
+          />
+        )}
+
         {activeTab === '3d' && (
-          <div className="space-y-6">
+          <div className="space-y-4">
             <Topology3D
               devices={devices}
               onSelectDevice={(id) => setSelectedModalDeviceId(id)}
@@ -194,14 +205,14 @@ export function App() {
               isJobRunning={jobs.some((j) => j.status === 'RUNNING')}
             />
             {/* Quick Actions Panel beneath 3D view */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
-              <div className="text-xs text-slate-400">
-                💡 <span className="text-slate-200 font-semibold">Управление 3D моделью:</span> Зажмите левую кнопку мыши для вращения угла обзора, используйте колесико для зума. Кликните на узел для открытия меню.
+            <div className="bg-[#0c0e14] border border-white/[0.08] rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4">
+              <div className="text-xs text-zinc-400 font-mono">
+                💡 <span className="text-zinc-200 font-semibold">Навигация:</span> Левая кнопка мыши — вращение, колесико — зум. Клик на ноду открывает параметры интерфейсов и BGP.
               </div>
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => handleRunDryRun(devices.map((d) => d.id))}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition"
+                  className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-xl text-xs font-semibold tracking-wide uppercase transition shadow-lg shadow-cyan-500/20 cursor-pointer"
                 >
                   Холостой прогон (Все ноды)
                 </button>
@@ -267,8 +278,8 @@ export function App() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-slate-900 bg-slate-950 py-4 px-6 text-center text-[11px] text-slate-500">
-        CROC DREAM — NetOps Platform • Хранилище SoT: Git + YAML • Движок: hier_config & Jinja2 • Бэкенд: FastAPI, SQLite, Celery
+      <footer className="border-t border-white/[0.06] bg-[#08090c] py-4 px-6 text-center text-[11px] font-mono text-zinc-500">
+        CROC DREAM // NetOps Platform • SoT: Git YAML • Engine: hier_config & Jinja2 • Multi-Vendor CLOS Automation
       </footer>
     </div>
   );

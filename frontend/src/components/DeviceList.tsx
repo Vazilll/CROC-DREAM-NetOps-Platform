@@ -10,6 +10,10 @@ import {
   ExternalLink,
   ShieldCheck,
   RefreshCw,
+  GitBranch,
+  Terminal,
+  Cpu,
+  Activity,
 } from 'lucide-react';
 import type { Device, DeviceStatus } from '../api';
 import { DeviceDetailModal } from './DeviceDetailModal';
@@ -55,7 +59,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
     (d) =>
       d.hostname.toLowerCase().includes(searchQuery.toLowerCase()) ||
       d.management_ip.includes(searchQuery) ||
-      d.platform.toLowerCase().includes(searchQuery.toLowerCase())
+      d.platform.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      d.role.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const inSyncCount = devices.filter((d) => d.status === 'IN_SYNC').length;
@@ -66,256 +71,361 @@ export const DeviceList: React.FC<DeviceListProps> = ({
     switch (status) {
       case 'IN_SYNC':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            <CheckCircle2 className="w-3.5 h-3.5" />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             <span>IN_SYNC</span>
           </span>
         );
       case 'DRIFT_DETECTED':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-500/10 text-amber-400 border border-amber-500/30">
-            <AlertTriangle className="w-3.5 h-3.5" />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25">
+            <AlertTriangle className="w-3 h-3 text-amber-400" />
             <span>DRIFT DETECTED</span>
           </span>
         );
       case 'UNREACHABLE':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-rose-500/10 text-rose-400 border border-rose-500/30">
-            <AlertTriangle className="w-3.5 h-3.5" />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/25">
+            <AlertTriangle className="w-3 h-3 text-rose-400" />
             <span>UNREACHABLE</span>
           </span>
         );
       case 'IN_PROGRESS':
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 animate-pulse">
-            <RotateCw className="w-3.5 h-3.5 animate-spin" />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 animate-pulse">
+            <RotateCw className="w-3 h-3 animate-spin" />
             <span>IN PROGRESS</span>
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-800 text-slate-400 border border-slate-700">
-            <HelpCircle className="w-3.5 h-3.5" />
+          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-zinc-800 text-zinc-400 border border-white/[0.08]">
+            <HelpCircle className="w-3 h-3" />
             <span>UNKNOWN</span>
           </span>
         );
     }
   };
 
+  const getPlatformBadge = (platform: string) => {
+    switch (platform) {
+      case 'arista_eos':
+        return (
+          <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/25 text-[10px] font-mono">
+            Arista EOS
+          </span>
+        );
+      case 'cisco_iosxe':
+        return (
+          <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/25 text-[10px] font-mono">
+            Cisco IOS-XE
+          </span>
+        );
+      case 'juniper_junos':
+        return (
+          <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/25 text-[10px] font-mono">
+            Juniper Junos
+          </span>
+        );
+      case 'eltex_mes':
+        return (
+          <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[10px] font-mono">
+            Eltex MES
+          </span>
+        );
+      case 'yadro_kornfe':
+        return (
+          <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/25 text-[10px] font-mono">
+            YADRO Kornfe
+          </span>
+        );
+      default:
+        return (
+          <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-mono">
+            {platform}
+          </span>
+        );
+    }
+  };
+
+  const getRoleBadge = (role: string) => {
+    switch (role) {
+      case 'spine':
+        return <span className="text-[10px] font-mono text-purple-400">SPINE</span>;
+      case 'leaf':
+        return <span className="text-[10px] font-mono text-cyan-400">LEAF</span>;
+      case 'border_firewall':
+        return <span className="text-[10px] font-mono text-amber-400">BORDER FW</span>;
+      default:
+        return <span className="text-[10px] font-mono text-zinc-500">{role.toUpperCase()}</span>;
+    }
+  };
+
   return (
     <div className="space-y-6">
-      {/* Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-400">Всего узлов фабрики</span>
-            <Server className="w-4 h-4 text-indigo-400" />
+      {/* Yandex Annushka Process Lifecycle Flow Banner */}
+      <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] shadow-lg">
+        <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-3">
+          <div className="flex items-center space-x-2">
+            <span className="text-[10px] font-mono font-bold tracking-wider text-cyan-400 uppercase">
+              КОНВЕЙЕР УПРАВЛЕНИЯ КОНФИГУРАЦИЕЙ
+            </span>
+            <span className="text-[10px] text-zinc-500 font-mono">| Яндекс Аннушка Pipeline</span>
           </div>
-          <div className="mt-2 text-2xl font-bold text-white">{devices.length}</div>
-          <div className="mt-1 text-[11px] text-slate-500">2x Arista cEOS, 2x Cisco IOS-XE</div>
+          <div className="text-[10px] font-mono text-zinc-400">
+            Безопасный цикл: <span className="text-emerald-400 font-semibold">Commit Confirmed 180s</span>
+          </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
+        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
+          {[
+            { step: '01', name: 'Git SoT', desc: 'inventory.yaml', icon: GitBranch, color: 'text-cyan-400' },
+            { step: '02', name: 'Jinja2', desc: 'Шаблонизация', icon: Cpu, color: 'text-purple-400' },
+            { step: '03', name: 'hier_config', desc: 'AST-сравнение', icon: Terminal, color: 'text-indigo-400' },
+            { step: '04', name: 'AI Risk Guard', desc: 'Аудит рисков', icon: ShieldCheck, color: 'text-amber-400' },
+            { step: '05', name: 'Commit Confirmed', desc: 'Накат сессии', icon: Play, color: 'text-emerald-400' },
+            { step: '06', name: 'Telemetry', desc: 'BGP & Link check', icon: Activity, color: 'text-rose-400' },
+          ].map((st, i) => {
+            const Icon = st.icon;
+            return (
+              <div key={i} className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] flex items-center space-x-2">
+                <Icon className={`w-3.5 h-3.5 ${st.color} shrink-0`} />
+                <div className="min-w-0 flex-1">
+                  <div className="text-white text-xs font-medium truncate">{st.name}</div>
+                  <div className="text-zinc-500 text-[10px] truncate">{st.desc}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Aeza-style Metric Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1 */}
+        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-emerald-400">В синхронизации</span>
+            <span className="text-xs font-mono text-zinc-400">Узлы Фабрики</span>
+            <Server className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div className="mt-3">
+            <div className="text-3xl font-bold font-mono text-white tracking-tight">{devices.length}</div>
+            <div className="mt-1 text-[11px] text-zinc-500 font-mono">
+              2x Arista, 2x Cisco, 2x Juniper
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2 */}
+        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-mono text-emerald-400">В Синхронизации</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-emerald-300">{inSyncCount}</div>
-          <div className="mt-1 text-[11px] text-emerald-500/80">Running = Intended</div>
+          <div className="mt-3">
+            <div className="text-3xl font-bold font-mono text-emerald-300 tracking-tight">{inSyncCount}</div>
+            <div className="mt-1 text-[11px] text-emerald-500/80 font-mono">
+              Running = Intended
+            </div>
+          </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
+        {/* Card 3 */}
+        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-amber-400">Обнаружен дрейф</span>
+            <span className="text-xs font-mono text-amber-400">Обнаружен Дрейф</span>
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-amber-300">{driftCount}</div>
-          <div className="mt-1 text-[11px] text-amber-500/80">Требуется remediate</div>
+          <div className="mt-3">
+            <div className="text-3xl font-bold font-mono text-amber-300 tracking-tight">{driftCount}</div>
+            <div className="mt-1 text-[11px] text-amber-500/80 font-mono">
+              Ожидает Remediate
+            </div>
+          </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm">
+        {/* Card 4 */}
+        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-rose-400">Недоступно</span>
-            <AlertTriangle className="w-4 h-4 text-rose-400" />
+            <span className="text-xs font-mono text-cyan-400">SSH Связность</span>
+            <ShieldCheck className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="mt-2 text-2xl font-bold text-rose-300">{unreachableCount}</div>
-          <div className="mt-1 text-[11px] text-rose-500/80">Ошибки SSH сессии</div>
+          <div className="mt-3">
+            <div className="text-3xl font-bold font-mono text-white tracking-tight">
+              {devices.length - unreachableCount}/{devices.length}
+            </div>
+            <div className="mt-1 text-[11px] text-cyan-500/80 font-mono">
+              Scrapli Driver Ready
+            </div>
+          </div>
         </div>
       </div>
 
       {/* Action Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+      <div className="p-3.5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col md:flex-row items-center justify-between gap-3">
         {/* Search */}
-        <div className="relative w-full md:w-72">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+        <div className="relative w-full md:w-80">
+          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
           <input
             type="text"
-            placeholder="Поиск по имени, IP или ОС..."
+            placeholder="Поиск по хосту, IP или ОС (Cisco, Arista...)"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition"
+            className="w-full pl-9 pr-4 py-1.5 bg-zinc-950 border border-white/[0.08] rounded-xl text-xs font-mono text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 transition"
           />
         </div>
 
         {/* Action buttons */}
-        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto justify-end">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
           <button
             onClick={onRefresh}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl transition border border-slate-700/60"
-            title="Обновить таблицу устройств"
+            className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/[0.08] rounded-xl transition cursor-pointer"
+            title="Обновить устройства"
           >
             <RefreshCw className="w-3.5 h-3.5" />
           </button>
 
           <button
             onClick={onSyncInventory}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition border border-slate-700/60"
-            title="Импортировать inventory.yaml из Git"
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
+            title="Перечитать inventory.yaml из репозитория Git"
           >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span>Git Sync</span>
+            <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Синхр. Git</span>
           </button>
 
           <button
             onClick={onLintIntent}
-            className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition border border-slate-700/60"
-            title="Pre-flight валидация моделей intent через Pydantic"
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
+            title="Pre-flight проверка Pydantic моделей"
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-cyan-400" />
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>Pre-flight Lint</span>
           </button>
 
           <button
             onClick={() => onScanDrift(selectedIds.length > 0 ? selectedIds : undefined)}
-            className="px-3.5 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition"
-            title="Запустить внеочередной опрос дрейфа"
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
           >
-            <RotateCw className="w-3.5 h-3.5" />
-            <span>Скан дрейфа {selectedIds.length > 0 && `(${selectedIds.length})`}</span>
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Скан дрейфа</span>
           </button>
 
           <button
             onClick={() => onRunDryRun(selectedIds.length > 0 ? selectedIds : devices.map((d) => d.id))}
-            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-medium flex items-center space-x-2 transition shadow-lg shadow-indigo-600/20"
-            title="Запустить Dry-Run и иерархический расчет патчей"
+            className="px-4 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-cyan-500/20 cursor-pointer"
           >
-            <Play className="w-3.5 h-3.5 fill-current" />
+            <Play className="w-3 h-3 fill-current" />
             <span>
-              Холостой прогон (Dry Run) {selectedIds.length > 0 ? `(${selectedIds.length})` : '(Все)'}
+              {selectedIds.length > 0
+                ? `Холостой прогон (${selectedIds.length})`
+                : 'Холостой прогон (Все)'}
             </span>
           </button>
         </div>
       </div>
 
-      {/* Devices Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+      {/* Device Table */}
+      <div className="rounded-2xl bg-[#0c0e14] border border-white/[0.08] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-950/60 text-slate-400 uppercase text-[11px] tracking-wider border-b border-slate-800 font-semibold">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-zinc-950/80 border-b border-white/[0.08] text-zinc-400 font-mono text-[11px]">
               <tr>
-                <th className="p-4 w-10">
+                <th className="py-3 px-4 w-10">
                   <input
                     type="checkbox"
                     checked={devices.length > 0 && selectedIds.length === devices.length}
                     onChange={toggleSelectAll}
-                    className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-0 cursor-pointer"
+                    className="rounded bg-zinc-900 border-white/[0.2] text-cyan-500 focus:ring-0 cursor-pointer"
                   />
                 </th>
-                <th className="p-4">Устройство (Hostname)</th>
-                <th className="p-4">Management IP</th>
-                <th className="p-4">Платформа ОС</th>
-                <th className="p-4">Роль</th>
-                <th className="p-4">Статус комплаенса</th>
-                <th className="p-4 text-right">Действия</th>
+                <th className="py-3 px-4">Устройство (Hostname)</th>
+                <th className="py-3 px-4">Роль в CLOS</th>
+                <th className="py-3 px-4">Платформа / ОС</th>
+                <th className="py-3 px-4">Management IP</th>
+                <th className="py-3 px-4">Статус Синхронизации</th>
+                <th className="py-3 px-4 text-right">Действия</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/80">
-              {filteredDevices.map((device) => {
-                const isSelected = selectedIds.includes(device.id);
-                return (
-                  <tr
-                    key={device.id}
-                    className={`hover:bg-slate-800/40 transition ${
-                      isSelected ? 'bg-indigo-950/20' : ''
-                    }`}
-                  >
-                    <td className="p-4">
-                      <input
-                        type="checkbox"
-                        checked={isSelected}
-                        onChange={() => toggleSelectOne(device.id)}
-                        className="rounded border-slate-700 bg-slate-800 text-indigo-600 focus:ring-0 cursor-pointer"
-                      />
-                    </td>
-                    <td className="p-4">
-                      <div className="flex items-center space-x-2.5">
-                        <div className="p-2 rounded-lg bg-slate-800 text-slate-300 font-mono">
-                          <Server className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div
-                            onClick={() => setSelectedDeviceModalId(device.id)}
-                            className="font-bold text-white hover:text-indigo-400 cursor-pointer font-mono flex items-center space-x-1"
-                          >
-                            <span>{device.hostname}</span>
-                            <ExternalLink className="w-3 h-3 text-slate-500" />
-                          </div>
-                          <div className="text-[11px] text-slate-500 font-mono">
-                            Auth profile: {device.auth_profile}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4 font-mono text-slate-300">
-                      {device.management_ip}:{device.management_port}
-                    </td>
-                    <td className="p-4">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[11px] font-mono font-medium ${
-                          device.platform === 'cisco_iosxe'
-                            ? 'bg-blue-500/10 text-blue-300 border border-blue-500/20'
-                            : device.platform === 'arista_eos'
-                            ? 'bg-purple-500/10 text-purple-300 border border-purple-500/20'
-                            : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/20'
-                        }`}
-                      >
-                        {device.platform}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span className="capitalize text-slate-300 font-medium">{device.role}</span>
-                    </td>
-                    <td className="p-4">{getStatusBadge(device.status)}</td>
-                    <td className="p-4 text-right space-x-2">
-                      <button
-                        onClick={() => setSelectedDeviceModalId(device.id)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium transition"
-                      >
-                        Параметры
-                      </button>
-                      <button
-                        onClick={() => onRunDryRun([device.id])}
-                        className="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 text-[11px] font-medium border border-indigo-500/30 transition"
-                      >
-                        Dry-Run
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {filteredDevices.length === 0 && (
+            <tbody className="divide-y divide-white/[0.04]">
+              {loading && devices.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-500 text-sm">
-                    {loading ? 'Загрузка устройств...' : 'Устройства не найдены.'}
+                  <td colSpan={7} className="py-12 text-center text-zinc-500">
+                    <RotateCw className="w-5 h-5 mx-auto animate-spin text-cyan-400 mb-2" />
+                    Загрузка инвентаря устройств...
                   </td>
                 </tr>
+              ) : filteredDevices.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-12 text-center text-zinc-500">
+                    Устройства не найдены по запросу «{searchQuery}»
+                  </td>
+                </tr>
+              ) : (
+                filteredDevices.map((dev) => {
+                  const isSelected = selectedIds.includes(dev.id);
+                  return (
+                    <tr
+                      key={dev.id}
+                      className={`hover:bg-white/[0.02] transition font-mono ${
+                        isSelected ? 'bg-cyan-500/[0.03]' : ''
+                      }`}
+                    >
+                      <td className="py-3 px-4">
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectOne(dev.id)}
+                          className="rounded bg-zinc-900 border-white/[0.2] text-cyan-500 focus:ring-0 cursor-pointer"
+                        />
+                      </td>
+
+                      <td className="py-3 px-4">
+                        <div className="flex items-center space-x-2">
+                          <Server className="w-3.5 h-3.5 text-zinc-500" />
+                          <span className="font-bold text-white tracking-wide">{dev.hostname}</span>
+                        </div>
+                      </td>
+
+                      <td className="py-3 px-4">{getRoleBadge(dev.role)}</td>
+
+                      <td className="py-3 px-4">{getPlatformBadge(dev.platform)}</td>
+
+                      <td className="py-3 px-4 text-zinc-300">
+                        {dev.management_ip}:{dev.management_port}
+                      </td>
+
+                      <td className="py-3 px-4">{getStatusBadge(dev.status)}</td>
+
+                      <td className="py-3 px-4 text-right">
+                        <div className="flex items-center justify-end space-x-2">
+                          <button
+                            onClick={() => setSelectedDeviceModalId(dev.id)}
+                            className="px-2.5 py-1 rounded bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300 border border-white/[0.06] text-[11px] font-sans transition flex items-center space-x-1 cursor-pointer"
+                          >
+                            <span>Параметры</span>
+                            <ExternalLink className="w-3 h-3 text-zinc-400" />
+                          </button>
+
+                          <button
+                            onClick={() => onRunDryRun([dev.id])}
+                            className="p-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+                            title="Холостой прогон (Dry Run)"
+                          >
+                            <Play className="w-3 h-3 fill-current" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
       </div>
 
-      {/* Device Detail Modal */}
+      {/* Modal for Device Parameters */}
       {selectedDeviceModalId !== null && (
         <DeviceDetailModal
           deviceId={selectedDeviceModalId}
