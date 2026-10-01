@@ -46,8 +46,8 @@ uv run celery -A netops.worker.tasks beat --loglevel=INFO
 docker compose up --build
 ```
 
-Сначала отрабатывает одноразовый сервис `migrate` (`alembic upgrade head`), затем стартуют API,
-воркер и Beat. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
+При старте API применяет миграции (`alembic upgrade head`) и запускает сервер; воркер и Beat
+стартуют, когда API стал `healthy`. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
 офлайн-стендом можно переопределить переменными `API_PORT`, `POSTGRES_PORT`, `INTENT_REPO`,
 `TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд и мониторинг
 добавятся туда же позже.
@@ -56,15 +56,18 @@ Swagger: <http://localhost:8000/docs>. Авторизация в API — заг�
 
 ### Если в базе нет таблиц
 
-Миграции применяет одноразовый сервис `migrate`. API, воркер и Beat стартуют только после его
-успешного завершения, а `/readyz` отвечает 503 `migrations not applied`, пока схемы нет.
+Миграции применяет контейнер `api` при старте. Пока схемы нет, `/readyz` отвечает 503
+`migrations not applied`, API не становится `healthy`, и воркер с Beat не запускаются.
 
 ```bash
-docker compose ps -a migrate      # должен быть Exited (0)
-docker compose logs migrate       # текст ошибки, если упал
-docker compose run --rm migrate   # применить миграции ещё раз
+docker compose ps                                  # api должен быть healthy
+docker compose logs api | grep -i alembic          # что сделали миграции, текст ошибки
+docker compose exec api alembic upgrade head       # применить миграции ещё раз
 docker compose exec postgres psql -U netops -d netops -c '\dt'
 ```
+
+Если стек поднимали до этого изменения, в нём остался старый контейнер `migrate` в статусе
+`Exited`; его убирает `docker compose up -d --build --remove-orphans`.
 
 Postgres считается готовым только когда принимает TCP-соединения к базе `netops`, а миграции
 дополнительно ждут базу до минуты: при первом старте контейнер Postgres сначала инициализируется

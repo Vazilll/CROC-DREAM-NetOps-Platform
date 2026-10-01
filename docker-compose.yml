@@ -24,10 +24,9 @@ x-backend: &backend
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
   restart: unless-stopped
+  # Воркер и Beat стартуют, когда API healthy: база доступна и миграции применены.
   depends_on:
-    migrate:
-      condition: service_completed_successfully
-    redis:
+    api:
       condition: service_healthy
 
 services:
@@ -57,23 +56,21 @@ services:
       interval: 5s
       retries: 10
 
-  # Один раз применяет миграции до старта API, воркера и Beat.
-  migrate:
+  # При старте API применяет миграции, затем запускает сервер.
+  api:
     <<: *backend
-    command: alembic upgrade head
-    restart: "no"
+    command: sh -c "alembic upgrade head && exec uvicorn netops.main:app --host 0.0.0.0 --port 8000"
+    ports: ["${API_PORT:-8000}:8000"]
     depends_on:
       postgres:
         condition: service_healthy
-
-  api:
-    <<: *backend
-    command: uvicorn netops.main:app --host 0.0.0.0 --port 8000
-    ports: ["${API_PORT:-8000}:8000"]
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
       interval: 10s
       retries: 5
+      start_period: 60s
 
   worker:
     <<: *backend
