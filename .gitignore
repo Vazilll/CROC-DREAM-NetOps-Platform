@@ -13,6 +13,12 @@ build/
 
 # Local configuration and data
 .env
+.env.*
+!.env.example
+*.key
+*.pem
+*.token
+*.secret
 *.db
 *.sqlite
 celerybeat-schedule*
