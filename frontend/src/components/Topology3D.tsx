@@ -43,6 +43,14 @@ export const Topology3D: React.FC<Topology3DProps> = ({
   const [burstMode, setBurstMode] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  // Mutable refs so the animation loop reads live values without re-creating the scene.
+  const autoRotateRef = useRef(autoRotate);
+  const burstModeRef = useRef(burstMode);
+  const isJobRunningRef = useRef(isJobRunning);
+  useEffect(() => { autoRotateRef.current = autoRotate; }, [autoRotate]);
+  useEffect(() => { burstModeRef.current = burstMode; }, [burstMode]);
+  useEffect(() => { isJobRunningRef.current = isJobRunning; }, [isJobRunning]);
+
   // References for Three.js animation loop
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -330,7 +338,7 @@ export const Topology3D: React.FC<Topology3DProps> = ({
       const elapsedTime = clock.getElapsedTime();
 
       // Auto rotation
-      if (autoRotate && !isDragging) {
+      if (autoRotateRef.current && !isDragging) {
         sceneRotation.y += delta * 0.15;
       }
       scene.rotation.y = sceneRotation.y;
@@ -352,14 +360,14 @@ export const Topology3D: React.FC<Topology3DProps> = ({
       });
 
       // Animate packet particles along links
-      const speedMultiplier = isJobRunning || burstMode ? 4.5 : 1.0;
+      const speedMultiplier = isJobRunningRef.current || burstModeRef.current ? 4.5 : 1.0;
       packets.forEach((p) => {
         p.progress += p.speed * speedMultiplier;
         if (p.progress >= 1) p.progress = 0;
         p.particle.position.lerpVectors(p.start, p.end, p.progress);
 
         // Highlight packet in burst/job
-        if (isJobRunning || burstMode) {
+        if (isJobRunningRef.current || burstModeRef.current) {
           (p.particle.material as THREE.MeshBasicMaterial).color.setHex(0xf59e0b);
         } else {
           (p.particle.material as THREE.MeshBasicMaterial).color.setHex(0x38bdf8);
@@ -392,7 +400,7 @@ export const Topology3D: React.FC<Topology3DProps> = ({
       resizeObserver.disconnect();
       renderer.dispose();
     };
-  }, [devices, autoRotate, burstMode, isJobRunning]);
+  }, [devices]);
 
   return (
     <div

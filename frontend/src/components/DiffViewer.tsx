@@ -31,8 +31,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   const [loading, setLoading] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState<{
     summary: string;
-    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH';
+    riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
     keyPoints: string[];
+    recommendations?: string[];
+    provider?: string;
   } | null>(null);
   const [analyzingAi, setAnalyzingAi] = useState(false);
 
@@ -64,18 +66,28 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   const activeDeviceDiff: DeviceDiff | undefined = diffData?.devices[selectedDeviceIndex];
 
-  // AI Diff Explainer logic (simulated or API driven)
-  const handleAnalyzeWithAI = () => {
-    if (!activeDeviceDiff) return;
+  // AI Diff Explainer: invokes backend LLM service (MiMo-V2.6-Flash) with graceful fallback
+  const handleAnalyzeWithAI = async () => {
+    if (!activeDeviceDiff || !selectedJobId) return;
     setAnalyzingAi(true);
 
-    setTimeout(() => {
+    try {
+      const res = await api.explainDiff(selectedJobId.toString(), activeDeviceDiff.hostname);
+      setAiAnalysis({
+        summary: res.summary,
+        riskLevel: res.risk_level,
+        keyPoints: res.key_points,
+        recommendations: res.recommendations,
+        provider: res.provider,
+      });
+    } catch (err) {
+      console.warn('Backend LLM explain endpoint failed, using client heuristic fallback', err);
       const remediation = activeDeviceDiff.remediation_patch || '';
       const hasBgp = remediation.includes('bgp') || remediation.includes('router-id');
       const hasInterface = remediation.includes('interface') || remediation.includes('mtu');
       const hasAcl = remediation.includes('access-list') || remediation.includes('permit');
 
-      let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
+      let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
       const keyPoints: string[] = [];
 
       if (!remediation.trim()) {
@@ -99,13 +111,16 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
       setAiAnalysis({
         summary: remediation.trim()
-          ? `Интеллектуальный анализ диффа для ${activeDeviceDiff.hostname}: обнаружены модификации сетевого намерения.`
+          ? `Анализ диффа для ${activeDeviceDiff.hostname}: обнаружены модификации сетевого намерения.`
           : `Устройство ${activeDeviceDiff.hostname} находится в актуальном эталонном состоянии.`,
         riskLevel,
         keyPoints,
+        recommendations: ['Проверьте ping до шлюза после наката'],
+        provider: 'Client-side Heuristic Fallback',
       });
+    } finally {
       setAnalyzingAi(false);
-    }, 600);
+    }
   };
 
   return (
@@ -231,6 +246,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   </p>
 
                   <div className="space-y-1 pt-1 border-t border-slate-800">
+                    <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Факторы риска:</span>
                     {aiAnalysis.keyPoints.map((pt, i) => (
                       <div key={i} className="flex items-start space-x-1.5 text-[11px] text-slate-400">
                         <span className="text-cyan-400 mt-0.5">•</span>
@@ -238,6 +254,25 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                       </div>
                     ))}
                   </div>
+
+                  {aiAnalysis.recommendations && aiAnalysis.recommendations.length > 0 && (
+                    <div className="space-y-1 pt-1 border-t border-slate-800">
+                      <span className="text-[10px] font-semibold text-cyan-400 uppercase tracking-wider">Рекомендации:</span>
+                      {aiAnalysis.recommendations.map((rec, i) => (
+                        <div key={i} className="flex items-start space-x-1.5 text-[11px] text-slate-300">
+                          <span className="text-emerald-400 mt-0.5">✓</span>
+                          <span>{rec}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {aiAnalysis.provider && (
+                    <div className="pt-1 flex items-center justify-between text-[10px] text-slate-500 border-t border-slate-800/60">
+                      <span>Провайдер анализа:</span>
+                      <span className="font-mono text-cyan-400/80">{aiAnalysis.provider}</span>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-[11px] text-slate-500">

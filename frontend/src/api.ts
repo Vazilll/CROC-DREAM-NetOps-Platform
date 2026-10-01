@@ -24,6 +24,15 @@ export interface Device {
   updated_at: string;
 }
 
+export interface RiskExplanation {
+  risk_level: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  summary: string;
+  key_points: string[];
+  recommendations: string[];
+  is_safe: boolean;
+  provider: string;
+}
+
 export interface InterfaceIntent {
   name: string;
   description?: string;
@@ -242,6 +251,22 @@ export class NetOpsApiClient {
   // Intent Lint
   async lintIntent(): Promise<{ issues: Array<{ source: string; field: string; message: string; severity?: string }> }> {
     return this.request('/intent/lint');
+  }
+
+  // Chaos Lab
+  async injectChaos(scenario: string): Promise<{ status: string; message: string }> {
+    return this.request('/system/chaos', {
+      method: 'POST',
+      body: JSON.stringify({ scenario }),
+    });
+  }
+
+  // LLM Risk Explanation
+  async explainDiff(jobId: string, hostname?: string): Promise<RiskExplanation> {
+    const query = hostname ? `?hostname=${encodeURIComponent(hostname)}` : '';
+    return this.request<RiskExplanation>(`/jobs/${jobId}/explain${query}`, {
+      method: 'POST',
+    });
   }
 }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Flame, RotateCcw, AlertTriangle, Check } from 'lucide-react';
+import { api } from '../api';
 
 interface ChaosLabViewProps {
   onRefreshAll: () => void;
@@ -15,23 +16,8 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
     setStatusMessage(null);
 
     try {
-      const res = await fetch('/api/v1/system/chaos', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: 'Bearer dev-admin-token',
-        },
-        body: JSON.stringify({ scenario }),
-      });
-
-      if (!res.ok) {
-        // Fallback: direct simulation feedback
-        setStatusMessage(`Сценарий '${scenario}' выполнен локально.`);
-      } else {
-        const data = await res.json();
-        setStatusMessage(data.message || 'Сценарий успешно применен!');
-      }
-
+      const data = await api.injectChaos(scenario);
+      setStatusMessage(data.message || 'Сценарий успешно применен!');
       onRefreshAll();
     } catch {
       setStatusMessage(`Сценарий '${scenario}' зафиксирован.`);
