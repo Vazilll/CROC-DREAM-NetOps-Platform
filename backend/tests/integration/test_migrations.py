@@ -1,5 +1,3 @@
-"""Alembic migrations must build exactly the schema described by the models."""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,7 +9,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from sqlalchemy import inspect
 
-import netops.models  # noqa: F401 - registers the tables
+import netops.models  # noqa: F401
 from netops.db import Base, build_engine
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]

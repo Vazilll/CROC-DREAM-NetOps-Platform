@@ -1,5 +1,3 @@
-"""Drift reporting."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -19,11 +17,6 @@ def latest_drift_records(
     until: datetime | None = None,
     status: DriftStatus | None = None,
 ) -> Sequence[DriftRecord]:
-    """The most recent check of every device within the time window.
-
-    The status filter applies to that latest check, so a device whose drift
-    has been remediated does not show up as drifted.
-    """
     ranked = select(
         DriftRecord.id,
         func.row_number()

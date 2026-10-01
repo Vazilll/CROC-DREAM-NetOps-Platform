@@ -1,15 +1,3 @@
-"""Evaluation of pre/post deployment health checks (spec 2.6).
-
-When the intent is known, the post-check verifies what it declares: every
-declared BGP peer is Established and accepts prefixes, every enabled
-interface is up/up. Peers the intent removes are expected to disappear, and
-disabled interfaces are expected to go down.
-
-Interfaces the intent does not mention, and everything when the intent is
-unknown, are judged by regression: what was up before the change must stay up.
-Ping loss above the threshold to any probed neighbor is always a failure.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping
@@ -27,6 +15,10 @@ class HealthVerdict:
         return not self.problems
 
 
+# Если intent известен: заявленные BGP-соседи должны быть Established и принимать
+# префиксы, включённые интерфейсы — up/up; соседи, убранные из intent, могут пропасть.
+# Интерфейсы вне intent (или всё, если intent неизвестен) проверяются на регрессию.
+# Потери ping выше порога — всегда авария.
 def evaluate_health(
     before: HealthSnapshot,
     after: HealthSnapshot,

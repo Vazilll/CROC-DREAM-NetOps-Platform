@@ -1,10 +1,10 @@
-# CROC DREAM NetOps Platform — the whole stack with one command:
+# CROC DREAM NetOps Platform — весь стек одной командой:
 #
 #   docker compose up --build
 #
-# API and Swagger: http://localhost:8000/docs
-# Backend settings (tokens, SSH profiles, ...) come from backend/.env, see backend/.env.example.
-# Host ports and data directories can be overridden with the variables below (e.g. in ./.env).
+# API и Swagger: http://localhost:8000/docs
+# Настройки бэкенда (токены, SSH-профили) — в backend/.env, пример в backend/.env.example.
+# Порты и каталоги с данными переопределяются переменными ниже (например, в ./.env).
 name: netops
 
 x-backend: &backend
@@ -57,7 +57,7 @@ services:
       interval: 5s
       retries: 10
 
-  # Applies Alembic migrations once before the API, worker and Beat start.
+  # Один раз применяет миграции до старта API, воркера и Beat.
   migrate:
     <<: *backend
     command: alembic upgrade head
@@ -83,8 +83,7 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
-  # The React UI joins here once its image exists; monitoring (Prometheus,
-  # Grafana) will be added later as well. For example:
+  # Сюда добавятся фронтенд (когда будет образ) и мониторинг, например:
   # frontend:
   #   build: ./frontend
   #   ports: ["${FRONTEND_PORT:-5173}:80"]

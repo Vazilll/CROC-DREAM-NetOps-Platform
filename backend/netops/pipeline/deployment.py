@@ -1,5 +1,3 @@
-"""Transactional deployment of a change to one device (spec 2.4, stage 3)."""
-
 from __future__ import annotations
 
 import logging
@@ -19,12 +17,6 @@ logger = logging.getLogger(__name__)
 
 
 class DeploymentExecutor:
-    """Runs pre-check → apply (commit confirmed) → post-check → confirm or rollback.
-
-    Every outcome leaves the device in a defined status and never in
-    ``IN_PROGRESS``; the job target records what happened.
-    """
-
     def __init__(self, session: Session, toolchain: Toolchain, recorder: JobRecorder) -> None:
         self._session = session
         self._toolchain = toolchain
@@ -40,14 +32,11 @@ class DeploymentExecutor:
         expectations: HealthExpectations | None = None,
         expected_running_sha256: str | None = None,
     ) -> bool:
-        """Deploy ``plan``; return whether the change was committed.
-
-        ``expectations`` come from the intent the patch was computed from;
-        without them the post-check falls back to regression checks only.
-        """
         previous_status = device.status
         self._set_status(device, DeviceStatus.IN_PROGRESS)
 
+        # Патч считался от конкретного running-config; если конфиг на устройстве поменялся,
+        # применять его нельзя.
         if expected_running_sha256 is not None:
             stale_reason = self._check_not_stale(device, target, expected_running_sha256)
             if stale_reason is not None:
@@ -102,7 +91,6 @@ class DeploymentExecutor:
         now = utcnow()
         row.mark(TargetStatus.SUCCESS)
         device.last_checked_at = now
-        # The committed change brings the device to its golden config.
         self._session.add(
             DriftRecord(
                 device_id=device.id,
@@ -122,7 +110,6 @@ class DeploymentExecutor:
         before: HealthSnapshot,
         expectations: HealthExpectations | None,
     ) -> HealthVerdict:
-        """Check health, retrying while BGP converges, within the commit-confirm timer."""
         attempts = self._toolchain.post_check_attempts
         interval = self._toolchain.post_check_interval_seconds
         self._recorder.info(
@@ -130,6 +117,7 @@ class DeploymentExecutor:
         )
         verdict = self._check_health(target, before, expectations)
         attempt = 1
+        # BGP сходится не сразу: повторяем проверку, не выходя за таймер commit confirmed.
         while not verdict.healthy and attempt < attempts:
             self._recorder.warning(
                 "post-check",
@@ -160,7 +148,6 @@ class DeploymentExecutor:
         )
 
     def _check_not_stale(self, device: Device, target: DeviceTarget, expected: str) -> str | None:
-        """Refuse to deploy a patch computed against an outdated running-config."""
         self._recorder.info(
             "verify",
             "Checking that the running-config is unchanged since the dry-run",

@@ -25,8 +25,6 @@ ALLOWED_TRANSITIONS: Final[Mapping[JobStatus, frozenset[JobStatus]]] = {
 
 
 class Job(Base):
-    """A background operation (dry-run, deploy, drift scan or remediation)."""
-
     __tablename__ = "jobs"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
@@ -55,7 +53,6 @@ class Job(Base):
     )
 
     def transition_to(self, status: JobStatus, *, error: str | None = None) -> None:
-        """Move the job through its state machine, stamping lifecycle timestamps."""
         if status not in ALLOWED_TRANSITIONS[self.status]:
             raise InvalidJobTransitionError(self.status, status)
         now = utcnow()
@@ -74,11 +71,6 @@ class Job(Base):
 
 
 class JobTarget(Base):
-    """Per-device state and results of a job.
-
-    ``hostname`` is denormalized so that the job history survives device deletion.
-    """
-
     __tablename__ = "job_targets"
     __table_args__ = (UniqueConstraint("job_id", "hostname"),)
 
@@ -87,6 +79,7 @@ class JobTarget(Base):
     device_id: Mapped[int | None] = mapped_column(
         ForeignKey("devices.id", ondelete="SET NULL"), index=True
     )
+    # hostname дублируем, чтобы история задач сохранялась после удаления устройства.
     hostname: Mapped[str] = mapped_column(String(253))
     status: Mapped[TargetStatus] = mapped_column(
         enum_type(TargetStatus), default=TargetStatus.PENDING
@@ -100,7 +93,7 @@ class JobTarget(Base):
     )
     remediation_config: Mapped[str | None] = mapped_column(Text)
     rollback_config: Mapped[str | None] = mapped_column(Text)
-    # HealthExpectations.to_json() of the intent the patch was computed from.
+    # Что заявлено в intent (BGP-соседи, интерфейсы): по этому судит post-check.
     health_expectations: Mapped[dict[str, Any] | None]
 
     job: Mapped[Job] = relationship(back_populates="targets")
@@ -122,8 +115,6 @@ class JobTarget(Base):
 
 
 class JobLog(Base):
-    """A single step log line of a job, shown to the operator in real time."""
-
     __tablename__ = "job_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True)

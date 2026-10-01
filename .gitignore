@@ -11,13 +11,13 @@ htmlcov/
 dist/
 build/
 
-# Local configuration and data
+# Локальные настройки и данные
 .env
 *.db
 *.sqlite
 celerybeat-schedule*
 
-# OS / editors
+# ОС и редакторы
 .DS_Store
 .idea/
 .vscode/

@@ -1,5 +1,3 @@
-"""Pre-flight lint: structured validation issues and fabric-wide checks."""
-
 from __future__ import annotations
 
 from collections import defaultdict
@@ -16,10 +14,8 @@ FABRIC_SOURCE = "<fabric>"
 
 @dataclass(frozen=True, slots=True)
 class IntentIssue:
-    """A single problem found in the intent, pointing at the offending field."""
-
-    source: str  # file path relative to the intent repository, or FABRIC_SOURCE
-    location: str  # dotted field path, e.g. "bgp.neighbors.0.remote_asn"
+    source: str
+    location: str
     message: str
     hostname: str | None = None
     code: str = "invalid"
@@ -51,7 +47,6 @@ def issues_from_validation_error(
 
 
 def lint_fabric(intents: Iterable[DeviceIntent]) -> list[IntentIssue]:
-    """Checks that need the whole fabric: Router ID and interface IP uniqueness."""
     router_ids: defaultdict[str, list[str]] = defaultdict(list)
     addresses: defaultdict[str, list[tuple[str, str]]] = defaultdict(list)
 

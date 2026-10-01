@@ -12,8 +12,6 @@ from netops.models.device import Device
 
 
 class DriftRecord(Base):
-    """Result of comparing a device's running-config with its golden config."""
-
     __tablename__ = "drift_records"
     __table_args__ = (Index("ix_drift_records_device_checked", "device_id", "checked_at"),)
 
@@ -24,9 +22,7 @@ class DriftRecord(Base):
     )
     status: Mapped[DriftStatus] = mapped_column(enum_type(DriftStatus), index=True)
     checked_at: Mapped[datetime] = mapped_column(default=utcnow)
-    # Lines present on the device but absent from the golden config.
     unauthorized_lines: Mapped[list[str]] = mapped_column(default=list)
-    # Lines of the golden config missing on the device.
     missing_lines: Mapped[list[str]] = mapped_column(default=list)
     remediation_config: Mapped[str | None] = mapped_column(Text)
     rollback_config: Mapped[str | None] = mapped_column(Text)

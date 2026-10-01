@@ -10,8 +10,6 @@ from netops.enums import UserRole
 
 
 class User(Base):
-    """An API user managed by administrators. Only a hash of the token is stored."""
-
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)

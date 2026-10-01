@@ -13,7 +13,7 @@ from netops.settings import ApiPrincipal
 router = APIRouter()
 
 
-@router.get("/healthz", tags=["system"], summary="Liveness probe")
+@router.get("/healthz", tags=["system"], summary="Сервис жив")
 def liveness() -> dict[str, str]:
     return {"status": "ok"}
 
@@ -39,7 +39,9 @@ def _unavailable(reason: str) -> JSONResponse:
 api_router = APIRouter()
 
 
-@api_router.get("/auth/me", response_model=ApiPrincipal, tags=["auth"], summary="Current user")
+@api_router.get(
+    "/auth/me", response_model=ApiPrincipal, tags=["auth"], summary="Текущий пользователь"
+)
 def current_user(user: Viewer) -> ApiPrincipal:
     return user
 
@@ -48,7 +50,7 @@ def current_user(user: Viewer) -> ApiPrincipal:
     "/intent/lint",
     response_model=IntentLintReport,
     tags=["intent"],
-    summary="Pre-flight lint of the intent repository",
+    summary="Проверка репозитория intent (pre-flight lint)",
 )
 def lint_intent(container: ContainerDep, _: Viewer) -> IntentLintReport:
     issues = container.intents.lint()

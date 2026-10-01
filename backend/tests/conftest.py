@@ -31,7 +31,7 @@ TOKENS = {
     UserRole.VIEWER: "viewer-token",
 }
 
-# What a real IOS-XE device prints around its configuration; must be ignored.
+# Служебный вывод IOS-XE, который нормализация должна убрать.
 CISCO_NOISE_HEADER = """\
 Building configuration...
 
@@ -52,8 +52,6 @@ end
 
 
 class RecordingDispatcher:
-    """Collects dispatched job ids instead of talking to Celery."""
-
     def __init__(self) -> None:
         self.job_ids: list[uuid.UUID] = []
         self.error: Exception | None = None
@@ -75,7 +73,6 @@ def intent_repo(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def lab_path(tmp_path: Path, intent_repo: Path) -> Path:
-    """An offline lab whose devices run exactly their golden configs (plus CLI noise)."""
     lab = tmp_path / "lab"
     lab.mkdir()
     snapshot = IntentRepository(intent_repo).load()
@@ -103,7 +100,7 @@ def settings(tmp_path: Path, intent_repo: Path, lab_path: Path) -> Settings:
             for role, token in TOKENS.items()
         },
         auth_profiles={"lab": {"username": "admin", "password": "admin"}},
-        post_check_interval_seconds=0,  # retries without waiting
+        post_check_interval_seconds=0,
     )
 
 
@@ -143,7 +140,6 @@ def toolchain(settings: Settings) -> Toolchain:
 
 @pytest.fixture
 def devices(session: Session, intent_repo: Path) -> dict[str, Device]:
-    """The four fabric devices, imported from the inventory."""
     service = DeviceService(session)
     service.sync_inventory(IntentRepository(intent_repo).load_inventory())
     return {device.hostname: device for device in service.list_devices()}
@@ -156,12 +152,6 @@ RunJob = Callable[..., JobStatus | None]
 def run_job(
     session_factory: sessionmaker[Session], session: Session, toolchain: Toolchain
 ) -> RunJob:
-    """Execute a job synchronously, optionally with a customized toolchain.
-
-    The runner uses its own session; the test session is expired afterwards so
-    that assertions see what the worker wrote.
-    """
-
     def run(job_id: uuid.UUID, **overrides: object) -> JobStatus | None:
         chain = replace(toolchain, **overrides) if overrides else toolchain
         status = JobRunner(session_factory, lambda: chain).run(job_id)

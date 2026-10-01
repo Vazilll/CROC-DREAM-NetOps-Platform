@@ -18,7 +18,7 @@ router = APIRouter(prefix="/drift", tags=["drift"])
     "/scan",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Run an out-of-schedule drift scan",
+    summary="Внеочередной скан дрейфа",
 )
 def start_scan(
     service: JobServiceDep,
@@ -33,7 +33,7 @@ def start_scan(
 @router.get(
     "/report",
     response_model=list[DriftReportItem],
-    summary="Latest drift check of every device",
+    summary="Последняя проверка дрейфа по каждому устройству",
 )
 def drift_report(
     session: SessionDep,
@@ -62,7 +62,6 @@ def drift_report(
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
-    """Timestamps without an offset are interpreted as UTC."""
     if value is None or value.tzinfo is not None:
         return value
     return value.replace(tzinfo=UTC)
@@ -72,7 +71,7 @@ def _as_utc(value: datetime | None) -> datetime | None:
     "/remediate",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Bring a drifted device back to its golden config",
+    summary="Устранить дрейф: вернуть устройство к эталону",
 )
 def remediate(
     request: DriftRemediateRequest, service: JobServiceDep, user: Operator

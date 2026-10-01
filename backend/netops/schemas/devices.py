@@ -48,8 +48,6 @@ class DeviceRead(BaseModel):
 
 
 class DeviceDetail(DeviceRead):
-    """Device card: inventory data plus the network parameters from Git."""
-
     intent: DeviceIntent | None = None
     intent_issues: list[IntentIssueRead] = Field(default_factory=list)
 

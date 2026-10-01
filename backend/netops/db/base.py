@@ -1,5 +1,3 @@
-"""Declarative base and portable column types."""
-
 from __future__ import annotations
 
 from datetime import UTC, datetime
@@ -11,7 +9,7 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase
 
-# Deterministic constraint names keep Alembic migrations reproducible.
+# Предсказуемые имена индексов и ограничений, чтобы миграции генерировались одинаково.
 NAMING_CONVENTION = {
     "ix": "ix_%(column_0_label)s",
     "uq": "uq_%(table_name)s_%(column_0_N_name)s",
@@ -27,13 +25,8 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+# SQLite (в тестах) теряет часовой пояс, поэтому всё пишем и читаем как UTC.
 class TZDateTime(sa.TypeDecorator[datetime]):
-    """Timezone-aware UTC datetime on every backend.
-
-    PostgreSQL keeps the offset natively; SQLite (used in tests) drops it, so
-    values read back are re-labelled as UTC.
-    """
-
     impl = sa.DateTime(timezone=True)
     cache_ok = True
 
@@ -52,12 +45,8 @@ class TZDateTime(sa.TypeDecorator[datetime]):
         return value.astimezone(UTC)
 
 
+# Enum храним строкой (VARCHAR): новые значения не требуют ALTER TYPE в PostgreSQL.
 def enum_type(enum_cls: type[Enum]) -> sa.Enum:
-    """Store enums as their *values* in a VARCHAR column.
-
-    Non-native enums avoid ``ALTER TYPE`` migrations when a new platform or
-    status is added.
-    """
     return sa.Enum(
         enum_cls,
         native_enum=False,
@@ -69,7 +58,7 @@ def enum_type(enum_cls: type[Enum]) -> sa.Enum:
 
 class Base(DeclarativeBase):
     metadata = sa.MetaData(naming_convention=NAMING_CONVENTION)
-    type_annotation_map: dict[Any, Any] = {  # noqa: RUF012 - SQLAlchemy API
+    type_annotation_map: dict[Any, Any] = {  # noqa: RUF012
         datetime: TZDateTime(),
         list[str]: JSONType,
         dict[str, Any]: JSONType,

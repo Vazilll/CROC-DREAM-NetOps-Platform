@@ -1,5 +1,3 @@
-"""Job lifecycle bookkeeping: state transitions, progress and step logs."""
-
 from __future__ import annotations
 
 import logging
@@ -19,12 +17,6 @@ _PY_LEVELS = {
 
 
 class JobRecorder:
-    """Writes job state to the database, committing after every step.
-
-    Committing eagerly is deliberate: the UI polls ``GET /jobs/{id}`` and must
-    see progress and logs while the worker is still busy.
-    """
-
     def __init__(self, session: Session, job: Job) -> None:
         self._session = session
         self._job = job
@@ -43,7 +35,6 @@ class JobRecorder:
         self._log(LogLevel.ERROR, step, message, hostname)
 
     def progress(self, completed: int, total: int) -> None:
-        # 100% is reserved for the SUCCESS transition.
         self._job.progress = min(99, completed * 100 // total) if total else 0
         self._session.commit()
 
@@ -52,7 +43,6 @@ class JobRecorder:
         self.info("job", f"{self._job.type} job started")
 
     def finish(self) -> None:
-        """Complete the job: SUCCESS unless any device failed."""
         self._skip_unprocessed_targets("Device was not processed")
         failed = [target.hostname for target in self._job.targets if target.status.is_failure]
         if failed:
@@ -64,7 +54,6 @@ class JobRecorder:
         self.info("job", "Job finished successfully")
 
     def fail(self, error: str) -> None:
-        """Mark the job FAILED and release every device it still holds."""
         self._skip_unprocessed_targets("Job failed before this device was processed")
         for target in self._job.targets:
             if target.device is not None and target.device.status is DeviceStatus.IN_PROGRESS:
@@ -77,6 +66,7 @@ class JobRecorder:
             if target.status is TargetStatus.PENDING:
                 target.mark(TargetStatus.SKIPPED, reason)
 
+    # Коммитим после каждой строки лога, чтобы UI видел прогресс в реальном времени.
     def _log(self, level: LogLevel, step: str, message: str, hostname: str | None) -> None:
         self._session.add(
             JobLog(job_id=self._job.id, level=level, step=step, message=message, hostname=hostname)

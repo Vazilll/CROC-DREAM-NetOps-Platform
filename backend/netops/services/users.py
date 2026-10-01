@@ -1,5 +1,3 @@
-"""User accounts for RBAC (spec 2.7: the admin manages accounts)."""
-
 from __future__ import annotations
 
 from collections.abc import Collection, Sequence
@@ -17,7 +15,6 @@ from netops.settings import ApiPrincipal
 
 class UserService:
     def __init__(self, session: Session, *, reserved_usernames: Collection[str] = ()) -> None:
-        """``reserved_usernames`` belong to bootstrap tokens from the settings."""
         self._session = session
         self._reserved = frozenset(reserved_usernames)
 
@@ -37,7 +34,6 @@ class UserService:
         return user
 
     def create(self, data: UserCreate) -> tuple[User, str]:
-        """Create a user and return it with its token, which is never stored in clear."""
         if data.username in self._reserved:
             raise ConflictError(f"Username {data.username} is used by a configured API token")
         token = generate_token()
@@ -68,8 +64,8 @@ class UserService:
         self._session.delete(self._get_other(user_id, acting_user))
         self._session.commit()
 
+    # Админ не может понизить, заблокировать или удалить сам себя.
     def _get_other(self, user_id: int, acting_user: str) -> User:
-        """Admins cannot lock themselves out by demoting, disabling or deleting their account."""
         user = self.get(user_id)
         if user.username == acting_user:
             raise ConflictError("You cannot change the role, status or existence of your account")

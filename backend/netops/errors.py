@@ -1,24 +1,22 @@
-"""Domain errors. The API layer maps them onto HTTP status codes."""
-
 from __future__ import annotations
 
 from netops.enums import JobStatus
 
 
 class NetOpsError(Exception):
-    """Base class for all expected (non-bug) errors of the platform."""
+    pass
 
 
 class NotFoundError(NetOpsError):
-    """A requested entity does not exist."""
+    pass
 
 
 class ConflictError(NetOpsError):
-    """The request contradicts the current state of the system."""
+    pass
 
 
 class ServiceUnavailableError(NetOpsError):
-    """A dependency (message broker, database, ...) is unavailable."""
+    pass
 
 
 class InvalidJobTransitionError(NetOpsError):
@@ -29,4 +27,4 @@ class InvalidJobTransitionError(NetOpsError):
 
 
 class PipelineError(NetOpsError):
-    """A pipeline stage failed in an expected way; the job is marked FAILED."""
+    pass

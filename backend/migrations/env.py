@@ -1,12 +1,10 @@
-"""Alembic environment: runs migrations against ``NETOPS_DATABASE_URL``."""
-
 from __future__ import annotations
 
 from logging.config import fileConfig
 
 from alembic import context
 
-import netops.models  # noqa: F401 - registers the tables on Base.metadata
+import netops.models  # noqa: F401
 from netops.db import Base, build_engine, wait_for_database
 from netops.settings import get_settings
 

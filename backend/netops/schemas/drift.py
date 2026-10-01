@@ -12,7 +12,7 @@ class DriftScanRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device_ids: list[int] | None = Field(
-        default=None, min_length=1, description="Devices to scan; all devices when omitted"
+        default=None, min_length=1, description="Устройства для скана; если не указаны — все"
     )
 
 

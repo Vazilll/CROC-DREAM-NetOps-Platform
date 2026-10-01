@@ -144,7 +144,6 @@ class TestDeploy:
         assert deploy["type"] == "DEPLOY"
         assert deploy["parent_job_id"] == str(dry_run_id)
         assert deploy["confirmed_by"] == "duty-engineer"
-        # Only devices with changes are deployed.
         assert [t["hostname"] for t in deploy["targets"]] == ["leaf-1.croc.lab"]
 
         assert run_job(deploy_id) is JobStatus.SUCCESS
@@ -263,7 +262,7 @@ class TestHistory:
         scan = client.post("/api/v1/drift/scan", headers=OPERATOR).json()["job_id"]
 
         jobs = client.get("/api/v1/jobs", headers=VIEWER).json()
-        assert [job["id"] for job in jobs] == [scan, str(first)]  # newest first
+        assert [job["id"] for job in jobs] == [scan, str(first)]
 
         by_type = client.get("/api/v1/jobs", params={"type": "DRY_RUN"}, headers=VIEWER).json()
         assert [job["id"] for job in by_type] == [str(first)]

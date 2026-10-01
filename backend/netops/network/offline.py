@@ -1,5 +1,3 @@
-"""File-backed emulation of the lab, for development and demos without Containerlab."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -18,17 +16,9 @@ from netops.network.base import (
 _ADMIN_DOWN = InterfaceState("administratively down", "down")
 
 
+# Стенд на файлах <hostname>.cfg для разработки и демо без Containerlab:
+# apply запоминает конфиг, confirm записывает его в файл, rollback отбрасывает.
 class OfflineLab:
-    """Implements every network protocol on top of ``<root>/<hostname>.cfg`` files.
-
-    * a missing file means the device is unreachable;
-    * ``apply`` stages the intended config, ``confirm`` writes it to the file and
-      ``rollback`` discards it — the same semantics as ``commit confirmed``;
-    * health snapshots report exactly what the intent expects (all declared
-      peers Established, enabled interfaces up/up, no ping loss), so
-      post-checks pass.
-    """
-
     SUFFIX = ".cfg"
 
     def __init__(self, root: Path) -> None:

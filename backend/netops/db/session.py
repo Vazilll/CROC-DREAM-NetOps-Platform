@@ -1,5 +1,3 @@
-"""Engine and session factory."""
-
 from __future__ import annotations
 
 import logging
@@ -15,7 +13,6 @@ logger = logging.getLogger(__name__)
 
 def build_engine(database_url: str, **kwargs: Any) -> Engine:
     if database_url.startswith("sqlite"):
-        # TestClient and the pipeline touch the same SQLite file from different threads.
         kwargs.setdefault("connect_args", {"check_same_thread": False})
         engine = create_engine(database_url, **kwargs)
         event.listen(engine, "connect", _enable_sqlite_foreign_keys)
@@ -24,8 +21,7 @@ def build_engine(database_url: str, **kwargs: Any) -> Engine:
 
 
 def build_session_factory(engine: Engine) -> sessionmaker[Session]:
-    # Objects stay usable after commit: the pipeline commits after every step
-    # so that progress and logs are visible to the API in real time.
+    # Пайплайн коммитит после каждого шага, объекты должны оставаться доступными.
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 

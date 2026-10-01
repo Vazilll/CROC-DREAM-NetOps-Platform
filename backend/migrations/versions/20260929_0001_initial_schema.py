@@ -1,4 +1,4 @@
-"""Initial schema: devices, jobs, job targets and logs, config snapshots, drift history.
+"""Начальная схема: устройства, задачи, логи, снимки конфигураций, дрейф.
 
 Revision ID: 0001
 Revises:
@@ -16,8 +16,7 @@ down_revision: str | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-# Enum values are spelled out so that this migration never changes when the
-# Python enums evolve; add new values in a new migration.
+# Значения enum зафиксированы в миграции, чтобы она не менялась вместе с кодом.
 PLATFORMS = ("cisco_iosxe", "arista_eos", "huawei_vrp")
 DEVICE_ROLES = ("spine", "leaf", "border")
 DEVICE_STATUSES = ("UNKNOWN", "IN_SYNC", "DRIFT_DETECTED", "UNREACHABLE", "IN_PROGRESS")
