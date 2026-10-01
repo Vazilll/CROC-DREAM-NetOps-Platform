@@ -54,10 +54,26 @@ docker compose up --build
 
 Swagger: <http://localhost:8000/docs>. Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
+### Если в базе нет таблиц
+
+Миграции применяет одноразовый сервис `migrate`. API, воркер и Beat стартуют только после его
+успешного завершения, а `/readyz` отвечает 503 `migrations not applied`, пока схемы нет.
+
+```bash
+docker compose ps -a migrate      # должен быть Exited (0)
+docker compose logs migrate       # текст ошибки, если упал
+docker compose run --rm migrate   # применить миграции ещё раз
+docker compose exec postgres psql -U netops -d netops -c '\dt'
+```
+
+Postgres считается готовым только когда принимает TCP-соединения к базе `netops`, а миграции
+дополнительно ждут базу до минуты: при первом старте контейнер Postgres сначала инициализируется
+и какое-то время слушает только unix-сокет.
+
 ## Проверки
 
 ```bash
-uv run pytest --cov=netops   # 285 тестов, SQLite, без Redis и сети
+uv run pytest --cov=netops   # 288 тестов, SQLite, без Redis и сети
 uv run ruff check .
 uv run black --check .
 uv run mypy                  # strict
@@ -109,7 +125,7 @@ uv run mypy                  # strict
 | GET/POST | `/api/v1/users` | admin | пользователи; при создании выдаётся токен (показывается один раз) |
 | GET/PATCH/DELETE | `/api/v1/users/{id}` | admin | роль, блокировка (`is_active`), удаление; себя изменить нельзя |
 | POST | `/api/v1/users/{id}/token` | admin | выпустить новый токен, старый перестаёт работать |
-| GET | `/healthz`, `/readyz` | — | liveness / readiness (БД) |
+| GET | `/healthz`, `/readyz` | — | сервис жив / готов: база доступна и миграции применены |
 
 Ошибки: `404` — нет сущности, `409` — конфликт состояния (dry-run не успешен, устройство уже
 деплоится и т. п.), `422` — ошибка валидации (для intent — со списком `issues` с файлом и полем),

@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
+import time
 from typing import Any
 
 from sqlalchemy import Engine, create_engine, event
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 def build_engine(database_url: str, **kwargs: Any) -> Engine:
@@ -22,6 +27,20 @@ def build_session_factory(engine: Engine) -> sessionmaker[Session]:
     # Objects stay usable after commit: the pipeline commits after every step
     # so that progress and logs are visible to the API in real time.
     return sessionmaker(bind=engine, expire_on_commit=False)
+
+
+def wait_for_database(engine: Engine, *, attempts: int = 30, delay: float = 2.0) -> None:
+    for attempt in range(1, attempts + 1):
+        try:
+            with engine.connect():
+                return
+        except OperationalError:
+            if attempt == attempts:
+                raise
+            logger.warning(
+                "База недоступна, попытка %d/%d, повтор через %gс", attempt, attempts, delay
+            )
+            time.sleep(delay)
 
 
 def _enable_sqlite_foreign_keys(dbapi_connection: Any, _record: Any) -> None:

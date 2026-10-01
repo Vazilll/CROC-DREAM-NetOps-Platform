@@ -41,9 +41,12 @@ services:
     volumes: [postgres-data:/var/lib/postgresql/data]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U netops"]
+      # Проверка по TCP: при первом старте временный сервер слушает только сокет.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U netops -d netops"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine

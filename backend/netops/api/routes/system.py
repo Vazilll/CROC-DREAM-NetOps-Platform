@@ -2,10 +2,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
+from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
 
 from netops.api.deps import ContainerDep, SessionDep, Viewer
+from netops.db import Base
 from netops.schemas.intent import IntentIssueRead, IntentLintReport
 from netops.settings import ApiPrincipal
 
@@ -17,16 +18,22 @@ def liveness() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.get("/readyz", tags=["system"], summary="Readiness probe (database)")
+@router.get("/readyz", tags=["system"], summary="Готовность: база доступна и миграции применены")
 def readiness(session: SessionDep) -> JSONResponse:
     try:
-        session.execute(text("SELECT 1"))
+        existing = set(inspect(session.connection()).get_table_names())
     except SQLAlchemyError:
-        return JSONResponse(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            content={"status": "unavailable", "database": "unreachable"},
-        )
+        return _unavailable("unreachable")
+    if not set(Base.metadata.tables) <= existing:
+        return _unavailable("migrations not applied")
     return JSONResponse(content={"status": "ok", "database": "ok"})
+
+
+def _unavailable(reason: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"status": "unavailable", "database": reason},
+    )
 
 
 api_router = APIRouter()
