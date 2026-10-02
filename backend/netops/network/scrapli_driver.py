@@ -38,7 +38,17 @@ class ScrapliNetworkDriver:
         except ImportError:
             raise RuntimeError("Scrapli is not installed in the environment.") from None
 
-        driver_cls = IOSXEDriver if target.platform == Platform.CISCO_IOSXE else EOSDriver
+        if target.platform == Platform.CISCO_IOSXE:
+            driver_cls = IOSXEDriver
+        elif target.platform == Platform.HUAWEI_VRP:
+            try:
+                from scrapli_community.huawei.vrp.driver import HuaweiVRPDriver  # noqa: PLC0415
+                driver_cls = HuaweiVRPDriver
+            except ImportError:
+                driver_cls = EOSDriver
+        else:
+            driver_cls = EOSDriver
+
         creds = target.credentials
         return driver_cls(
             host=target.host,
@@ -68,7 +78,7 @@ class ScrapliNetworkDriver:
         return results
 
     def _fetch_single(self, target: DeviceTarget) -> str:
-        cmd = "show running-config"
+        cmd = "display current-configuration" if target.platform == Platform.HUAWEI_VRP else "show running-config"
         with self._get_connection(target) as conn:
             response = conn.send_command(cmd)
             if response.failed:
@@ -93,6 +103,9 @@ class ScrapliNetworkDriver:
                 conn.send_command(f"configure session {session_name}")
                 conn.send_configs(lines)
                 conn.send_command(f"commit timer {confirm_timeout}")
+            elif target.platform == Platform.HUAWEI_VRP:
+                conn.send_configs(lines)
+                conn.send_command("commit")
 
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:
@@ -100,6 +113,8 @@ class ScrapliNetworkDriver:
                 conn.send_command("commit")
             elif target.platform == Platform.ARISTA_EOS:
                 conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command("commit")
+            elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_command("commit")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
@@ -109,6 +124,8 @@ class ScrapliNetworkDriver:
             elif target.platform == Platform.ARISTA_EOS:
                 conn.send_command("configure session NETOPS_DEPLOY")
                 conn.send_command("abort")
+            elif target.platform == Platform.HUAWEI_VRP:
+                conn.send_command("quit")
 
             rollback_lines = [
                 line.strip()
