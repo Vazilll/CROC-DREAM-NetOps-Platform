@@ -54,7 +54,7 @@ def test_arista_header_is_removed_and_indent_normalized(normalizer: ConfigNormal
         "! device: spine-1 (cEOS-lab, EOS-4.32.0F)\n"
         "!\n"
         "router bgp 65000\n"
-        "  router-id 10.255.0.1\n"  # two spaces, e.g. from a template
+        "  router-id 10.255.0.1\n"
         "  address-family ipv4\n"
         "      neighbor 10.0.1.1 activate\n"
         "!\n"
@@ -87,7 +87,6 @@ def test_only_top_level_end_is_a_terminator(normalizer: ConfigNormalizer) -> Non
 
 def test_dedent_after_irregular_indentation(normalizer: ConfigNormalizer) -> None:
     config = "a\n    b\n  c\nd\n"
-    # "c" is shallower than "b" but deeper than "a": it becomes b's sibling.
     assert normalizer.normalize(Platform.CISCO_IOSXE, config) == "a\n b\n c\nd\n"
 
 
@@ -106,7 +105,6 @@ def test_rules_can_be_extended_from_yaml(tmp_path: Path) -> None:
     normalizer = ConfigNormalizer.from_file(rules_file)
     config = "service timestamps log datetime\nline vty 0 4\n login local\nhostname x\n"
     assert normalizer.normalize(Platform.CISCO_IOSXE, config) == "hostname x\n"
-    # Built-in rules are kept.
     assert normalizer.normalize(Platform.CISCO_IOSXE, "ntp clock-period 1\n") == ""
 
 

@@ -18,7 +18,7 @@ class DryRunRequest(BaseModel):
 class DeployRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    job_id: uuid.UUID = Field(description="Successful dry-run job to deploy")
+    job_id: uuid.UUID = Field(description="Успешный dry-run, который нужно применить")
     confirmed_by: str = Field(min_length=1, max_length=64, examples=["operator_name"])
 
 
@@ -40,7 +40,9 @@ class JobTargetRead(BaseModel):
 class JobLogRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int = Field(description="Monotonic; pass as after_id to fetch only newer lines")
+    id: int = Field(
+        description="Растёт монотонно; передайте как after_id, чтобы получить только новые строки"
+    )
     created_at: datetime
     level: LogLevel
     step: str

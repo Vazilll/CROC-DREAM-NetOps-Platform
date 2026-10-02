@@ -1,5 +1,3 @@
-"""Transactional deployment: health checks, rollback and failure handling."""
-
 from __future__ import annotations
 
 import uuid
@@ -25,14 +23,12 @@ from netops.services import JobService
 from tests.conftest import RunJob
 from tests.integration.helpers import append_to_running_config, change_uplink_description
 
-# Both leaves of the fixture fabric: every declared peer Established, links up.
 LEAF_PEERS = ("10.0.1.0", "10.0.1.2", "10.0.2.0", "10.0.2.2")
 UP = InterfaceState("up", "up")
 LINKS = {"Loopback0": UP, "GigabitEthernet2": UP, "GigabitEthernet3": UP}
 
 
 def _fabric(**states: str) -> HealthSnapshot:
-    """A leaf snapshot where peers are Established unless overridden by name."""
     sessions = {
         peer: BgpSessionState(states.get(peer.replace(".", "_"), "Established"), 5)
         for peer in LEAF_PEERS
@@ -49,11 +45,6 @@ BGP_DOWN = _fabric(**{"10_0_1_0": "Idle"})
 
 
 class ScriptedProbe:
-    """Returns the given results in order and then keeps repeating the last one.
-
-    An exception instance is raised instead of being returned.
-    """
-
     def __init__(self, *results: HealthSnapshot | Exception) -> None:
         self._results = list(results)
         self.expectations: list[HealthExpectations | None] = []
@@ -67,8 +58,6 @@ class ScriptedProbe:
 
 
 class FaultyLab(OfflineLab):
-    """The offline lab with injectable failures of individual operations."""
-
     def __init__(self, root: Path, *, fail_on: Sequence[str] = ()) -> None:
         super().__init__(root)
         self.fail_on = set(fail_on)
@@ -96,7 +85,6 @@ class FaultyLab(OfflineLab):
 def approved_dry_run(
     devices: dict[str, Device], intent_repo: Path, job_service: JobService, run_job: RunJob
 ) -> Job:
-    """A successful dry-run that changes both leaves."""
     change_uplink_description(intent_repo, "leaf-1.croc.lab", "Uplink to spine-1 (400G)")
     change_uplink_description(intent_repo, "leaf-2.croc.lab", "Uplink to spine-1 (400G)")
     job = job_service.create_dry_run(
@@ -147,7 +135,6 @@ def test_post_check_failure_rolls_back_and_stops_the_rollout(
     )
     assert lab.calls == ["apply", "rollback"]
     assert (lab_path / "leaf-1.croc.lab.cfg").read_text() == before
-    # The device returns to the status it had before the deployment.
     assert _status(session, devices["leaf-1.croc.lab"]) is DeviceStatus.UNKNOWN
     job = session.get_one(Job, deploy_id)
     assert job.error == "1 of 2 device(s) failed: leaf-1.croc.lab"
@@ -389,13 +376,10 @@ class TestRemediationFailures:
         assert status is JobStatus.FAILED
         assert lab.calls == ["apply", "rollback"]
         assert _outcome(session, job.id)["leaf-2.croc.lab"][0] is TargetStatus.ROLLED_BACK
-        # Still drifted: the rollback restored the unauthorized configuration.
         assert _status(session, drifted) is DeviceStatus.DRIFT_DETECTED
 
 
 class TestPostCheckRules:
-    """Spec 2.6: declared peers Established with prefixes, enabled ports up/up."""
-
     def test_bgp_is_given_time_to_converge(
         self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
     ) -> None:
@@ -414,7 +398,6 @@ class TestPostCheckRules:
         probe = ScriptedProbe(HEALTHY, BGP_DOWN)
 
         assert run_job(deploy_id, health_probe=probe, post_check_attempts=3) is JobStatus.FAILED
-        # pre-check + 3 post-check attempts on leaf-1, then the rollout stops
         assert len(probe.expectations) == 4
         assert _outcome(session, deploy_id)["leaf-1.croc.lab"][0] is TargetStatus.ROLLED_BACK
 
@@ -443,7 +426,6 @@ class TestPostCheckRules:
     def test_new_peer_that_never_comes_up_is_rolled_back(
         self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
     ) -> None:
-        """A regression check alone would miss this: the peer was never up."""
         without_second_spine = HealthSnapshot(
             bgp_sessions={"10.0.1.0": BgpSessionState("Established", 5)},
             interfaces=LINKS,
@@ -482,7 +464,7 @@ class TestPostCheckRules:
     ) -> None:
         path = intent_repo / "devices" / "leaf-1.croc.lab.yaml"
         data = yaml.safe_load(path.read_text())
-        data["bgp"]["neighbors"] = data["bgp"]["neighbors"][:1]  # decommission spine-2
+        data["bgp"]["neighbors"] = data["bgp"]["neighbors"][:1]
         path.write_text(yaml.safe_dump(data))
         dry_run = job_service.create_dry_run(
             [devices["leaf-1.croc.lab"].id], IntentSource.GIT_MAIN, requested_by="tester"
@@ -500,7 +482,6 @@ class TestPostCheckRules:
     def test_without_expectations_regressions_still_count(
         self, approved_dry_run: Job, job_service: JobService, run_job: RunJob, session: Session
     ) -> None:
-        """Targets recorded before expectations existed fall back to regression checks."""
         deploy_id = _deploy(job_service, approved_dry_run)
         for target in session.get_one(Job, deploy_id).targets:
             target.health_expectations = None

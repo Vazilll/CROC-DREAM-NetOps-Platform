@@ -1,17 +1,3 @@
-"""Normalization of configuration text before diffing (spec 2.2.2).
-
-Both the running-config and the rendered intended config pass through the same
-rules, so that timestamps, byte counters, banners, locally generated
-certificates and indentation differences never show up as drift.
-
-The built-in rules can be extended without code changes via a YAML file
-(``NETOPS_NORMALIZATION_RULES_PATH``)::
-
-    cisco_iosxe:
-      ignore_lines: ['^ntp clock-period']
-      ignore_sections: ['^crypto pki certificate chain']
-"""
-
 from __future__ import annotations
 
 import re
@@ -30,9 +16,7 @@ class NormalizationRules:
     indent_unit: int
     comment_prefixes: tuple[str, ...]
     terminators: tuple[str, ...] = ()
-    # Lines matching any pattern are dropped.
     ignore_lines: tuple[re.Pattern[str], ...] = ()
-    # Lines matching any pattern are dropped together with their indented children.
     ignore_sections: tuple[re.Pattern[str], ...] = ()
 
     def extended(
@@ -59,7 +43,7 @@ DEFAULT_RULES: Mapping[Platform, NormalizationRules] = MappingProxyType(
                 [
                     r"^Building configuration",
                     r"^Current configuration\s*:",
-                    r"^version \d",  # reflects the installed IOS-XE image, not intent
+                    r"^version \d",
                     r"^ntp clock-period\b",
                 ]
             ),
@@ -90,7 +74,6 @@ class ConfigNormalizer:
 
     @classmethod
     def from_file(cls, path: Path | None) -> ConfigNormalizer:
-        """Built-in rules extended with the patterns from a YAML file, if given."""
         if path is None:
             return cls()
         raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -118,7 +101,7 @@ class ConfigNormalizer:
 
 
 def _filter_lines(text: str, rules: NormalizationRules) -> Iterator[tuple[int, str]]:
-    """Yield ``(indent, content)`` of every meaningful line."""
+    # Строка из ignore_sections выбрасывается вместе со всеми вложенными строками.
     skip_deeper_than: int | None = None
     for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").expandtabs(8).split("\n"):
         line = raw_line.rstrip()
@@ -142,12 +125,9 @@ def _filter_lines(text: str, rules: NormalizationRules) -> Iterator[tuple[int, s
         yield indent, content
 
 
+# Вложенность определяем по относительным отступам, поэтому шаблон с 4 пробелами
+# и вывод Arista с 3 пробелами дают одинаковый текст.
 def _reindent(entries: Iterable[tuple[int, str]], unit: int) -> Iterator[str]:
-    """Re-indent lines to ``unit`` spaces per nesting level.
-
-    Nesting is inferred from relative indentation, so a template indented with
-    four spaces and a device output indented with three produce the same text.
-    """
     open_levels: list[int] = []
     for indent, content in entries:
         while open_levels and open_levels[-1] > indent:

@@ -1,5 +1,3 @@
-"""Creation and querying of jobs. Execution happens in the Celery worker."""
-
 from __future__ import annotations
 
 import logging
@@ -23,16 +21,13 @@ _CHANGING_TYPES = tuple(job_type for job_type in JobType if job_type.changes_dev
 
 
 class JobDispatcher(Protocol):
-    def dispatch(self, job_id: uuid.UUID) -> None:
-        """Hand the job over to a background worker."""
+    def dispatch(self, job_id: uuid.UUID) -> None: ...
 
 
 class JobService:
     def __init__(self, session: Session, dispatcher: JobDispatcher) -> None:
         self._session = session
         self._dispatcher = dispatcher
-
-    # Queries
 
     def get(self, job_id: uuid.UUID) -> Job:
         job = self._session.scalar(
@@ -45,7 +40,6 @@ class JobService:
         return job
 
     def logs(self, job_id: uuid.UUID, *, after_id: int = 0, limit: int = 500) -> Sequence[JobLog]:
-        """Log lines newer than ``after_id``, for incremental polling by the UI."""
         if self._session.get(Job, job_id) is None:
             raise NotFoundError(f"Job {job_id} not found")
         return self._session.scalars(
@@ -92,8 +86,6 @@ class JobService:
             )
         )
 
-    # Commands
-
     def create_dry_run(
         self, device_ids: Sequence[int], intent_source: IntentSource, *, requested_by: str
     ) -> Job:
@@ -103,7 +95,6 @@ class JobService:
         return self._submit(job)
 
     def create_deploy(self, dry_run_id: uuid.UUID, *, confirmed_by: str, requested_by: str) -> Job:
-        """Manual approval of a dry-run (spec 2.4, end of stage 2)."""
         parent = self.get(dry_run_id)
         if parent.type is not JobType.DRY_RUN:
             raise ConflictError(f"Job {dry_run_id} is a {parent.type} job, not a dry-run")
@@ -182,8 +173,8 @@ class JobService:
         job.targets = _targets_for([device])
         return self._submit(job)
 
+    # Плановый скан из Celery Beat пропускаем, пока идёт предыдущий.
     def schedule_drift_scan(self) -> Job | None:
-        """Periodic scan (Celery Beat). Skipped while a previous scan is still active."""
         if self.has_active(JobType.DRIFT_SCAN):
             logger.info("Skipping scheduled drift scan: a scan is already in progress")
             return None
@@ -192,8 +183,6 @@ class JobService:
         except ConflictError as exc:
             logger.info("Skipping scheduled drift scan: %s", exc)
             return None
-
-    # Helpers
 
     def _devices(self, device_ids: Iterable[int]) -> list[Device]:
         ids = list(dict.fromkeys(device_ids))
@@ -207,7 +196,6 @@ class JobService:
         return [found[device_id] for device_id in ids]
 
     def _ensure_idle(self, device_ids: Iterable[int]) -> None:
-        """One change at a time per device."""
         ids = list(device_ids)
         busy = self._session.execute(
             select(JobTarget.hostname, Job.id)

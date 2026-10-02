@@ -1,11 +1,3 @@
-"""Jinja2 rendering of intended configurations (spec 2.2.1).
-
-Templates live in ``<templates_path>/<platform>/<section>.j2`` and receive two
-variables: ``device`` (:class:`InventoryDevice`) and ``intent``
-(:class:`DeviceIntent`). Sections are concatenated in a fixed order; a
-missing section file is simply skipped.
-"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -31,7 +23,7 @@ class JinjaConfigRenderer:
             trim_blocks=True,
             lstrip_blocks=True,
             keep_trailing_newline=True,
-            autoescape=False,  # CLI configuration, not HTML
+            autoescape=False,
         )
 
     def render(self, device: InventoryDevice, intent: DeviceIntent) -> str:

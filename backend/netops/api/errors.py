@@ -1,5 +1,3 @@
-"""Mapping of domain errors onto HTTP responses."""
-
 from __future__ import annotations
 
 from fastapi import FastAPI, Request, status
@@ -24,7 +22,6 @@ async def _handle_domain_error(_: Request, exc: Exception) -> JSONResponse:
     )
     content: dict[str, object] = {"detail": str(exc)}
     if isinstance(exc, IntentValidationError):
-        # Structured issues point the operator at the offending file and field.
         content["issues"] = [
             IntentIssueRead.model_validate(issue).model_dump() for issue in exc.issues
         ]

@@ -34,7 +34,7 @@ def test_fixture_repository_is_valid(intent_repo: Path) -> None:
 def test_duplicate_router_id_across_devices(intent_repo: Path) -> None:
     path = intent_repo / "devices" / "leaf-2.croc.lab.yaml"
     data = yaml.safe_load(path.read_text())
-    data["bgp"]["router_id"] = "10.255.1.1"  # leaf-1's router ID
+    data["bgp"]["router_id"] = "10.255.1.1"
     path.write_text(yaml.safe_dump(data))
 
     repo = IntentRepository(intent_repo)
@@ -51,7 +51,7 @@ def test_duplicate_router_id_across_devices(intent_repo: Path) -> None:
 def test_duplicate_ip_across_devices(intent_repo: Path) -> None:
     path = intent_repo / "devices" / "leaf-2.croc.lab.yaml"
     data = yaml.safe_load(path.read_text())
-    data["interfaces"][1]["ipv4_address"] = "10.0.1.1/31"  # leaf-1 GigabitEthernet2
+    data["interfaces"][1]["ipv4_address"] = "10.0.1.1/31"
     path.write_text(yaml.safe_dump(data))
 
     issues = IntentRepository(intent_repo).lint()

@@ -41,7 +41,6 @@ def test_scan_classifies_every_device(
     (lab_path / "spine-2.croc.lab.cfg").unlink()
 
     job_id = _scan(client)
-    # One unreachable device fails the scan job, but every result is recorded.
     assert run_job(job_id) is JobStatus.FAILED
 
     statuses = {d.hostname: session.get_one(Device, d.id).status for d in devices.values()}
@@ -107,11 +106,9 @@ def test_report_shows_only_the_latest_check(
 
     assert _report(client)["leaf-1.croc.lab"]["status"] == "IN_SYNC"
     assert _report(client, status="DRIFT_DETECTED") == {}
-    # Restricting the window to the past exposes the older result.
     until = (now - timedelta(hours=1)).isoformat()
     assert _report(client, until=until)["leaf-1.croc.lab"]["status"] == "DRIFT_DETECTED"
     assert _report(client, since=(now + timedelta(minutes=1)).isoformat()) == {}
-    # Timestamps without an offset are treated as UTC.
     naive_until = (now - timedelta(hours=1)).replace(tzinfo=None).isoformat()
     assert _report(client, until=naive_until)["leaf-1.croc.lab"]["status"] == "DRIFT_DETECTED"
 
@@ -144,7 +141,6 @@ class TestRemediation:
         assert job["type"] == "DRIFT_REMEDIATE"
         assert job["confirmed_by"] == "operator-user"
 
-        # A fresh scan agrees: the device is back to its golden config.
         run_job(_scan(client))
         assert session.get_one(Device, device_id).status is DeviceStatus.IN_SYNC
 
@@ -203,4 +199,4 @@ class TestRemediation:
         assert (
             client.post("/api/v1/drift/remediate", json=body, headers=OPERATOR).status_code == 409
         )
-        assert len(dispatcher.job_ids) == 2  # the scan and the first remediation
+        assert len(dispatcher.job_ids) == 2

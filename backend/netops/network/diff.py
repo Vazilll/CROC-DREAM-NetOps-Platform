@@ -1,5 +1,3 @@
-"""Hierarchical diff via hier_config (spec 2.4, stage 2 and 2.5)."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -35,6 +33,6 @@ class HierConfigDiffEngine:
 
 
 def _as_patch(config: HConfig) -> str:
-    # Explicit "exit" lines make the patch safe to paste into any config mode.
+    # exit после каждой секции, чтобы патч можно было вставлять из любого режима.
     lines = config.dump_simple(sectional_exiting=True)
     return "\n".join(lines) + "\n" if lines else ""

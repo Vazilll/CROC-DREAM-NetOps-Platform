@@ -1,34 +1,23 @@
-"""Enumerations shared by the database, the API and the network pipeline."""
-
 from __future__ import annotations
 
 from enum import StrEnum
 
 
 class Platform(StrEnum):
-    """Network operating system of a device."""
-
     CISCO_IOSXE = "cisco_iosxe"
     ARISTA_EOS = "arista_eos"
     HUAWEI_VRP = "huawei_vrp"
 
 
 class DeviceRole(StrEnum):
-    """Functional role of a device in the CLOS fabric."""
-
     SPINE = "spine"
     LEAF = "leaf"
     BORDER = "border"
 
 
 class DeviceStatus(StrEnum):
-    """Compliance status of a device.
-
-    ``UNKNOWN`` is not part of the original spec: it marks devices that have
-    never been checked, or whose state could not be determined after a failed
-    rollback, so that the UI never shows a misleading ``IN_SYNC``.
-    """
-
+    # UNKNOWN нет в ТЗ: устройство ещё не проверялось или состояние неизвестно после
+    # неудачного отката.
     UNKNOWN = "UNKNOWN"
     IN_SYNC = "IN_SYNC"
     DRIFT_DETECTED = "DRIFT_DETECTED"
@@ -37,8 +26,6 @@ class DeviceStatus(StrEnum):
 
 
 class DriftStatus(StrEnum):
-    """Outcome of a drift check of a single device."""
-
     IN_SYNC = "IN_SYNC"
     DRIFT_DETECTED = "DRIFT_DETECTED"
     UNREACHABLE = "UNREACHABLE"
@@ -52,13 +39,10 @@ class JobType(StrEnum):
 
     @property
     def changes_devices(self) -> bool:
-        """Whether jobs of this type push configuration to devices."""
         return self in {JobType.DEPLOY, JobType.DRIFT_REMEDIATE}
 
 
 class JobStatus(StrEnum):
-    """Lifecycle of a job: ``PENDING → RUNNING → SUCCESS / FAILED``."""
-
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCESS = "SUCCESS"
@@ -70,8 +54,6 @@ class JobStatus(StrEnum):
 
 
 class TargetStatus(StrEnum):
-    """Outcome of a job for a single device."""
-
     PENDING = "PENDING"
     SUCCESS = "SUCCESS"
     FAILED = "FAILED"
@@ -95,14 +77,10 @@ class LogLevel(StrEnum):
 
 
 class IntentSource(StrEnum):
-    """Where the intended state is read from. Only the main Git branch for the MVP."""
-
     GIT_MAIN = "git_main"
 
 
 class UserRole(StrEnum):
-    """RBAC roles, from the least to the most privileged."""
-
     VIEWER = "viewer"
     OPERATOR = "operator"
     ADMIN = "admin"
@@ -112,7 +90,6 @@ class UserRole(StrEnum):
         return _ROLE_RANK[self]
 
     def grants(self, required: UserRole) -> bool:
-        """Whether this role includes the privileges of ``required``."""
         return self.rank >= required.rank
 
 

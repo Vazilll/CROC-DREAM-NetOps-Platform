@@ -1,4 +1,4 @@
-"""API users for RBAC: role, active flag and a SHA-256 hash of the token.
+"""Пользователи API: роль, флаг активности и хеш токена.
 
 Revision ID: 0002
 Revises: 0001

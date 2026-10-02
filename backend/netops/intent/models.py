@@ -1,9 +1,3 @@
-"""Declarative network intent (Source of Truth) and the Git inventory.
-
-The models enforce every per-device rule of the spec (section 2.1.3). Rules that
-span several devices, such as Router ID uniqueness, live in :mod:`netops.intent.lint`.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -29,7 +23,7 @@ from netops.enums import DeviceRole, Platform
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 
 Hostname = Annotated[str, StringConstraints(max_length=253, pattern=rf"^{_LABEL}(?:\.{_LABEL})*$")]
-Asn = Annotated[int, Field(ge=1, le=4_294_967_295, description="2- or 4-byte AS number")]
+Asn = Annotated[int, Field(ge=1, le=4_294_967_295, description="Номер AS (2 или 4 байта)")]
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[\w.\-]+$")]
 InterfaceName = Annotated[
     str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z][\w./:\-]*$")
@@ -52,7 +46,7 @@ class InterfaceIntent(IntentModel):
     enabled: bool = True
     mode: InterfaceMode = InterfaceMode.L3
     ipv4_address: IPv4Interface | None = Field(
-        default=None, description="Address with prefix length, e.g. 10.10.0.1/31"
+        default=None, description="Адрес с маской, например 10.10.0.1/31"
     )
     mtu: int = Field(default=1500, ge=68, le=9216)
 
@@ -78,7 +72,7 @@ class InterfaceIntent(IntentModel):
                 "l2_interface_address", "An L2 (switched) interface cannot have an IPv4 address"
             )
         network = value.network
-        # /31 (RFC 3021) and /32 have no network/broadcast addresses to reserve.
+        # В /31 и /32 нет адреса сети и broadcast (RFC 3021).
         if network.prefixlen < 31 and value.ip in (
             network.network_address,
             network.broadcast_address,
@@ -95,7 +89,7 @@ class BgpNeighborIntent(IntentModel):
     peer_ip: IPv4Address
     remote_asn: Asn
     description: Description | None = None
-    # Never serialized: the MD5 key must not leak through the API.
+    # MD5-пароль не попадает в ответы API и в логи.
     password: str | None = Field(
         default=None, min_length=1, max_length=80, repr=False, exclude=True
     )
@@ -178,8 +172,6 @@ class AclIntent(IntentModel):
 
 
 class DeviceIntent(IntentModel):
-    """Intended state of a single device, stored as ``devices/<hostname>.yaml``."""
-
     hostname: Hostname
     interfaces: list[InterfaceIntent] = Field(default_factory=list)
     bgp: BgpIntent | None = None
@@ -212,8 +204,6 @@ class DeviceIntent(IntentModel):
 
 
 class InventoryDevice(IntentModel):
-    """A device entry of ``inventory.yaml``; also the device context of templates."""
-
     model_config = ConfigDict(from_attributes=True)
 
     hostname: Hostname

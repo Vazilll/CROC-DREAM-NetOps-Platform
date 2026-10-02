@@ -1,11 +1,3 @@
-"""Reading the intent Git repository.
-
-Layout of the repository::
-
-    inventory.yaml            # devices: [{hostname, management_ip, platform, ...}]
-    devices/<hostname>.yaml   # DeviceIntent: interfaces, bgp, acls
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -33,8 +25,6 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 @dataclass(frozen=True)
 class IntentSnapshot:
-    """A validated, internally consistent view of the whole Source of Truth."""
-
     inventory: Inventory
     intents: Mapping[str, DeviceIntent] = field(default_factory=dict)
 
@@ -51,7 +41,6 @@ class IntentRepository:
         return self._root
 
     def load(self) -> IntentSnapshot:
-        """Load and lint everything; raise :class:`IntentValidationError` on any issue."""
         inventory, intents, issues = self._collect()
         if issues or inventory is None:
             raise IntentValidationError(issues)
@@ -68,7 +57,6 @@ class IntentRepository:
         return inventory
 
     def load_device_intent(self, hostname: str) -> DeviceIntent | None:
-        """Parse a single device file without fabric-wide checks (for the device card)."""
         path = self._device_file(hostname)
         if path is None:
             return None

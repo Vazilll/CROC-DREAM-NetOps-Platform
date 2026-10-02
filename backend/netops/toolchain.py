@@ -1,5 +1,3 @@
-"""Wiring of the pipeline dependencies (intent, templates, diff, network driver)."""
-
 from __future__ import annotations
 
 from collections.abc import Mapping
@@ -53,6 +51,7 @@ class Toolchain:
 
 
 def build_toolchain(settings: Settings) -> Toolchain:
+    # Драйвер Scrapli/Nornir регистрируется здесь под своим значением NETOPS_NETWORK_DRIVER.
     match settings.network_driver:
         case "offline":
             lab = OfflineLab(settings.offline_lab_path)

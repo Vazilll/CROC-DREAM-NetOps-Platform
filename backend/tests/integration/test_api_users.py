@@ -34,7 +34,6 @@ def test_created_user_can_authenticate(client: TestClient) -> None:
 
     me = client.get("/api/v1/auth/me", headers=_bearer(user["token"]))
     assert me.json() == {"username": "duty", "role": "operator"}
-    # An operator may start jobs but not manage users.
     assert client.get("/api/v1/users", headers=_bearer(user["token"])).status_code == 403
 
 
@@ -98,7 +97,6 @@ def test_admin_cannot_lock_themselves_out(client: TestClient) -> None:
     assert client.patch(url, json={"role": "viewer"}, headers=own).status_code == 409
     assert client.patch(url, json={"is_active": False}, headers=own).status_code == 409
     assert client.delete(url, headers=own).status_code == 409
-    # Rotating one's own token is allowed.
     assert client.post(f"{url}/token", headers=own).status_code == 200
 
 
@@ -106,7 +104,6 @@ def test_duplicate_and_reserved_usernames(client: TestClient) -> None:
     _create(client, "duty")
     duplicate = client.post("/api/v1/users", json={"username": "duty"}, headers=ADMIN)
     assert duplicate.status_code == 409
-    # "admin-user" belongs to a bootstrap token from the settings.
     reserved = client.post("/api/v1/users", json={"username": "admin-user"}, headers=ADMIN)
     assert reserved.status_code == 409
 

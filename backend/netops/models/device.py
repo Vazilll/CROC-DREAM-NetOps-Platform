@@ -10,8 +10,6 @@ from netops.enums import DeviceRole, DeviceStatus, Platform
 
 
 class Device(Base):
-    """A managed network device (cached copy of the Git inventory)."""
-
     __tablename__ = "devices"
     __table_args__ = (UniqueConstraint("management_ip", "management_port"),)
 

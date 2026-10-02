@@ -1,18 +1,16 @@
-"""Alembic environment: runs migrations against ``NETOPS_DATABASE_URL``."""
-
 from __future__ import annotations
 
 from logging.config import fileConfig
 
 from alembic import context
 
-import netops.models  # noqa: F401 - registers the tables on Base.metadata
-from netops.db import Base, build_engine
+import netops.models  # noqa: F401
+from netops.db import Base, build_engine, wait_for_database
 from netops.settings import get_settings
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 
@@ -35,6 +33,8 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     engine = build_engine(_database_url())
+    # При первом старте контейнер Postgres какое-то время не принимает TCP-соединения.
+    wait_for_database(engine)
     with engine.connect() as connection:
         context.configure(
             connection=connection,

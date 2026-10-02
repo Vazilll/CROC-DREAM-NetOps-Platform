@@ -1,5 +1,3 @@
-"""Celery application: broker settings and the Celery Beat schedule."""
-
 from __future__ import annotations
 
 import uuid
@@ -22,9 +20,9 @@ def create_celery_app(settings: Settings) -> Celery:
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
-        # Job state lives in PostgreSQL; Celery results are not needed.
+        # Состояние задач хранится в PostgreSQL, результаты Celery не нужны.
         task_ignore_result=True,
-        # Network jobs are long: acknowledge after completion, one message at a time.
+        # Сетевые задачи долгие: подтверждаем сообщение после выполнения и берём по одному.
         task_acks_late=True,
         worker_prefetch_multiplier=1,
         broker_connection_retry_on_startup=True,
@@ -43,11 +41,8 @@ def create_celery_app(settings: Settings) -> Celery:
 
 
 class CeleryJobDispatcher:
-    """Enqueues jobs by task name, so the API never imports worker code."""
-
     def __init__(self, app: Celery) -> None:
         self._app = app
 
     def dispatch(self, job_id: uuid.UUID) -> None:
-        # Reusing the job id as the task id makes worker logs easy to correlate.
         self._app.send_task(RUN_JOB_TASK, args=[str(job_id)], task_id=str(job_id))
