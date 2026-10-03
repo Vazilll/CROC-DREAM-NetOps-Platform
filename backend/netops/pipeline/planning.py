@@ -1,5 +1,3 @@
-"""Shared stages: pre-flight lint and change planning (render → collect → diff)."""
-
 from __future__ import annotations
 
 import logging
@@ -20,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def load_intent(toolchain: Toolchain, recorder: JobRecorder) -> IntentSnapshot:
-    """Stage 1 of the pipeline: lint the Source of Truth without touching devices."""
     recorder.info("preflight", f"Validating intent repository {toolchain.intents.root}")
     try:
         snapshot = toolchain.intents.load()
@@ -36,8 +33,6 @@ def load_intent(toolchain: Toolchain, recorder: JobRecorder) -> IntentSnapshot:
 
 @dataclass(slots=True)
 class DevicePlan:
-    """Planning result for one device. Exactly one of ``diff``/``error`` is set when done."""
-
     device: Device
     target: DeviceTarget | None = None
     expectations: HealthExpectations | None = None
@@ -64,8 +59,6 @@ class DevicePlan:
 
 
 class ChangePlanner:
-    """Renders intended configs, collects running-configs and diffs them."""
-
     def __init__(self, toolchain: Toolchain, recorder: JobRecorder) -> None:
         self._toolchain = toolchain
         self._recorder = recorder
@@ -147,7 +140,6 @@ class ChangePlanner:
 
 
 def persist_plan(session: Session, job: Job, row: JobTarget, plan: DevicePlan) -> None:
-    """Store snapshots and patches of a plan on its job target."""
     if plan.running is not None:
         row.running_snapshot = _snapshot(
             session, job, plan.device, SnapshotKind.RUNNING, plan.running

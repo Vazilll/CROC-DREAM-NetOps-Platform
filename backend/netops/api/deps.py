@@ -1,5 +1,3 @@
-"""FastAPI dependencies: database session, services and RBAC."""
-
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator
@@ -39,7 +37,7 @@ def get_session(container: ContainerDep) -> Iterator[Session]:
 
 SessionDep = Annotated[Session, Depends(get_session)]
 
-_bearer = HTTPBearer(auto_error=False, description="API token issued by the administrator")
+_bearer = HTTPBearer(auto_error=False, description="Токен API, выданный администратором")
 
 
 def get_user_service(session: SessionDep, container: ContainerDep) -> UserService:
@@ -57,7 +55,6 @@ def get_principal(
     users: UserServiceDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)],
 ) -> ApiPrincipal:
-    """Bootstrap tokens from the settings first, then users managed through the API."""
     principal = None
     if credentials is not None:
         token = credentials.credentials

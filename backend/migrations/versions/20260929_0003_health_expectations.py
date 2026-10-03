@@ -1,4 +1,4 @@
-"""Store the declared health expectations with every job target.
+"""Ожидания для post-check у каждого устройства задачи.
 
 Revision ID: 0003
 Revises: 0002

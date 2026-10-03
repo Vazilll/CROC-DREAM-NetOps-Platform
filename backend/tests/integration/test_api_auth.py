@@ -115,3 +115,12 @@ def test_cors_rejects_unknown_origins(client: TestClient) -> None:
         "/api/v1/devices", headers={"Origin": "https://evil.example"} | auth(UserRole.VIEWER)
     )
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_readiness_reports_missing_migrations(settings: Settings, tmp_path: Path) -> None:
+    empty = settings.model_copy(update={"database_url": f"sqlite:///{tmp_path / 'empty.db'}"})
+    app = create_app(empty, dispatcher=RecordingDispatcher())
+    with TestClient(app) as client:
+        response = client.get("/readyz")
+    assert response.status_code == 503
+    assert response.json() == {"status": "unavailable", "database": "migrations not applied"}

@@ -42,7 +42,7 @@ class TestCrud:
         assert response.status_code == 200
         body = response.json()
         assert body["hostname"] == "border-1.croc.lab"
-        assert body["intent"] is None  # no file in the intent repository
+        assert body["intent"] is None
         assert body["intent_issues"] == []
 
     @pytest.mark.parametrize(
@@ -70,7 +70,6 @@ class TestCrud:
             "/api/v1/devices", json=NEW_DEVICE | {"hostname": "other.croc.lab"}, headers=ADMIN
         )
         assert duplicate_endpoint.status_code == 409
-        # Same IP on another forwarded port is a different endpoint.
         _create(client, hostname="other.croc.lab", management_port=2222)
 
     def test_update(self, client: TestClient) -> None:
@@ -187,7 +186,7 @@ class TestInventorySync:
     def test_conflicting_inventory_is_rejected_atomically(
         self, client: TestClient, intent_repo: Path
     ) -> None:
-        _create(client, hostname="rogue.croc.lab", management_ip="172.20.20.11")  # spine-1's IP
+        _create(client, hostname="rogue.croc.lab", management_ip="172.20.20.11")
         response = client.post("/api/v1/inventory/sync", headers=ADMIN)
         assert response.status_code == 409
         assert len(client.get("/api/v1/devices", headers=VIEWER).json()) == 1

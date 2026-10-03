@@ -28,7 +28,7 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     "/dry-run",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Start a dry-run: render intent, collect running-config and compute the diff",
+    summary="Холостой прогон: рендер intent, сбор running-config и расчёт диффа",
 )
 def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
     job = service.create_dry_run(
@@ -41,7 +41,7 @@ def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator
     "/deploy",
     response_model=JobAccepted,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Approve a successful dry-run and deploy it transactionally",
+    summary="Подтвердить dry-run и применить изменения транзакционно",
 )
 def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
     job = service.create_deploy(
@@ -50,7 +50,7 @@ def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator)
     return JobAccepted(job_id=job.id, status=job.status)
 
 
-@router.get("", response_model=list[JobSummary], summary="Job history")
+@router.get("", response_model=list[JobSummary], summary="История задач")
 def list_jobs(
     service: JobServiceDep,
     _: Viewer,
@@ -64,7 +64,7 @@ def list_jobs(
     )
 
 
-@router.get("/{job_id}", response_model=JobRead, summary="Job status, progress and logs")
+@router.get("/{job_id}", response_model=JobRead, summary="Статус, прогресс и логи задачи")
 def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
     return service.get(job_id)
 
@@ -72,7 +72,7 @@ def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
 @router.get(
     "/{job_id}/logs",
     response_model=list[JobLogRead],
-    summary="Job log lines after a given id (incremental polling)",
+    summary="Новые строки лога задачи после after_id",
 )
 def get_job_logs(
     job_id: uuid.UUID,
@@ -87,7 +87,7 @@ def get_job_logs(
 @router.get(
     "/{job_id}/diff",
     response_model=JobDiffRead,
-    summary="Running vs intended config and the remediation/rollback patches",
+    summary="Текущий и целевой конфиг, патчи наката и отката",
 )
 def get_job_diff(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> JobDiffRead:
     job = service.get_with_diff(job_id)

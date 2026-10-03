@@ -1,6 +1,3 @@
-"""One pipeline per job type. Each one fills in the job targets; the runner
-turns the target outcomes into the final job status."""
-
 from __future__ import annotations
 
 from datetime import datetime
@@ -33,7 +30,6 @@ class _BasePipeline:
         self._recorder = recorder
 
     def _live_targets(self, job: Job) -> list[tuple[JobTarget, Device]]:
-        """Targets whose device still exists; the others are marked FAILED."""
         live: list[tuple[JobTarget, Device]] = []
         for row in job.targets:
             if row.device is None:
@@ -58,8 +54,6 @@ class _BasePipeline:
 
 
 class DryRunPipeline(_BasePipeline):
-    """Stages 1–2: lint, render, collect and diff. Never changes devices."""
-
     def run(self, job: Job) -> None:
         for row, plan in self._plan(job, self._live_targets(job)):
             if plan.error is not None:
@@ -71,10 +65,8 @@ class DryRunPipeline(_BasePipeline):
         self._session.commit()
 
 
+# Устройства обновляем по одному; после первой ошибки раскатку останавливаем.
 class DeployPipeline(_BasePipeline):
-    """Stage 3 for an approved dry-run. Devices are changed one at a time and
-    the rollout stops at the first failure."""
-
     def run(self, job: Job) -> None:
         executor = DeploymentExecutor(self._session, self._toolchain, self._recorder)
         failed_on: str | None = None
@@ -88,7 +80,6 @@ class DeployPipeline(_BasePipeline):
             self._recorder.progress(index, total)
 
     def _deploy_row(self, executor: DeploymentExecutor, row: JobTarget) -> bool:
-        # Deploy jobs only carry targets with changes (see JobService.create_deploy).
         device = row.device
         if device is None:
             row.mark(TargetStatus.FAILED, "Device was deleted")
@@ -122,8 +113,6 @@ class DeployPipeline(_BasePipeline):
 
 
 class DriftScanPipeline(_BasePipeline):
-    """Spec 2.5: compare every device with its golden config and record the result."""
-
     def run(self, job: Job) -> None:
         pairs = []
         for row, device in self._live_targets(job):
@@ -175,10 +164,9 @@ class DriftScanPipeline(_BasePipeline):
         )
 
 
+# Компенсирующий патч считаем заново от текущего running-config и катим через обычный
+# транзакционный деплой.
 class DriftRemediationPipeline(_BasePipeline):
-    """Spec 2.5 "Устранить дрейф": recompute the compensating patch against the
-    current running-config and push it through the regular deployment stage."""
-
     def run(self, job: Job) -> None:
         pairs = self._live_targets(job)
         if not pairs:
@@ -196,7 +184,7 @@ class DriftRemediationPipeline(_BasePipeline):
             device.status = DeviceStatus.IN_SYNC
             device.last_checked_at = utcnow()
             return
-        if plan.target is None:  # unreachable: a plan without errors always has a target
+        if plan.target is None:
             raise PipelineError(f"{device.hostname}: no management target")
         executor = DeploymentExecutor(self._session, self._toolchain, self._recorder)
         executor.deploy(

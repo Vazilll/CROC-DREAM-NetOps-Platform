@@ -20,7 +20,7 @@ from netops.schemas.intent import IntentIssueRead
 router = APIRouter(tags=["devices"])
 
 
-@router.get("/devices", response_model=list[DeviceRead], summary="List devices")
+@router.get("/devices", response_model=list[DeviceRead], summary="Список устройств")
 def list_devices(
     service: DeviceServiceDep,
     _: Viewer,
@@ -37,7 +37,7 @@ def list_devices(
     )
 
 
-@router.get("/devices/{device_id}", response_model=DeviceDetail, summary="Device card")
+@router.get("/devices/{device_id}", response_model=DeviceDetail, summary="Карточка устройства")
 def get_device(
     device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Viewer
 ) -> DeviceDetail:
@@ -54,13 +54,13 @@ def get_device(
     "/devices",
     response_model=DeviceRead,
     status_code=status.HTTP_201_CREATED,
-    summary="Register a device",
+    summary="Добавить устройство",
 )
 def create_device(data: DeviceCreate, service: DeviceServiceDep, _: Admin) -> Device:
     return service.create(data)
 
 
-@router.patch("/devices/{device_id}", response_model=DeviceRead, summary="Update a device")
+@router.patch("/devices/{device_id}", response_model=DeviceRead, summary="Изменить устройство")
 def update_device(
     device_id: int, data: DeviceUpdate, service: DeviceServiceDep, _: Admin
 ) -> Device:
@@ -68,7 +68,7 @@ def update_device(
 
 
 @router.delete(
-    "/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Delete a device"
+    "/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить устройство"
 )
 def delete_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Response:
     service.delete(device_id)
@@ -78,7 +78,7 @@ def delete_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Respon
 @router.post(
     "/inventory/sync",
     response_model=InventorySyncResult,
-    summary="Import devices from inventory.yaml of the intent repository",
+    summary="Импорт устройств из inventory.yaml",
 )
 def sync_inventory(
     service: DeviceServiceDep, container: ContainerDep, _: Admin

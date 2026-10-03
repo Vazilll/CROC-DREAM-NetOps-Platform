@@ -1,5 +1,3 @@
-"""ORM models. Importing this package registers every table on ``Base.metadata``."""
-
 from netops.models.device import Device
 from netops.models.drift import DriftRecord
 from netops.models.job import ALLOWED_TRANSITIONS, Job, JobLog, JobTarget

@@ -6,8 +6,6 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 
 class PartialUpdate(BaseModel):
-    """PATCH payload: omitted fields keep their values, explicit nulls are rejected."""
-
     model_config = ConfigDict(extra="forbid")
 
     @model_validator(mode="after")

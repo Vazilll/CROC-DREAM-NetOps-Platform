@@ -1,5 +1,3 @@
-"""Celery wiring: schedule, dispatcher and task bodies (executed in-process)."""
-
 from __future__ import annotations
 
 import uuid
@@ -92,7 +90,6 @@ def test_scheduled_scan_creates_one_scan_at_a_time(
     assert len(job.targets) == len(devices)
     assert dispatcher.job_ids == [job.id]
 
-    # The previous scan is still pending: the next tick is skipped.
     assert tasks.scheduled_drift_scan.apply().get() is None
     assert len(dispatcher.job_ids) == 1
 

@@ -1,10 +1,10 @@
-# CROC DREAM NetOps Platform — the whole stack with one command:
+# CROC DREAM NetOps Platform — весь стек одной командой:
 #
 #   docker compose up --build
 #
-# API and Swagger: http://localhost:8000/docs
-# Backend settings (tokens, SSH profiles, ...) come from backend/.env, see backend/.env.example.
-# Host ports and data directories can be overridden with the variables below (e.g. in ./.env).
+# API и Swagger: http://localhost:8000/docs
+# Настройки бэкенда (токены, SSH-профили) — в backend/.env, пример в backend/.env.example.
+# Порты и каталоги с данными переопределяются переменными ниже (например, в ./.env).
 name: netops
 
 x-backend: &backend
@@ -24,10 +24,9 @@ x-backend: &backend
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
   restart: unless-stopped
+  # Воркер и Beat стартуют, когда API healthy: база доступна и миграции применены.
   depends_on:
-    migrate:
-      condition: service_completed_successfully
-    redis:
+    api:
       condition: service_healthy
 
 services:
@@ -41,9 +40,12 @@ services:
     volumes: [postgres-data:/var/lib/postgresql/data]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U netops"]
+      # Проверка по TCP: при первом старте временный сервер слушает только сокет.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U netops -d netops"]
       interval: 5s
+      timeout: 5s
       retries: 10
+      start_period: 30s
 
   redis:
     image: redis:7-alpine
@@ -54,23 +56,21 @@ services:
       interval: 5s
       retries: 10
 
-  # Applies Alembic migrations once before the API, worker and Beat start.
-  migrate:
+  # При старте API применяет миграции, затем запускает сервер.
+  api:
     <<: *backend
-    command: alembic upgrade head
-    restart: "no"
+    command: sh -c "alembic upgrade head && exec uvicorn netops.main:app --host 0.0.0.0 --port 8000"
+    ports: ["${API_PORT:-8000}:8000"]
     depends_on:
       postgres:
         condition: service_healthy
-
-  api:
-    <<: *backend
-    command: uvicorn netops.main:app --host 0.0.0.0 --port 8000
-    ports: ["${API_PORT:-8000}:8000"]
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/readyz')"]
       interval: 10s
       retries: 5
+      start_period: 60s
 
   worker:
     <<: *backend
@@ -80,8 +80,7 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
-  # The React UI joins here once its image exists; monitoring (Prometheus,
-  # Grafana) will be added later as well. For example:
+  # Сюда добавятся фронтенд (когда будет образ) и мониторинг, например:
   # frontend:
   #   build: ./frontend
   #   ports: ["${FRONTEND_PORT:-5173}:80"]

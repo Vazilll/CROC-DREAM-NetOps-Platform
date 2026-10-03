@@ -1,5 +1,3 @@
-"""Job runner, planning failures and maintenance."""
-
 from __future__ import annotations
 
 import uuid
@@ -147,7 +145,6 @@ def test_diff_errors_are_per_device(
     assert run_job(job.id, diff_engine=ExplodingDiffEngine()) is JobStatus.FAILED
     target = _targets(session, job.id)["leaf-1.croc.lab"]
     assert target.error == "Diff failed: unparseable config"
-    # Snapshots are kept for troubleshooting even when the diff fails.
     assert target.running_snapshot is not None
     assert target.intended_snapshot is not None
 
@@ -174,7 +171,7 @@ class TestRunner:
         assert run_job(job.id) is JobStatus.SUCCESS
         logs = len(session.get_one(Job, job.id).logs)
 
-        assert run_job(job.id) is JobStatus.SUCCESS  # redelivered message
+        assert run_job(job.id) is JobStatus.SUCCESS
         assert len(session.get_one(Job, job.id).logs) == logs
 
     def test_crash_fails_the_job_and_releases_devices(
@@ -198,7 +195,6 @@ class TestRunner:
             def normalize(self, platform: object, text: str) -> str:
                 raise KeyError("boom")
 
-        # A bug outside the executor's guards (here: in the staleness check).
         status = run_job(deploy.id, normalizer=CrashingNormalizer())
 
         assert status is JobStatus.FAILED

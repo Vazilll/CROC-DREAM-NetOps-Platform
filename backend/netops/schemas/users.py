@@ -37,4 +37,4 @@ class UserRead(BaseModel):
 
 
 class UserWithToken(UserRead):
-    token: str = Field(description="Bearer token; shown only once, store it safely")
+    token: str = Field(description="Токен показывается один раз, сохраните его")

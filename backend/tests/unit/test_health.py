@@ -117,8 +117,6 @@ def test_problems_are_reported_in_a_stable_order() -> None:
 
 
 class TestDeclaredState:
-    """Rules applied when the intent is known (spec 2.6)."""
-
     EXPECTED = HealthExpectations(
         bgp_peers=("10.0.1.0", "10.0.1.2"),
         interfaces={"Gi2": True, "Gi3": True, "Gi4": False},

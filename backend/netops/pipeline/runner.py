@@ -1,5 +1,3 @@
-"""Entry point of the worker: executes one job through its pipeline."""
-
 from __future__ import annotations
 
 import logging
@@ -47,13 +45,8 @@ class JobRunner:
         self._toolchain_factory = toolchain_factory
 
     def run(self, job_id: uuid.UUID) -> JobStatus | None:
-        """Run a PENDING job to completion and return its final status.
-
-        Jobs in any other state are left untouched, which makes redelivered
-        Celery messages harmless.
-        """
         with self._session_factory() as session:
-            # The row lock serializes concurrent deliveries of the same message.
+            # Блокировка строки: повторно доставленное сообщение Celery не запустит задачу дважды.
             job = session.get(Job, job_id, with_for_update=True)
             if job is None:
                 logger.warning("Job %s does not exist", job_id)
@@ -80,7 +73,6 @@ class JobRunner:
 
 
 def fail_stale_jobs(session: Session, *, timeout: timedelta) -> list[uuid.UUID]:
-    """Fail jobs whose worker died or whose message was lost by the broker."""
     cutoff = utcnow() - timeout
     stale = session.scalars(
         select(Job).where(

@@ -1,11 +1,3 @@
-"""Celery tasks.
-
-Run the worker and the scheduler with::
-
-    celery -A netops.worker.tasks worker --loglevel=INFO
-    celery -A netops.worker.tasks beat --loglevel=INFO
-"""
-
 from __future__ import annotations
 
 import uuid
@@ -39,9 +31,9 @@ class WorkerRuntime:
     dispatcher: JobDispatcher
 
 
+# Создаётся лениво в каждом процессе воркера, уже после fork.
 @lru_cache(maxsize=1)
 def get_runtime() -> WorkerRuntime:
-    """Created lazily inside each worker process (after the prefork fork)."""
     settings = get_settings()
     session_factory = build_session_factory(build_engine(settings.database_url))
     return WorkerRuntime(

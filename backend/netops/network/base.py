@@ -1,10 +1,3 @@
-"""Contracts between the backend pipeline and the network layer.
-
-The pipeline only talks to devices through these protocols. The Scrapli/Nornir
-driver (integrations) and the Jinja2 templates (lab) plug in here without
-touching the job orchestration code.
-"""
-
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -23,8 +16,6 @@ class Credentials:
 
 @dataclass(frozen=True, slots=True)
 class DeviceTarget:
-    """Everything a driver needs to open a management session to a device."""
-
     hostname: str
     platform: Platform
     host: str
@@ -34,8 +25,6 @@ class DeviceTarget:
 
 @dataclass(frozen=True, slots=True)
 class FetchResult:
-    """Outcome of collecting the running-config of one device."""
-
     config: str | None = None
     error: str | None = None
 
@@ -50,8 +39,6 @@ class FetchResult:
 
 @dataclass(frozen=True, slots=True)
 class ChangePlan:
-    """What to push to a device and how to undo it."""
-
     remediation: str
     rollback: str
     intended: str
@@ -98,8 +85,6 @@ class InterfaceState:
 
 @dataclass(frozen=True, slots=True)
 class HealthSnapshot:
-    """Operational state used by pre/post deployment checks (spec 2.6)."""
-
     bgp_sessions: Mapping[str, BgpSessionState] = field(default_factory=dict)
     interfaces: Mapping[str, InterfaceState] = field(default_factory=dict)
     ping_loss_percent: Mapping[str, float] = field(default_factory=dict)
@@ -107,11 +92,6 @@ class HealthSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class HealthExpectations:
-    """What the intent declares for a device, used to judge the post-check.
-
-    ``interfaces`` maps every declared interface to whether it is enabled.
-    """
-
     bgp_peers: tuple[str, ...] = ()
     interfaces: Mapping[str, bool] = field(default_factory=dict)
 
@@ -136,49 +116,38 @@ class HealthExpectations:
 
 @runtime_checkable
 class ConfigRenderer(Protocol):
-    def render(self, device: InventoryDevice, intent: DeviceIntent) -> str:
-        """Render the full intended configuration of a device."""
+    def render(self, device: InventoryDevice, intent: DeviceIntent) -> str: ...
 
 
 @runtime_checkable
 class DiffEngine(Protocol):
-    def compare(self, platform: Platform, running: str, intended: str) -> ConfigDiff:
-        """Compute remediation/rollback patches between two normalized configs."""
+    def compare(self, platform: Platform, running: str, intended: str) -> ConfigDiff: ...
 
 
 @runtime_checkable
 class ConfigCollector(Protocol):
-    def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
-        """Collect running-configs, ideally in parallel; keyed by hostname.
-
-        Per-device failures must be reported as ``FetchResult.failure`` rather
-        than raised, so that one unreachable device does not abort the batch.
-        """
+    # Ошибку по отдельному устройству возвращать как FetchResult.failure, а не исключением.
+    def fetch_running_configs(
+        self, targets: Sequence[DeviceTarget]
+    ) -> Mapping[str, FetchResult]: ...
 
 
+# apply: Cisco IOS-XE — commit confirmed <timeout>, Arista EOS — configure session
+# с commit timer. confirm фиксирует изменение, rollback отменяет сессию или накатывает
+# plan.rollback.
 @runtime_checkable
 class ConfigDeployer(Protocol):
-    """Transactional delivery of a change (spec 2.4, stage 3)."""
+    def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None: ...
 
-    def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None:
-        """Push ``plan.remediation`` inside a revertible transaction.
+    def confirm(self, target: DeviceTarget) -> None: ...
 
-        Cisco IOS-XE: ``configure terminal`` + ``commit confirmed <timeout>``;
-        Arista EOS: ``configure session`` + ``commit timer``.
-        """
-
-    def confirm(self, target: DeviceTarget) -> None:
-        """Make the pending transaction permanent."""
-
-    def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
-        """Abort the pending transaction, or push ``plan.rollback`` if it is gone."""
+    def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None: ...
 
 
+# show ip bgp summary, show ip interface brief и ping (5 пакетов) до expected.bgp_peers;
+# expected равен None, если intent неизвестен.
 @runtime_checkable
 class HealthProbe(Protocol):
-    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
-        """Run ``show ip bgp summary``, ``show ip interface brief`` and pings.
-
-        ``expected`` lists the declared BGP peers, which are also the adjacent
-        nodes to ping (5 packets each); it is ``None`` when the intent is unknown.
-        """
+    def snapshot(
+        self, target: DeviceTarget, expected: HealthExpectations | None
+    ) -> HealthSnapshot: ...

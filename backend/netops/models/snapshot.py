@@ -16,8 +16,6 @@ def sha256_hex(content: str) -> str:
 
 
 class ConfigSnapshot(Base):
-    """A normalized configuration captured from a device or rendered from intent."""
-
     __tablename__ = "config_snapshots"
     __table_args__ = (
         Index("ix_config_snapshots_device_kind_created", "device_id", "kind", "created_at"),

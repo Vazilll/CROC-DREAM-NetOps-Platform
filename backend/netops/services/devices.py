@@ -1,5 +1,3 @@
-"""Device inventory management."""
-
 from __future__ import annotations
 
 from collections.abc import Sequence
@@ -69,11 +67,6 @@ class DeviceService:
         self._session.commit()
 
     def sync_inventory(self, inventory: Inventory) -> InventorySyncResult:
-        """Upsert devices from the Git inventory, matching them by hostname.
-
-        Devices missing from the inventory are kept: removing a device is an
-        explicit administrative action.
-        """
         existing = {device.hostname: device for device in self._session.scalars(select(Device))}
         result = InventorySyncResult()
         for spec in inventory.devices:
