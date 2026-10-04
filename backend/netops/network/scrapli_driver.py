@@ -48,24 +48,41 @@ class _ParamikoConnAdapter:
 
         self.client = paramiko.SSHClient()
         self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self.client.connect(
-            self.target.host,
-            port=self.target.port,
-            username=self.target.credentials.username,
-            password=getattr(self.target.credentials, "password", ""),
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=self.timeout,
-        )
+        password = getattr(self.target.credentials, "password", "")
+        username = self.target.credentials.username
+
+        try:
+            self.client.connect(
+                self.target.host,
+                port=self.target.port,
+                username=username,
+                password=password,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=self.timeout,
+                banner_timeout=60,
+                auth_timeout=30,
+            )
+        except paramiko.ssh_exception.AuthenticationException:
+            # Fallback to keyboard-interactive authentication (e.g. Cisco IOS-XE)
+            transport = self.client.get_transport()
+            if transport is None:
+                transport = paramiko.Transport((self.target.host, self.target.port))
+                transport.start_client(timeout=self.timeout)
+            transport.auth_interactive(
+                username,
+                lambda title, instructions, prompt_list: [password for _ in prompt_list],
+            )
+
         self.shell = self.client.invoke_shell()
-        time.sleep(0.5)
+        time.sleep(0.8)
         if self.shell.recv_ready():
             _ = self.shell.recv(8192)
 
         if self.target.platform == Platform.ARISTA_EOS:
             self.shell.send("enable\nterminal length 0\n")
         elif self.target.platform == Platform.CISCO_IOSXE:
-            self.shell.send("terminal length 0\n")
+            self.shell.send("enable\nterminal length 0\n")
         elif self.target.platform == Platform.HUAWEI_VRP:
             self.shell.send("screen-length 0 temporary\n")
 
@@ -92,7 +109,7 @@ class _ParamikoConnAdapter:
                 output += self.shell.recv(8192).decode("utf-8", errors="ignore")
                 time.sleep(0.1)
             elif output:
-                time.sleep(0.2)
+                time.sleep(0.3)
                 if not self.shell.recv_ready():
                     break
             else:
@@ -135,43 +152,12 @@ class _ParamikoConnAdapter:
 class ScrapliNetworkDriver:
     """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
 
-    def __init__(self, max_workers: int = 4, timeout_socket: int = 15) -> None:
+    def __init__(self, max_workers: int = 4, timeout_socket: int = 35) -> None:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
 
     def _get_connection(self, target: DeviceTarget):
-        try:
-            from scrapli.driver.core import EOSDriver, IOSXEDriver  # noqa: PLC0415
-
-            if target.platform == Platform.CISCO_IOSXE:
-                driver_cls = IOSXEDriver
-            elif target.platform == Platform.HUAWEI_VRP:
-                try:
-                    from scrapli_community.huawei.vrp.driver import HuaweiVRPDriver  # noqa: PLC0415
-
-                    driver_cls = HuaweiVRPDriver
-                except ImportError:
-                    driver_cls = EOSDriver
-            else:
-                driver_cls = EOSDriver
-
-            creds = target.credentials
-            return driver_cls(
-                host=target.host,
-                port=target.port,
-                auth_username=creds.username,
-                auth_password=getattr(creds, "password", ""),
-                auth_strict_key=False,
-                transport="system",
-                timeout_socket=self.timeout_socket,
-            )
-        except Exception as exc:
-            logger.debug(
-                "Scrapli native driver unavailable (%s), using Paramiko SSH adapter for %s",
-                exc,
-                target.hostname,
-            )
-            return _ParamikoConnAdapter(target, timeout=self.timeout_socket)
+        return _ParamikoConnAdapter(target, timeout=max(self.timeout_socket, 35))
 
     def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
         results: dict[str, FetchResult] = {}
@@ -218,7 +204,8 @@ class ScrapliNetworkDriver:
                 conn.send_command(f"commit timer {confirm_timeout}")
             elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_configs(lines)
-                conn.send_command("commit")
+                conn.send_command(f"commit trial {confirm_timeout}")
+
 
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:

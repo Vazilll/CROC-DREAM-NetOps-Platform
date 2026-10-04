@@ -1,5 +1,5 @@
 import React from 'react';
-import { Activity, LayoutDashboard, FlaskConical, Layers, ShieldCheck, Terminal } from 'lucide-react';
+import { Activity, LayoutDashboard, FlaskConical, Layers, ShieldCheck, Terminal, ShieldAlert } from 'lucide-react';
 
 export const TABS = [
   { group: 'Обзор', id: 'dashboard', label: 'Дашборд', Icon: LayoutDashboard },
@@ -7,6 +7,7 @@ export const TABS = [
   { group: 'Автоматизация', id: 'jobs', label: 'Пайплайны', Icon: Activity },
   { group: 'Автоматизация', id: 'diff', label: 'Diff & AI Guard', Icon: Terminal },
   { group: 'Автоматизация', id: 'drift', label: 'Контроль дрейфа', Icon: ShieldCheck },
+  { group: 'Безопасность', id: 'emergency', label: 'Аварийный пульт', Icon: ShieldAlert },
   { group: 'Тестирование', id: 'lab', label: 'Chaos Lab', Icon: FlaskConical },
 ];
 

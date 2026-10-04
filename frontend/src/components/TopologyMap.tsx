@@ -17,6 +17,13 @@ const STATUS_COLOR: Record<string, string> = {
   UNKNOWN: '#71717a',
 };
 
+const VENDOR_BADGE: Record<string, { bg: string; stroke: string; text: string; label: string }> = {
+  arista_eos: { bg: 'rgba(99, 102, 241, 0.22)', stroke: 'rgba(129, 140, 248, 0.45)', text: '#c7d2fe', label: 'EOS' },
+  cisco_iosxe: { bg: 'rgba(14, 165, 233, 0.22)', stroke: 'rgba(56, 189, 248, 0.45)', text: '#bae6fd', label: 'IOS-XE' },
+  huawei_vrp: { bg: 'rgba(244, 63, 94, 0.22)', stroke: 'rgba(251, 113, 133, 0.45)', text: '#fecdd3', label: 'VRP' },
+};
+
+
 const linkLoad = (a: string, b: string) =>
   [...(a < b ? a + b : b + a)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 997, 7) % 70 + 15;
 
@@ -216,10 +223,42 @@ export const TopologyMap: React.FC<Props> = ({
                   <text x="22" y="32" fontSize="9" fill="#71717a" fontFamily="monospace">
                     {PLATFORM_NAMES[d.platform] ?? d.platform}
                   </text>
+
+                  {/* Vendor Chip Badge */}
+                  {VENDOR_BADGE[d.platform] && (
+                    <g transform={`translate(${NODE_W - 46}, 6)`}>
+                      <rect
+                        width="38"
+                        height="12"
+                        rx="3"
+                        fill={VENDOR_BADGE[d.platform].bg}
+                        stroke={VENDOR_BADGE[d.platform].stroke}
+                        strokeWidth="0.75"
+                      />
+                      <text
+                        x="19"
+                        y="9"
+                        fontSize="7.5"
+                        fontWeight="700"
+                        textAnchor="middle"
+                        fill={VENDOR_BADGE[d.platform].text}
+                        fontFamily="monospace"
+                      >
+                        {VENDOR_BADGE[d.platform].label}
+                      </text>
+                    </g>
+                  )}
+
+                  {/* AI Guard Status Dot */}
+                  <g transform={`translate(${NODE_W - 14}, 27)`}>
+                    <circle cx="4" cy="4" r="3" fill="#06b6d4" opacity="0.25" />
+                    <circle cx="4" cy="4" r="1.5" fill="#06b6d4" />
+                  </g>
+
                   {alert && (
-                    <g>
-                      <circle cx={NODE_W - 10} cy="10" r="5" fill="#f59e0b" />
-                      <text x={NODE_W - 10} y="13" fontSize="8" fontWeight="700" textAnchor="middle" fill="#09090b">
+                    <g transform={`translate(${NODE_W - 18}, -4)`}>
+                      <circle cx="7" cy="7" r="6" fill="#f59e0b" stroke="#0e1017" strokeWidth="1.5" />
+                      <text x="7" y="10" fontSize="8" fontWeight="800" textAnchor="middle" fill="#09090b">
                         !
                       </text>
                     </g>
@@ -366,6 +405,19 @@ export const TopologyMap: React.FC<Props> = ({
             <div className="flex justify-between items-center pt-1">
               <span>Статус:</span>
               <StatusBadge status={popoverNode.d.status} />
+            </div>
+            <div className="flex justify-between items-center pt-1">
+              <span>AI Guard:</span>
+              <span className="text-cyan-400 font-mono text-[10px] flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
+                TimesFM Active
+              </span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span>Транзакция:</span>
+              <span className="text-zinc-300 font-mono text-[10px]">
+                {popoverNode.d.platform === 'huawei_vrp' ? 'commit trial' : popoverNode.d.platform === 'cisco_iosxe' ? 'commit confirmed' : 'commit timer'}
+              </span>
             </div>
           </div>
 

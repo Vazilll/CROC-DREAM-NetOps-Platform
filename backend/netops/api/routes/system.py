@@ -116,7 +116,67 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Viewer) -> dict[
             "status": "ok",
             "message": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
         }
+    if req.scenario == "huawei_drift":
+        leaf3_cfg = lab_dir / "leaf-3.croc.lab.cfg"
+        if leaf3_cfg.exists():
+            content = leaf3_cfg.read_text(encoding="utf-8")
+            if "rule 15 permit ip source 10.99.0.0" not in content:
+                content = content.replace(
+                    "rule 20 deny ip source any destination any",
+                    "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any\n rule 20 deny ip source any destination any",
+                )
+                leaf3_cfg.write_text(content, encoding="utf-8")
+        record_chaos_event(
+            scenario="huawei_drift",
+            target_hostnames=["leaf-3.croc.lab", "leaf-3"],
+            title="Chaos: Внедрение несанкционированного правила в Huawei VRP",
+            description="Внедрен дрейф ACL rule 15 в leaf-3.croc.lab (Huawei)",
+            severity="warning",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Внедрен несанкционированный ACL в leaf-3.croc.lab (Huawei VRP)",
+        }
+    if req.scenario == "ai_blackhole":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-3.croc.lab", "blackhole")
+        record_chaos_event(
+            scenario="ai_blackhole",
+            target_hostnames=["leaf-3.croc.lab", "leaf-3"],
+            title="Chaos: Моделирование 'тихой аварии' (Blackhole / 0 трафика)",
+            description="Имитация падения трафика при статусе портов up/up для проверки TimesFM 3.0",
+            severity="critical",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Смоделирована 'тихая авария' на leaf-3.croc.lab (TimesFM 3.0 обнаружит дроп)",
+        }
+    if req.scenario == "ai_storm":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "storm")
+        record_chaos_event(
+            scenario="ai_storm",
+            target_hostnames=["leaf-1.croc.lab", "leaf-1"],
+            title="Chaos: Моделирование шторма нагрузки / петли маршрутизации",
+            description="Имитация аномального всплеска трафика и CPU для проверки TimesFM 3.0",
+            severity="critical",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Смоделирован шторм трафика на leaf-1.croc.lab (TimesFM 3.0 обнаружит аномалию)",
+        }
     if req.scenario == "reset_lab":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-2.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-3.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-4.croc.lab", "clear")
         renderer = JinjaConfigRenderer(container.settings.templates_path)
         snapshot = container.intents.load()
         for dev in snapshot.inventory.devices:
@@ -144,4 +204,32 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Viewer) -> dict[
         lab_dir=lab_dir,
     )
     return {"status": "ok", "message": "Неизвестный сценарий"}
+
+
+class FreezeRequest(BaseModel):
+    frozen: bool
+    reason: str | None = None
+
+
+@api_router.get(
+    "/system/freeze",
+    tags=["system"],
+    summary="Статус экстренной заморозки фабрики (Kill Switch)",
+)
+def get_freeze_status(_: Viewer) -> dict[str, Any]:
+    from netops.services.freeze import get_freeze_state  # noqa: PLC0415
+
+    return get_freeze_state()
+
+
+@api_router.post(
+    "/system/freeze",
+    tags=["system"],
+    summary="Включение / отключение экстренной заморозки фабрики",
+)
+def toggle_freeze(req: FreezeRequest, user: Viewer) -> dict[str, Any]:
+    from netops.services.freeze import set_factory_freeze  # noqa: PLC0415
+
+    return set_factory_freeze(req.frozen, req.reason, user.username)
+
 

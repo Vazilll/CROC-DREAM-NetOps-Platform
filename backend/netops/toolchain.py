@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from netops.errors import PipelineError
 from netops.intent.models import InventoryDevice
 from netops.intent.repository import IntentRepository
 from netops.network.base import (
+
     ConfigCollector,
     ConfigDeployer,
     ConfigRenderer,
@@ -36,6 +38,8 @@ class Toolchain:
     max_ping_loss_percent: float = 20.0
     post_check_attempts: int = 1
     post_check_interval_seconds: float = 0.0
+    ai_guard: Any | None = None
+
 
     def target_for(self, device: InventoryDevice) -> DeviceTarget:
         credentials = self.credentials.get(device.auth_profile)
@@ -82,4 +86,12 @@ def build_toolchain(settings: Settings) -> Toolchain:
         max_ping_loss_percent=settings.max_ping_loss_percent,
         post_check_attempts=settings.post_check_attempts,
         post_check_interval_seconds=settings.post_check_interval_seconds,
+        ai_guard=_get_ai_guard(settings),
     )
+
+
+def _get_ai_guard(settings: Settings) -> Any:
+    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+    return AiTelemetryGuard(settings)
+

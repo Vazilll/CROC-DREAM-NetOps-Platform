@@ -18,13 +18,19 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
+is_live = "--live" in sys.argv
+default_driver = "scrapli" if is_live else "offline"
+default_inventory = "inventory.live.yaml" if is_live else "inventory.yaml"
+
 # Default environment variables for standalone local run
 os.environ.setdefault("NETOPS_DATABASE_URL", f"sqlite:///{BACKEND_DIR / 'netops_local.db'}")
 os.environ.setdefault("NETOPS_INTENT_REPO_PATH", str(PROJECT_ROOT / "intent"))
+os.environ.setdefault("NETOPS_INVENTORY_FILE", default_inventory)
 os.environ.setdefault("NETOPS_TEMPLATES_PATH", str(PROJECT_ROOT / "templates"))
 os.environ.setdefault("NETOPS_OFFLINE_LAB_PATH", str(PROJECT_ROOT / "lab" / "running"))
-os.environ.setdefault("NETOPS_NETWORK_DRIVER", "offline")
-os.environ.setdefault("NETOPS_CORS_ORIGINS", '["http://localhost:5173", "http://127.0.0.1:5173", "http://localhost:3000"]')
+os.environ.setdefault("NETOPS_NETWORK_DRIVER", default_driver)
+
+os.environ.setdefault("NETOPS_CORS_ORIGINS", '["*"]')
 os.environ.setdefault(
     "NETOPS_API_TOKENS",
     '{"dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}}',
@@ -80,7 +86,7 @@ def init_local_environment() -> None:
     lab_dir = Path(settings.offline_lab_path)
     lab_dir.mkdir(parents=True, exist_ok=True)
 
-    intent_repo = IntentRepository(Path(settings.intent_repo_path))
+    intent_repo = IntentRepository(Path(settings.intent_repo_path), inventory_file=settings.inventory_file)
     templates_dir = Path(settings.templates_path)
     renderer = JinjaConfigRenderer(templates_dir)
 

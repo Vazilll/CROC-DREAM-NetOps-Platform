@@ -194,7 +194,28 @@ export interface CopilotReply {
   provider: string;
 }
 
+export interface AiGuardResponse {
+  hostname: string;
+  healthy: boolean;
+  metric: string;
+  observed_value: number;
+  expected_range: [number, number];
+  deviation_pct: number;
+  problem: string | null;
+  message: string;
+  provider: string;
+  injected_simulation: string | null;
+}
+
+export interface FreezeStatus {
+  frozen: boolean;
+  reason: string;
+  timestamp: string | null;
+  user: string | null;
+}
+
 const API_BASE = '/api/v1';
+
 
 export class NetOpsApiClient {
   private token: string;
@@ -331,6 +352,84 @@ export class NetOpsApiClient {
       body: JSON.stringify({ message, device_id: deviceId ?? null }),
     });
   }
+
+  // AI Telemetry Guard (TimesFM 3.0)
+  async getAiGuardOverview(): Promise<AiGuardResponse[]> {
+    return this.request<AiGuardResponse[]>('/ai-guard/overview');
+  }
+
+  async checkAiGuardDevice(deviceId: number): Promise<AiGuardResponse> {
+    return this.request<AiGuardResponse>(`/ai-guard/check/${deviceId}`);
+  }
+
+  async simulateAiGuardAnomaly(hostname: string, anomalyType: 'blackhole' | 'storm' | 'clear'): Promise<{ status: string; message: string }> {
+    return this.request('/ai-guard/simulate', {
+      method: 'POST',
+      body: JSON.stringify({ hostname, anomaly_type: anomalyType }),
+    });
+  }
+
+  // Emergency Factory Freeze (Kill Switch)
+  async getFreezeStatus(): Promise<FreezeStatus> {
+    return this.request<FreezeStatus>('/system/freeze');
+  }
+
+  async toggleFreeze(frozen: boolean, reason?: string): Promise<FreezeStatus> {
+    return this.request<FreezeStatus>('/system/freeze', {
+      method: 'POST',
+      body: JSON.stringify({ frozen, reason }),
+    });
+  }
+
+  // Emergency Hub / Manual Intervention (Admin role)
+  async executeEmergencyCommand(device: string, command: string): Promise<{
+    status: string;
+    device: string;
+    command: string;
+    output: string;
+    failed?: boolean;
+  }> {
+    return this.request('/emergency/command', {
+      method: 'POST',
+      body: JSON.stringify({ device, command }),
+    });
+  }
+
+  async applyEmergencyPatch(device: string, patch: string, reason?: string): Promise<{
+    status: string;
+    device: string;
+    applied_lines: string[];
+    output: string;
+    reason?: string;
+  }> {
+    return this.request('/emergency/patch', {
+      method: 'POST',
+      body: JSON.stringify({ device, patch, reason: reason || 'Manual emergency patch' }),
+    });
+  }
+
+  async softResetFabric(): Promise<{ status: string; message: string; details: string }> {
+    return this.request('/emergency/soft-reset', { method: 'POST' });
+  }
+
+  async hardResetFabric(): Promise<{ status: string; message: string; details: string }> {
+    return this.request('/emergency/hard-reset', { method: 'POST' });
+  }
+
+  // Persona / Role helper
+  getRole(): 'operator' | 'admin' {
+    return localStorage.getItem('netops_user_role') === 'admin' ? 'admin' : 'operator';
+  }
+
+  setRole(role: 'operator' | 'admin') {
+    localStorage.setItem('netops_user_role', role);
+    this.setToken(role === 'admin' ? 'dev-admin-token' : 'dev-operator-token');
+  }
 }
 
-export const api = new NetOpsApiClient();
+export const api = new NetOpsApiClient(
+  (typeof window !== 'undefined' && localStorage.getItem('netops_user_role') === 'admin')
+    ? 'dev-admin-token'
+    : 'dev-operator-token'
+);
+

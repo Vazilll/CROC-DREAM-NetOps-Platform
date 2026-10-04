@@ -3,11 +3,11 @@ interfaces:
   - name: Loopback0
     description: Router ID
     ipv4_address: 10.255.1.2/32
-  - name: GigabitEthernet2
+  - name: GigabitEthernet5
     description: Uplink to spine-1
     ipv4_address: 10.0.2.1/31
     mtu: 9000
-  - name: GigabitEthernet3
+  - name: GigabitEthernet6
     description: Uplink to spine-2
     ipv4_address: 10.0.2.3/31
     mtu: 9000

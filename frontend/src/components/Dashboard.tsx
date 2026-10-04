@@ -12,7 +12,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { api } from '../api';
-import type { Device, ForecastAlert, JobSummary } from '../api';
+import type { Device, ForecastAlert, JobSummary, AiGuardResponse } from '../api';
 import { TopologyMap } from './TopologyMap';
 import { PLATFORM_NAMES, ROLE_NAMES } from './ui';
 
@@ -24,6 +24,7 @@ interface DashboardProps {
   onRunDryRun?: (deviceIds: number[]) => void;
   onOpenDiff?: (jobId?: string) => void;
 }
+
 
 const BentoCard: React.FC<{
   title: string;
@@ -62,12 +63,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
   onOpenDiff,
 }) => {
   const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
+  const [aiGuardList, setAiGuardList] = useState<AiGuardResponse[]>([]);
   const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
   const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
 
   useEffect(() => {
     api.getForecastAlerts().then(setAlerts).catch(() => setAlerts([]));
+    api.getAiGuardOverview().then(setAiGuardList).catch(() => setAiGuardList([]));
   }, [devices.length]);
+
+  const aiAnomalies = aiGuardList.filter((g) => !g.healthy);
+
 
   const by = (s: string) => devices.filter((d) => d.status === s).length;
   const inSyncCount = by('IN_SYNC');
@@ -110,7 +116,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-3 max-w-[1920px] mx-auto select-none">
       {/* 1. Health KPI Strip — scannable in < 0.5s */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-2.5">
         <button
           onClick={() => onOpenTab('devices')}
           className="text-left rounded-lg border border-white/[0.08] bg-[#0c0e14] px-3.5 py-2.5 hover:border-white/[0.18] transition-colors cursor-pointer flex items-center justify-between"
@@ -186,7 +192,33 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <AlertTriangle className={`w-5 h-5 ${unreachableCount > 0 ? 'text-rose-400/60' : 'text-zinc-600'}`} />
         </button>
+
+        <button
+          onClick={() => onOpenTab('chaos')}
+          className={`text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between ${
+            aiAnomalies.length > 0
+              ? 'border-rose-500/40 bg-rose-500/[0.06] hover:border-rose-500/70 shadow-[0_0_15px_rgba(244,63,94,0.15)] animate-pulse'
+              : 'border-cyan-500/20 bg-cyan-500/[0.02] hover:border-cyan-500/40'
+          }`}
+          title="Защитный барьер телеметрии TimesFM 3.0"
+        >
+          <div>
+            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
+              <span className={`w-2 h-2 rounded-full ${aiAnomalies.length > 0 ? 'bg-rose-500 animate-ping' : 'bg-cyan-400'}`} />
+              <span>TimesFM 3.0 Guard</span>
+            </div>
+            <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${aiAnomalies.length > 0 ? 'text-rose-400' : 'text-cyan-400'}`}>
+              {aiAnomalies.length > 0 ? `${aiAnomalies.length} аномалий` : 'ACTIVE'}
+            </div>
+          </div>
+          <div className="text-right">
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${aiAnomalies.length > 0 ? 'bg-rose-500/20 text-rose-300' : 'bg-cyan-500/10 text-cyan-300'}`}>
+              {aiAnomalies.length > 0 ? 'Rollback' : 'Shield OK'}
+            </span>
+          </div>
+        </button>
       </div>
+
 
       {/* 2. Bento Grid Central Arena (strictly fits 1080p display) */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
