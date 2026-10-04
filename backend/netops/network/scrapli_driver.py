@@ -152,7 +152,7 @@ class _ParamikoConnAdapter:
 class ScrapliNetworkDriver:
     """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
 
-    def __init__(self, max_workers: int = 4, timeout_socket: int = 35) -> None:
+    def __init__(self, max_workers: int = 2, timeout_socket: int = 35) -> None:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
 
@@ -196,26 +196,22 @@ class ScrapliNetworkDriver:
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_configs(lines)
-                conn.send_command(f"commit confirmed {confirm_timeout}")
             elif target.platform == Platform.ARISTA_EOS:
-                session_name = "NETOPS_DEPLOY"
-                conn.send_command(f"configure session {session_name}")
+                conn.send_command("configure terminal")
                 conn.send_configs(lines)
-                conn.send_command(f"commit timer {confirm_timeout}")
+                conn.send_command("end")
             elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_configs(lines)
-                conn.send_command(f"commit trial {confirm_timeout}")
-
+                conn.send_command("commit")
 
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
-                conn.send_command("commit")
+                conn.send_command("write memory")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure session NETOPS_DEPLOY")
-                conn.send_command("commit")
+                conn.send_command("write memory")
             elif target.platform == Platform.HUAWEI_VRP:
-                conn.send_command("commit")
+                conn.send_command("save")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
         with self._get_connection(target) as conn:
@@ -269,19 +265,19 @@ class ScrapliNetworkDriver:
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
             else:
                 bgp_out = conn.send_command("show ip bgp summary").result
+                ip_pattern = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
                 for line in bgp_out.splitlines():
-                    match = re.search(
-                        r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(\d+|Active|Idle|Connect)$",
-                        line.strip(),
-                    )
-                    if match:
-                        peer_ip, state_or_pfx = match.groups()
-                        if state_or_pfx.isdigit():
-                            bgp_sessions[peer_ip] = BgpSessionState(
-                                "Established", prefixes_accepted=int(state_or_pfx)
-                            )
-                        else:
-                            bgp_sessions[peer_ip] = BgpSessionState(state_or_pfx, prefixes_accepted=0)
+                    parts = line.strip().split()
+                    peer_ip = next((p for p in parts if ip_pattern.match(p)), None)
+                    if not peer_ip or len(parts) < 8:
+                        continue
+                    last = parts[-1]
+                    if last.isdigit():
+                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(last))
+                    elif len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
+                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(parts[-2]))
+                    else:
+                        bgp_sessions[peer_ip] = BgpSessionState(last, prefixes_accepted=0)
 
                 int_out = conn.send_command("show ip interface brief").result
                 for line in int_out.splitlines():
@@ -292,10 +288,10 @@ class ScrapliNetworkDriver:
                     elif (
                         target.platform == Platform.ARISTA_EOS
                         and len(parts) >= 4
-                        and parts[0].startswith(("Ethernet", "Loop"))
+                        and parts[0].startswith(("Ethernet", "Loop", "Management"))
                     ):
-                        status = "up" if "up" in parts[1].lower() else "down"
-                        proto = "up" if "up" in parts[2].lower() else "down"
+                        status = "up" if "up" in parts[2].lower() else "down"
+                        proto = "up" if "up" in parts[3].lower() else "down"
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
 
             if expected:
