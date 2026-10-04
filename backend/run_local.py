@@ -90,25 +90,25 @@ def init_local_environment() -> None:
     templates_dir = Path(settings.templates_path)
     renderer = JinjaConfigRenderer(templates_dir)
 
-    is_clean = "--clean" in sys.argv or os.environ.get("NETOPS_CLEAN_START", "0") == "1"
+    seed_inventory = "--seed-inventory" in sys.argv or os.environ.get("NETOPS_SEED_INVENTORY", "0") == "1"
 
-    # Sync inventory into SQLite unless --clean is requested
-    if is_clean:
-        logger.info("Clean start requested: skipping auto-sync of inventory. System starts with empty database.")
-    else:
+    # Only sync inventory if explicitly requested via --seed-inventory
+    if seed_inventory:
         try:
             snapshot = intent_repo.load()
             with session_factory() as session:
                 device_svc = DeviceService(session)
                 sync_res = device_svc.sync_inventory(snapshot.inventory)
                 logger.info(
-                    "Inventory synced: created=%s, updated=%s, unchanged=%s",
+                    "Explicit inventory seed: created=%s, updated=%s, unchanged=%s",
                     sync_res.created,
                     sync_res.updated,
                     sync_res.unchanged,
                 )
         except Exception:
-            logger.exception("Failed to auto-sync inventory from %s", settings.intent_repo_path)
+            logger.exception("Failed to seed inventory from %s", settings.intent_repo_path)
+    else:
+        logger.info("Default clean start: system starts with empty database. Devices must be added by the user.")
 
     # Ensure initial running .cfg files exist for each device
     try:

@@ -104,70 +104,68 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </p>
         </div>
 
-        {/* 2 Primary Choice Bento Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Card 1: SSH Probe Single Node */}
+        {/* Primary Action Card: Manual / SSH Probe Onboarding */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div
             onClick={() => setAddModalOpen(true)}
-            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-cyan-500/50 bg-[#0c0e14] hover:bg-cyan-500/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+            className="md:col-span-2 group relative p-6 sm:p-8 rounded-2xl border border-white/[0.1] hover:border-cyan-500/50 bg-[#0c0e14] hover:bg-cyan-500/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-2xl shadow-cyan-950/20"
           >
             <div>
-              <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-                <Plus className="w-6 h-6" />
+              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 border border-cyan-500/30 text-cyan-400 flex items-center justify-center mb-5 group-hover:scale-105 transition-transform">
+                <Plus className="w-7 h-7" />
               </div>
-              <h3 className="text-lg font-semibold text-white group-hover:text-cyan-200 transition-colors">
-                Добавить сервер или коммутатор
+              <span className="text-[11px] font-mono uppercase tracking-wider text-cyan-400 font-semibold px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">
+                Первичное подключение
+              </span>
+              <h3 className="text-xl font-bold text-white group-hover:text-cyan-200 transition-colors mt-2">
+                Добавить сервер или сетевой коммутатор
               </h3>
-              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                Безопасный 3-шаговый мастер SSH Probe. Сканирование ядра хоста, определение vCPU, RAM, диска, сетевых портов и автоматический ввод в режиме <strong>MONITORING_ONLY</strong>.
+              <p className="text-xs sm:text-sm text-zinc-400 mt-2 leading-relaxed">
+                Система начинает работу с чистого листа. Укажите IP-адрес, SSH-порт и реквизиты доступа вашего оборудования. Мастер SSH Probe автоматически определит платформу (Cisco, Arista, Huawei, Linux), вычислительные ресурсы (vCPU, RAM, NVMe) и сетевые интерфейсы.
               </p>
-              <div className="mt-4 flex flex-wrap gap-1.5 text-[11px] font-mono text-zinc-400">
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Linux Server</span>
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Cisco</span>
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Arista</span>
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Huawei</span>
+              <div className="mt-5 flex flex-wrap gap-2 text-xs font-mono text-zinc-300">
+                <span className="px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">Linux Compute</span>
+                <span className="px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">Cisco 8000V / IOS-XE</span>
+                <span className="px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">Arista cEOS</span>
+                <span className="px-2.5 py-1 rounded-md bg-white/[0.04] border border-white/[0.06]">Huawei VRP</span>
               </div>
             </div>
-            <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-cyan-400 font-semibold">
-              <span>Запустить SSH Probe мастер</span>
+            <div className="mt-8 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-cyan-400 font-semibold">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+                Открыть мастер подключения (SSH Probe)
+              </span>
               <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
             </div>
           </div>
 
-          {/* Card 2: 1-Click Import Git SoT Lab */}
-          <div
-            onClick={async () => {
-              if (onSyncInventory) {
-                setSyncing(true);
-                await onSyncInventory();
-                setSyncing(false);
-              }
-            }}
-            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-indigo-500/50 bg-[#0c0e14] hover:bg-indigo-500/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
-          >
-            <div>
-              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-                {syncing ? (
-                  <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
-                ) : (
-                  <Download className="w-6 h-6" />
-                )}
+          {/* Side Info Card: Progressive Disclosure & Safe-First */}
+          <div className="space-y-4">
+            <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0c0e14] space-y-3">
+              <div className="flex items-center gap-2 text-zinc-300 text-xs font-semibold">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>Принцип Safe-First</span>
               </div>
-              <h3 className="text-lg font-semibold text-white group-hover:text-indigo-200 transition-colors">
-                Импортировать эталонную CLOS-фабрику
-              </h3>
-              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
-                Быстрый старт лаборатории в 1 клик. Импорт 6 гетерогенных bare-metal узлов из Git SoT (2 Arista Spines, 2 Cisco Leafs, 2 Huawei Leafs) с дефолтными учетными данными <code>admin/admin</code>.
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Каждое новое устройство регистрируется в режиме <strong>MONITORING_ONLY</strong>. Мутации конфигураций исключены до тех пор, пока администратор явно не переведет узел в управление.
               </p>
-              <div className="mt-4 flex flex-wrap gap-1.5 text-[11px] font-mono text-zinc-400">
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">spine-1..2</span>
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">leaf-1..4</span>
-                <span className="px-2 py-0.5 rounded bg-white/[0.04]">BGP Underlay/Overlay</span>
-              </div>
             </div>
-            <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-indigo-400 font-semibold">
-              <span>{syncing ? 'Импорт фабрики…' : 'Импортировать 6 узлов фабрики'}</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+
+            <div className="p-5 rounded-2xl border border-white/[0.08] bg-[#0c0e14] space-y-3">
+              <div className="flex items-center gap-2 text-zinc-300 text-xs font-semibold">
+                <Presentation className="w-4 h-4 text-indigo-400" />
+                <span>Архитектура фабрики</span>
+              </div>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                Интерактивный разбор топологий Clos, валидация инвариантов SMT/Z3 и транзакционные откаты <code>commit confirmed</code>.
+              </p>
+              <button
+                onClick={() => onOpenTab('slides')}
+                className="text-xs text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 cursor-pointer pt-1"
+              >
+                <span>Смотреть слайды</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
             </div>
           </div>
         </div>
