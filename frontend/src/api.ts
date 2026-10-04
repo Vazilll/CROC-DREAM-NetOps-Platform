@@ -416,6 +416,19 @@ export class NetOpsApiClient {
     return this.request('/emergency/hard-reset', { method: 'POST' });
   }
 
+  async getEmergencyAudit(): Promise<Array<{
+    timestamp: string;
+    user: string;
+    action: string;
+    device: string;
+    payload: string;
+    reason: string;
+    success: boolean;
+    output_preview: string;
+  }>> {
+    return this.request('/emergency/audit');
+  }
+
   // Persona / Role helper
   getRole(): 'operator' | 'admin' {
     return localStorage.getItem('netops_user_role') === 'admin' ? 'admin' : 'operator';

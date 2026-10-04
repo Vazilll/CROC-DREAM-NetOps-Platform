@@ -11,7 +11,10 @@ Provides:
 
 from __future__ import annotations
 
+import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 import paramiko
 from fastapi import APIRouter, HTTPException, status
@@ -25,6 +28,35 @@ from netops.toolchain import build_toolchain
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emergency", tags=["emergency"])
+
+AUDIT_LOG_FILE = Path("lab/running/emergency_audit.jsonl")
+
+
+def record_audit(
+    user: str,
+    action: str,
+    device: str,
+    payload: str,
+    reason: str,
+    success: bool,
+    output: str = "",
+) -> None:
+    try:
+        AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "user": user,
+            "action": action,
+            "device": device,
+            "payload": payload,
+            "reason": reason,
+            "success": success,
+            "output_preview": output[:200] if output else "",
+        }
+        with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        logger.warning("Failed to record emergency audit log: %s", exc)
 
 
 class EmergencyCommandRequest(BaseModel):
@@ -42,6 +74,21 @@ class ResetResponse(BaseModel):
     status: str
     message: str
     details: str = ""
+
+
+@router.get("/audit", summary="Get emergency operations audit log")
+def get_emergency_audit(_: Viewer) -> list[dict[str, Any]]:
+    if not AUDIT_LOG_FILE.exists():
+        return []
+    records = []
+    with open(AUDIT_LOG_FILE, "r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                try:
+                    records.append(json.loads(line))
+                except Exception:
+                    pass
+    return records[-50:]
 
 
 @router.post("/command", summary="Execute live CLI command on network device (Admin only)")
@@ -66,6 +113,15 @@ def execute_emergency_command(
         from netops.network.scrapli_driver import _ParamikoConnAdapter  # noqa: PLC0415
         with _ParamikoConnAdapter(target, timeout=30) as conn:
             res = conn.send_command(req.command)
+            record_audit(
+                user=_.username,
+                action="cli_command",
+                device=device_obj.hostname,
+                payload=req.command,
+                reason="Interactive CLI",
+                success=not res.failed,
+                output=res.result,
+            )
             return {
                 "status": "ok",
                 "device": device_obj.hostname,
@@ -74,6 +130,15 @@ def execute_emergency_command(
                 "failed": res.failed,
             }
     except Exception as exc:
+        record_audit(
+            user=_.username,
+            action="cli_command",
+            device=device_obj.hostname,
+            payload=req.command,
+            reason="Interactive CLI",
+            success=False,
+            output=str(exc),
+        )
         logger.exception("Failed to execute emergency command on %s", device_obj.hostname)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -109,6 +174,15 @@ def apply_emergency_patch(
         from netops.network.scrapli_driver import _ParamikoConnAdapter  # noqa: PLC0415
         with _ParamikoConnAdapter(target, timeout=35) as conn:
             res = conn.send_configs(lines)
+            record_audit(
+                user=_.username,
+                action="emergency_patch",
+                device=device_obj.hostname,
+                payload="\n".join(lines),
+                reason=req.reason,
+                success=True,
+                output=res.result,
+            )
             return {
                 "status": "ok",
                 "device": device_obj.hostname,
@@ -117,6 +191,15 @@ def apply_emergency_patch(
                 "reason": req.reason,
             }
     except Exception as exc:
+        record_audit(
+            user=_.username,
+            action="emergency_patch",
+            device=device_obj.hostname,
+            payload="\n".join(lines),
+            reason=req.reason,
+            success=False,
+            output=str(exc),
+        )
         logger.exception("Failed to apply emergency patch on %s", device_obj.hostname)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

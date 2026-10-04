@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Terminal as TerminalIcon,
   ShieldAlert,
@@ -12,7 +12,10 @@ import {
   Lock,
   ArrowRight,
   Copy,
-  Check
+  Check,
+  History,
+  Clock,
+  User,
 } from 'lucide-react';
 import { api } from '../api';
 
@@ -55,6 +58,35 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   const [resetLog, setResetLog] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
 
+  // Audit Logs
+  const [auditLogs, setAuditLogs] = useState<Array<{
+    timestamp: string;
+    user: string;
+    action: string;
+    device: string;
+    payload: string;
+    reason: string;
+    success: boolean;
+    output_preview: string;
+  }>>([]);
+  const [isLoadingAudit, setIsLoadingAudit] = useState<boolean>(false);
+
+  const loadAudit = async () => {
+    setIsLoadingAudit(true);
+    try {
+      const logs = await api.getEmergencyAudit();
+      setAuditLogs([...logs].reverse());
+    } catch (err) {
+      console.error('Failed to load audit logs', err);
+    } finally {
+      setIsLoadingAudit(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAudit();
+  }, []);
+
   const activeDeviceObj = DEVICES.find((d) => d.hostname === selectedDevice) || DEVICES[0];
   const activePresets = PRESETS[activeDeviceObj.platform] || PRESETS.arista_eos;
 
@@ -69,6 +101,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
       setCliOutput((prev) => `${prev}\n[ОШИБКА]: ${err.message || String(err)}`);
     } finally {
       setIsExecutingCmd(false);
+      loadAudit();
     }
   };
 
@@ -90,6 +123,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
       });
     } finally {
       setIsApplyingPatch(false);
+      loadAudit();
     }
   };
 
@@ -377,6 +411,99 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Emergency Audit Trail Card */}
+      <div className="rounded-2xl border border-white/5 bg-[#0a0c10]/80 p-5 space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-white">Журнал аудита аварийных вмешательств (Audit Trail)</h3>
+              <p className="text-xs text-slate-400">
+                Фиксация низкоуровневых команд, хот-патчей и сбросов администратора с таймстемпом
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={loadAudit}
+            disabled={isLoadingAudit}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-300 bg-white/5 hover:bg-white/10 transition-all cursor-pointer disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAudit ? 'animate-spin' : ''}`} />
+            Обновить
+          </button>
+        </div>
+
+        {auditLogs.length === 0 ? (
+          <div className="py-8 text-center text-xs text-slate-500">
+            Журнал пуст. Экстренные действия еще не фиксировались.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-white/5 text-slate-400">
+                  <th className="pb-2.5 font-medium">Время (UTC)</th>
+                  <th className="pb-2.5 font-medium">Пользователь</th>
+                  <th className="pb-2.5 font-medium">Узел</th>
+                  <th className="pb-2.5 font-medium">Действие</th>
+                  <th className="pb-2.5 font-medium">Команда / Детали</th>
+                  <th className="pb-2.5 font-medium">Причина</th>
+                  <th className="pb-2.5 font-medium text-right">Статус</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-white/5">
+                {auditLogs.map((entry, idx) => (
+                  <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
+                    <td className="py-2.5 font-mono text-slate-400 whitespace-nowrap">
+                      {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                    </td>
+                    <td className="py-2.5 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                        <User className="w-3 h-3" />
+                        {entry.user}
+                      </span>
+                    </td>
+                    <td className="py-2.5 font-mono text-slate-300 whitespace-nowrap">{entry.device}</td>
+                    <td className="py-2.5 whitespace-nowrap">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-md font-mono text-[10px] uppercase font-semibold ${
+                          entry.action === 'cli_command'
+                            ? 'bg-sky-500/10 border border-sky-500/20 text-sky-300'
+                            : entry.action === 'emergency_patch'
+                            ? 'bg-purple-500/10 border border-purple-500/20 text-purple-300'
+                            : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
+                        }`}
+                      >
+                        {entry.action}
+                      </span>
+                    </td>
+                    <td className="py-2.5 font-mono text-slate-200 max-w-xs truncate" title={entry.payload}>
+                      {entry.payload}
+                    </td>
+                    <td className="py-2.5 text-slate-400 max-w-xs truncate" title={entry.reason}>
+                      {entry.reason}
+                    </td>
+                    <td className="py-2.5 text-right whitespace-nowrap">
+                      <span
+                        className={`inline-block px-2 py-0.5 rounded-md font-mono text-[10px] font-semibold ${
+                          entry.success
+                            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
+                            : 'bg-red-500/10 border border-red-500/20 text-red-400'
+                        }`}
+                      >
+                        {entry.success ? 'УСПЕШНО' : 'СБОЙ'}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* Confirmation Modals for Soft/Hard Reset */}
