@@ -10,19 +10,27 @@ import {
   Cpu,
   Clock,
   ShieldCheck,
+  Plus,
+  Download,
+  ArrowRight,
+  Presentation,
+  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
-import type { Device, ForecastAlert, JobSummary, AiGuardResponse } from '../api';
+import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../api';
 import { TopologyMap } from './TopologyMap';
 import { PLATFORM_NAMES, ROLE_NAMES } from './ui';
+import { AddDeviceModal } from './AddDeviceModal';
 
 interface DashboardProps {
   devices: Device[];
   jobs: JobSummary[];
+  userRole?: UserRole;
   onOpenTab: (tab: string) => void;
   onOpenDevice: (id: number) => void;
   onRunDryRun?: (deviceIds: number[]) => void;
   onOpenDiff?: (jobId?: string) => void;
+  onSyncInventory?: () => void;
 }
 
 
@@ -57,23 +65,141 @@ const JOB_COLOR: Record<string, { text: string; bg: string; border: string }> = 
 export const Dashboard: React.FC<DashboardProps> = ({
   devices,
   jobs,
+  userRole,
   onOpenTab,
   onOpenDevice,
   onRunDryRun,
   onOpenDiff,
+  onSyncInventory,
 }) => {
   const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
   const [aiGuardList, setAiGuardList] = useState<AiGuardResponse[]>([]);
   const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
   const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
-    api.getForecastAlerts().then(setAlerts).catch(() => setAlerts([]));
-    api.getAiGuardOverview().then(setAiGuardList).catch(() => setAiGuardList([]));
+    if (devices.length > 0) {
+      api.getForecastAlerts().then(setAlerts).catch(() => setAlerts([]));
+      api.getAiGuardOverview().then(setAiGuardList).catch(() => setAiGuardList([]));
+    }
   }, [devices.length]);
 
-  const aiAnomalies = aiGuardList.filter((g) => !g.healthy);
+  // If there are no devices in the system, show the Onboarding & First Structure prompt!
+  if (devices.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto py-8 sm:py-14 space-y-8 animate-fade-in select-none">
+        {/* Onboarding Stepper Header */}
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-cyan-500/10 border border-cyan-500/25 text-cyan-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            Инициализация сетевой фабрики
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+            Шаг 2 из 2: Добавление первой сетевой структуры
+          </h1>
+          <p className="text-xs sm:text-sm text-zinc-400 max-w-xl mx-auto leading-relaxed">
+            Вы вошли в систему. В инвентаре пока нет активных узлов. Выберите способ создания структуры для запуска мониторинга и телеметрии:
+          </p>
+        </div>
 
+        {/* 2 Primary Choice Bento Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Card 1: SSH Probe Single Node */}
+          <div
+            onClick={() => setAddModalOpen(true)}
+            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-cyan-500/50 bg-[#0c0e14] hover:bg-cyan-500/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+          >
+            <div>
+              <div className="w-12 h-12 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+                <Plus className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-semibold text-white group-hover:text-cyan-200 transition-colors">
+                Добавить сервер или коммутатор
+              </h3>
+              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                Безопасный 3-шаговый мастер SSH Probe. Сканирование ядра хоста, определение vCPU, RAM, диска, сетевых портов и автоматический ввод в режиме <strong>MONITORING_ONLY</strong>.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-1.5 text-[11px] font-mono text-zinc-400">
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Linux Server</span>
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Cisco</span>
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Arista</span>
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">Huawei</span>
+              </div>
+            </div>
+            <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-cyan-400 font-semibold">
+              <span>Запустить SSH Probe мастер</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+
+          {/* Card 2: 1-Click Import Git SoT Lab */}
+          <div
+            onClick={async () => {
+              if (onSyncInventory) {
+                setSyncing(true);
+                await onSyncInventory();
+                setSyncing(false);
+              }
+            }}
+            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-indigo-500/50 bg-[#0c0e14] hover:bg-indigo-500/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+          >
+            <div>
+              <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+                {syncing ? (
+                  <RefreshCw className="w-6 h-6 animate-spin text-cyan-400" />
+                ) : (
+                  <Download className="w-6 h-6" />
+                )}
+              </div>
+              <h3 className="text-lg font-semibold text-white group-hover:text-indigo-200 transition-colors">
+                Импортировать эталонную CLOS-фабрику
+              </h3>
+              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+                Быстрый старт лаборатории в 1 клик. Импорт 6 гетерогенных bare-metal узлов из Git SoT (2 Arista Spines, 2 Cisco Leafs, 2 Huawei Leafs) с дефолтными учетными данными <code>admin/admin</code>.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-1.5 text-[11px] font-mono text-zinc-400">
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">spine-1..2</span>
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">leaf-1..4</span>
+                <span className="px-2 py-0.5 rounded bg-white/[0.04]">BGP Underlay/Overlay</span>
+              </div>
+            </div>
+            <div className="mt-6 pt-4 border-t border-white/[0.06] flex items-center justify-between text-xs text-indigo-400 font-semibold">
+              <span>{syncing ? 'Импорт фабрики…' : 'Импортировать 6 узлов фабрики'}</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </div>
+          </div>
+        </div>
+
+        {/* Presentation Slide shortcut */}
+        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs text-zinc-400">
+          <div className="flex items-center gap-2.5">
+            <Presentation className="w-4 h-4 text-cyan-400" />
+            <span>Хотите сначала ознакомиться с архитектурой и графом инвариантов?</span>
+          </div>
+          <button
+            onClick={() => onOpenTab('slides')}
+            className="text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 cursor-pointer"
+          >
+            <span>Слайды проекта</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        <AddDeviceModal
+          isOpen={addModalOpen}
+          onClose={() => setAddModalOpen(false)}
+          onSuccess={() => {
+            if (onSyncInventory) onSyncInventory();
+          }}
+          userRole={userRole || 'admin'}
+        />
+      </div>
+    );
+  }
+
+  const aiAnomalies = aiGuardList.filter((g) => !g.healthy);
 
   const by = (s: string) => devices.filter((d) => d.status === s).length;
   const inSyncCount = by('IN_SYNC');

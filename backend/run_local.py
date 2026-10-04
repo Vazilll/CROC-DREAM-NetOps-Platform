@@ -90,20 +90,29 @@ def init_local_environment() -> None:
     templates_dir = Path(settings.templates_path)
     renderer = JinjaConfigRenderer(templates_dir)
 
-    # Sync inventory into SQLite
+    is_clean = "--clean" in sys.argv or os.environ.get("NETOPS_CLEAN_START", "0") == "1"
+
+    # Sync inventory into SQLite unless --clean is requested
+    if is_clean:
+        logger.info("Clean start requested: skipping auto-sync of inventory. System starts with empty database.")
+    else:
+        try:
+            snapshot = intent_repo.load()
+            with session_factory() as session:
+                device_svc = DeviceService(session)
+                sync_res = device_svc.sync_inventory(snapshot.inventory)
+                logger.info(
+                    "Inventory synced: created=%s, updated=%s, unchanged=%s",
+                    sync_res.created,
+                    sync_res.updated,
+                    sync_res.unchanged,
+                )
+        except Exception:
+            logger.exception("Failed to auto-sync inventory from %s", settings.intent_repo_path)
+
+    # Ensure initial running .cfg files exist for each device
     try:
         snapshot = intent_repo.load()
-        with session_factory() as session:
-            device_svc = DeviceService(session)
-            sync_res = device_svc.sync_inventory(snapshot.inventory)
-            logger.info(
-                "Inventory synced: created=%s, updated=%s, unchanged=%s",
-                sync_res.created,
-                sync_res.updated,
-                sync_res.unchanged,
-            )
-
-        # Ensure initial running .cfg files exist for each device
         for dev in snapshot.inventory.devices:
             cfg_file = lab_dir / f"{dev.hostname}.cfg"
             if not cfg_file.exists():
@@ -112,7 +121,7 @@ def init_local_environment() -> None:
                 cfg_file.write_text(cfg, encoding="utf-8")
                 logger.info("Generated initial running config: %s", cfg_file.name)
     except Exception:
-        logger.exception("Failed to auto-sync inventory from %s", settings.intent_repo_path)
+        logger.exception("Failed to ensure running configs in %s", lab_dir)
 
 
 def main() -> None:

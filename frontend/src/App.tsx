@@ -265,6 +265,7 @@ export function App() {
             <Dashboard
               devices={devices}
               jobs={jobs}
+              userRole={userRole}
               onOpenTab={setActiveTab}
               onOpenDevice={openDevice}
               onRunDryRun={openDryRunModal}
@@ -272,6 +273,7 @@ export function App() {
                 if (jobId) setSelectedJobId(jobId);
                 setActiveTab('diff');
               }}
+              onSyncInventory={handleSyncInventory}
             />
           )}
 
