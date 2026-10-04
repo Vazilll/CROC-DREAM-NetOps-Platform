@@ -7,12 +7,16 @@ class Platform(StrEnum):
     CISCO_IOSXE = "cisco_iosxe"
     ARISTA_EOS = "arista_eos"
     HUAWEI_VRP = "huawei_vrp"
+    JUNIPER_JUNOS = "juniper_junos"
+    ELTEX_MES = "eltex_mes"
+    YADRO_KORNFE = "yadro_kornfe"
 
 
 class DeviceRole(StrEnum):
     SPINE = "spine"
     LEAF = "leaf"
     BORDER = "border"
+    BORDER_FIREWALL = "border_firewall"
 
 
 class DeviceStatus(StrEnum):

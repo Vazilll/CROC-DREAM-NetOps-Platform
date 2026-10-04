@@ -1,0 +1,72 @@
+[
+  {
+    "type": "CHAOS",
+    "scenario": "acl_drift",
+    "target_hostnames": [
+      "leaf-1.croc.lab",
+      "leaf-1"
+    ],
+    "title": "Chaos: Внедрение несанкционированного ACL",
+    "description": "Внедрен несанкционированный ACL в leaf-1.croc.lab (Дрейф создан!)",
+    "severity": "warning",
+    "timestamp": "2026-10-04T12:39:19.070496+00:00"
+  },
+  {
+    "type": "CHAOS",
+    "scenario": "port_down",
+    "target_hostnames": [
+      "leaf-2.croc.lab",
+      "leaf-2"
+    ],
+    "title": "Chaos: Отключение интерфейса GigabitEthernet3",
+    "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
+    "severity": "critical",
+    "timestamp": "2026-10-04T12:39:21.985125+00:00"
+  },
+  {
+    "type": "CHAOS",
+    "scenario": "port_down",
+    "target_hostnames": [
+      "leaf-2.croc.lab",
+      "leaf-2"
+    ],
+    "title": "Chaos: Отключение интерфейса GigabitEthernet3",
+    "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
+    "severity": "critical",
+    "timestamp": "2026-10-04T12:39:23.410779+00:00"
+  },
+  {
+    "type": "CHAOS",
+    "scenario": "port_down",
+    "target_hostnames": [
+      "leaf-2.croc.lab",
+      "leaf-2"
+    ],
+    "title": "Chaos: Отключение интерфейса GigabitEthernet3",
+    "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
+    "severity": "critical",
+    "timestamp": "2026-10-04T12:39:24.396638+00:00"
+  },
+  {
+    "type": "CHAOS",
+    "scenario": "reset_lab",
+    "target_hostnames": [
+      "*"
+    ],
+    "title": "Chaos: Сброс фабрики к Git SoT",
+    "description": "Устройства успешно сброшены к чистому эталону Git SoT",
+    "severity": "info",
+    "timestamp": "2026-10-04T12:39:28.559961+00:00"
+  },
+  {
+    "type": "CHAOS",
+    "scenario": "reset_lab",
+    "target_hostnames": [
+      "*"
+    ],
+    "title": "Chaos: Сброс фабрики к Git SoT",
+    "description": "Устройства успешно сброшены к чистому эталону Git SoT",
+    "severity": "info",
+    "timestamp": "2026-10-04T12:39:31.671894+00:00"
+  }
+]

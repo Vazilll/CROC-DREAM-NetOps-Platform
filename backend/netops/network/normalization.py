@@ -64,6 +64,21 @@ DEFAULT_RULES: Mapping[Platform, NormalizationRules] = MappingProxyType(
             comment_prefixes=("#",),
             terminators=("return",),
         ),
+        Platform.JUNIPER_JUNOS: NormalizationRules(
+            indent_unit=4,
+            comment_prefixes=("#", "/*"),
+            terminators=(),
+        ),
+        Platform.ELTEX_MES: NormalizationRules(
+            indent_unit=1,
+            comment_prefixes=("!",),
+            terminators=("exit",),
+        ),
+        Platform.YADRO_KORNFE: NormalizationRules(
+            indent_unit=2,
+            comment_prefixes=("!", "#"),
+            terminators=(),
+        ),
     }
 )
 
@@ -90,10 +105,13 @@ class ConfigNormalizer:
         return cls(rules)
 
     def rules_for(self, platform: Platform) -> NormalizationRules:
-        return self._rules[platform]
+        return self._rules.get(
+            platform,
+            NormalizationRules(indent_unit=2, comment_prefixes=("!", "#"), terminators=()),
+        )
 
     def normalize(self, platform: Platform, text: str) -> str:
-        rules = self._rules[platform]
+        rules = self.rules_for(platform)
         entries = list(_filter_lines(text, rules))
         if not entries:
             return ""

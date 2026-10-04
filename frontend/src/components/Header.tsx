@@ -1,6 +1,7 @@
 import React from 'react';
-import { Network, Activity, ShieldCheck, UserCheck, Terminal, Layers } from 'lucide-react';
+import { Network, Presentation, Search, Sparkles, UserCheck } from 'lucide-react';
 import type { UserRole } from '../api';
+import { TABS } from './Sidebar';
 
 interface HeaderProps {
   activeTab: string;
@@ -8,6 +9,9 @@ interface HeaderProps {
   userRole: UserRole;
   setUserRole: (role: UserRole) => void;
   apiHealthy: boolean;
+  onOpenSearch: () => void;
+  onToggleCopilot: () => void;
+  copilotOpen: boolean;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,129 +20,84 @@ export const Header: React.FC<HeaderProps> = ({
   userRole,
   setUserRole,
   apiHealthy,
-}) => {
-  return (
-    <header className="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50 px-6 py-3.5">
-      <div className="max-w-7xl mx-auto flex items-center justify-between">
-        {/* Brand */}
-        <div className="flex items-center space-x-3.5">
-          <div className="h-10 w-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-indigo-500/20">
-            <Network className="h-5 w-5 text-white" />
-          </div>
-          <div>
-            <div className="flex items-center space-x-2">
-              <span className="font-bold text-lg tracking-tight text-white">CROC DREAM</span>
-              <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                NetOps Platform
-              </span>
-            </div>
-            <p className="text-xs text-slate-400">Heterogeneous CLOS Automation • Cisco & Arista</p>
-          </div>
-        </div>
-
-        {/* Navigation Tabs */}
-        <nav className="flex items-center space-x-1 bg-slate-950/60 p-1 rounded-xl border border-slate-800">
-          <button
-            onClick={() => setActiveTab('3d')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === '3d'
-                ? 'bg-gradient-to-r from-indigo-600 to-cyan-500 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <span className="text-cyan-400 font-bold">✨</span>
-            <span>3D Топология</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('devices')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === 'devices'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Устройства</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('jobs')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === 'jobs'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Activity className="w-3.5 h-3.5" />
-            <span>Пайплайны</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('diff')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === 'diff'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <Terminal className="w-3.5 h-3.5" />
-            <span>Monaco Diff & AI</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('drift')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === 'drift'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Контроль дрейфа</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('lab')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center space-x-2 ${
-              activeTab === 'lab'
-                ? 'bg-indigo-600 text-white shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-            }`}
-          >
-            <span className="text-amber-400 font-bold">🧪</span>
-            <span>Тестовый стенд</span>
-          </button>
-        </nav>
-
-        {/* Status & User Selector */}
-        <div className="flex items-center space-x-4">
-          {/* API Health */}
-          <div className="flex items-center space-x-1.5 text-xs text-slate-400">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                apiHealthy ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.6)]' : 'bg-rose-500 animate-pulse'
-              }`}
-            />
-            <span className="hidden sm:inline">{apiHealthy ? 'API Active' : 'API Offline'}</span>
-          </div>
-
-          {/* Role selector */}
-          <div className="flex items-center space-x-2 bg-slate-800/70 border border-slate-700/60 rounded-lg px-2.5 py-1">
-            <UserCheck className="w-3.5 h-3.5 text-indigo-400" />
-            <select
-              value={userRole}
-              onChange={(e) => setUserRole(e.target.value as UserRole)}
-              className="bg-transparent text-xs font-medium text-slate-200 focus:outline-none cursor-pointer"
-            >
-              <option value="admin" className="bg-slate-900 text-slate-200">
-                admin (Полный доступ)
-              </option>
-              <option value="operator" className="bg-slate-900 text-slate-200">
-                operator (Оператор деплоя)
-              </option>
-              <option value="viewer" className="bg-slate-900 text-slate-200">
-                viewer (Только чтение)
-              </option>
-            </select>
-          </div>
-        </div>
+  onOpenSearch,
+  onToggleCopilot,
+  copilotOpen,
+}) => (
+  <header className="border-b border-white/[0.06] bg-[#08090c]/90 backdrop-blur-xl sticky top-0 z-50 px-4 md:px-5 h-14 flex items-center gap-4">
+    <div className="flex items-center gap-2.5 lg:w-48 shrink-0">
+      <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center">
+        <Network className="h-4 w-4 text-white" />
       </div>
-    </header>
-  );
-};
+      <span className="text-sm font-semibold tracking-tight text-white whitespace-nowrap">NetOps Platform</span>
+    </div>
+
+    <button
+      onClick={onOpenSearch}
+      className="hidden sm:flex items-center gap-2 flex-1 max-w-md bg-white/[0.04] hover:bg-white/[0.07] border border-white/[0.06] rounded-md px-3 py-1.5 text-xs text-zinc-500 cursor-pointer"
+    >
+      <Search className="w-3.5 h-3.5" />
+      <span className="flex-1 text-left">Поиск устройств и разделов</span>
+      <kbd className="text-[10px] border border-white/[0.12] rounded px-1">Ctrl K</kbd>
+    </button>
+
+    <div className="flex items-center gap-3 ml-auto">
+      <button
+        onClick={() => setActiveTab('slides')}
+        className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
+          activeTab === 'slides'
+            ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30'
+            : 'text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]'
+        }`}
+        title="Слайды архитектурного проекта"
+      >
+        <Presentation className="w-3.5 h-3.5" />
+        <span>Архитектура</span>
+      </button>
+
+      <select
+        value={activeTab}
+        onChange={(e) => setActiveTab(e.target.value)}
+        className="lg:hidden bg-zinc-900 border border-white/[0.08] text-xs text-zinc-200 rounded-md px-2 py-1"
+      >
+        {TABS.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.label}
+          </option>
+        ))}
+        <option value="slides">Архитектура (слайды)</option>
+      </select>
+
+      <button
+        onClick={onToggleCopilot}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
+          copilotOpen ? 'bg-indigo-500 text-white' : 'border border-indigo-400/40 text-indigo-300 hover:bg-indigo-500/10'
+        }`}
+      >
+        <Sparkles className="w-3.5 h-3.5" /> Copilot
+      </button>
+
+      <div className="flex items-center gap-1.5 bg-white/[0.04] rounded-md px-2 py-1">
+        <UserCheck className="w-3 h-3 text-zinc-400" />
+        <select
+          value={userRole}
+          onChange={(e) => setUserRole(e.target.value as UserRole)}
+          className="bg-transparent text-[11px] font-medium text-zinc-200 focus:outline-none cursor-pointer"
+        >
+          <option value="admin" className="bg-[#08090c]">admin</option>
+          <option value="operator" className="bg-[#08090c]">operator</option>
+          <option value="viewer" className="bg-[#08090c]">viewer</option>
+        </select>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 pl-3 border-l border-white/[0.08]">
+        <span
+          className={`w-1.5 h-1.5 rounded-full ${
+            apiHealthy ? 'bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.8)]' : 'bg-rose-500 animate-pulse'
+          }`}
+        />
+        <span className="hidden sm:inline">{apiHealthy ? 'API' : 'API offline'}</span>
+      </div>
+    </div>
+  </header>
+);

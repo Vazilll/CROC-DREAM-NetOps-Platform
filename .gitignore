@@ -32,3 +32,6 @@ frontend/.cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Agent scratch / teamwork
+.agents/

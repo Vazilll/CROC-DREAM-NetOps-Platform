@@ -80,11 +80,10 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
-  # Сюда добавятся фронтенд (когда будет образ) и мониторинг, например:
-  # frontend:
-  #   build: ./frontend
-  #   ports: ["${FRONTEND_PORT:-5173}:80"]
-  #   depends_on: [api]
+  frontend:
+    build: ./frontend
+    ports: ["${FRONTEND_PORT:-5173}:80"]
+    depends_on: [api]
 
 volumes:
   postgres-data:

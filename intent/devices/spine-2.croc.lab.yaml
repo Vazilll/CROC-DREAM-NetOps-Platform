@@ -11,6 +11,14 @@ interfaces:
     description: Downlink to leaf-2
     ipv4_address: 10.0.2.2/31
     mtu: 9000
+  - name: Ethernet3
+    description: Downlink to leaf-3
+    ipv4_address: 10.0.3.2/31
+    mtu: 9000
+  - name: Ethernet4
+    description: Downlink to leaf-4
+    ipv4_address: 10.0.4.2/31
+    mtu: 9000
 bgp:
   asn: 65000
   router_id: 10.255.0.2
@@ -22,4 +30,12 @@ bgp:
     - peer_ip: 10.0.2.3
       remote_asn: 65102
       description: leaf-2
+      announced_prefixes: ["10.255.0.2/32"]
+    - peer_ip: 10.0.3.3
+      remote_asn: 65103
+      description: leaf-3
+      announced_prefixes: ["10.255.0.2/32"]
+    - peer_ip: 10.0.4.3
+      remote_asn: 65104
+      description: leaf-4
       announced_prefixes: ["10.255.0.2/32"]

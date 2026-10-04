@@ -34,11 +34,21 @@ class ScrapliNetworkDriver:
 
     def _get_connection(self, target: DeviceTarget):
         try:
-            from scrapli.driver.core import EOSDriver, IOSXEDriver
+            from scrapli.driver.core import EOSDriver, IOSXEDriver  # noqa: PLC0415
         except ImportError:
             raise RuntimeError("Scrapli is not installed in the environment.") from None
 
-        driver_cls = IOSXEDriver if target.platform == Platform.CISCO_IOSXE else EOSDriver
+        if target.platform == Platform.CISCO_IOSXE:
+            driver_cls = IOSXEDriver
+        elif target.platform == Platform.HUAWEI_VRP:
+            try:
+                from scrapli_community.huawei.vrp.driver import HuaweiVRPDriver  # noqa: PLC0415
+                driver_cls = HuaweiVRPDriver
+            except ImportError:
+                driver_cls = EOSDriver
+        else:
+            driver_cls = EOSDriver
+
         creds = target.credentials
         return driver_cls(
             host=target.host,
@@ -68,7 +78,7 @@ class ScrapliNetworkDriver:
         return results
 
     def _fetch_single(self, target: DeviceTarget) -> str:
-        cmd = "show running-config"
+        cmd = "display current-configuration" if target.platform == Platform.HUAWEI_VRP else "show running-config"
         with self._get_connection(target) as conn:
             response = conn.send_command(cmd)
             if response.failed:
@@ -76,7 +86,11 @@ class ScrapliNetworkDriver:
             return response.result
 
     def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None:
-        lines = [line.strip() for line in plan.remediation.splitlines() if line.strip() and not line.startswith("!")]
+        lines = [
+            line.strip()
+            for line in plan.remediation.splitlines()
+            if line.strip() and not line.startswith("!")
+        ]
         if not lines:
             return
 
@@ -89,6 +103,9 @@ class ScrapliNetworkDriver:
                 conn.send_command(f"configure session {session_name}")
                 conn.send_configs(lines)
                 conn.send_command(f"commit timer {confirm_timeout}")
+            elif target.platform == Platform.HUAWEI_VRP:
+                conn.send_configs(lines)
+                conn.send_command("commit")
 
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:
@@ -96,6 +113,8 @@ class ScrapliNetworkDriver:
                 conn.send_command("commit")
             elif target.platform == Platform.ARISTA_EOS:
                 conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command("commit")
+            elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_command("commit")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
@@ -105,50 +124,90 @@ class ScrapliNetworkDriver:
             elif target.platform == Platform.ARISTA_EOS:
                 conn.send_command("configure session NETOPS_DEPLOY")
                 conn.send_command("abort")
+            elif target.platform == Platform.HUAWEI_VRP:
+                conn.send_command("quit")
 
             rollback_lines = [
-                line.strip() for line in plan.rollback.splitlines() if line.strip() and not line.startswith("!")
+                line.strip()
+                for line in plan.rollback.splitlines()
+                if line.strip() and not line.startswith("!")
             ]
             if rollback_lines:
                 conn.send_configs(rollback_lines)
 
-    def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
+    def snapshot(
+        self, target: DeviceTarget, expected: HealthExpectations | None
+    ) -> HealthSnapshot:
         bgp_sessions: dict[str, BgpSessionState] = {}
         interfaces: dict[str, InterfaceState] = {}
         ping_losses: dict[str, float] = {}
 
         with self._get_connection(target) as conn:
-            bgp_out = conn.send_command("show ip bgp summary").result
-            for line in bgp_out.splitlines():
-                match = re.search(r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(\d+|Active|Idle|Connect)$", line.strip())
-                if match:
-                    peer_ip, state_or_pfx = match.groups()
-                    if state_or_pfx.isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(state_or_pfx))
-                    else:
-                        bgp_sessions[peer_ip] = BgpSessionState(state_or_pfx, prefixes_accepted=0)
+            if target.platform == Platform.HUAWEI_VRP:
+                bgp_out = conn.send_command("display bgp peer").result
+                for line in bgp_out.splitlines():
+                    match = re.search(
+                        r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(Established|Active|Idle|Connect|\d+)",
+                        line.strip(),
+                        re.IGNORECASE,
+                    )
+                    if match:
+                        peer_ip, state_or_pfx = match.groups()
+                        is_est = state_or_pfx.isdigit() or state_or_pfx.lower() == "established"
+                        prefixes = int(state_or_pfx) if state_or_pfx.isdigit() else 1
+                        bgp_sessions[peer_ip] = BgpSessionState(
+                            "Established" if is_est else state_or_pfx,
+                            prefixes_accepted=prefixes if is_est else 0,
+                        )
 
-            int_out = conn.send_command("show ip interface brief").result
-            for line in int_out.splitlines():
-                parts = line.split()
-                if target.platform == Platform.CISCO_IOSXE and len(parts) >= 6:
-                    if parts[0].startswith("Gigabit") or parts[0].startswith("Loop"):
-                        interfaces[parts[0]] = InterfaceState(status=parts[4], protocol=parts[5])
-                elif target.platform == Platform.ARISTA_EOS and len(parts) >= 4:
-                    if parts[0].startswith("Ethernet") or parts[0].startswith("Loop"):
+                int_out = conn.send_command("display ip interface brief").result
+                for line in int_out.splitlines():
+                    parts = line.split()
+                    if len(parts) >= 3 and parts[0].startswith(("GE", "Loop", "Gigabit")):
+                        status = "up" if "up" in parts[1].lower() else "down"
+                        proto = "up" if "up" in parts[2].lower() else "down"
+                        interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
+            else:
+                bgp_out = conn.send_command("show ip bgp summary").result
+                for line in bgp_out.splitlines():
+                    match = re.search(
+                        r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(\d+|Active|Idle|Connect)$",
+                        line.strip(),
+                    )
+                    if match:
+                        peer_ip, state_or_pfx = match.groups()
+                        if state_or_pfx.isdigit():
+                            bgp_sessions[peer_ip] = BgpSessionState(
+                                "Established", prefixes_accepted=int(state_or_pfx)
+                            )
+                        else:
+                            bgp_sessions[peer_ip] = BgpSessionState(state_or_pfx, prefixes_accepted=0)
+
+                int_out = conn.send_command("show ip interface brief").result
+                for line in int_out.splitlines():
+                    parts = line.split()
+                    if target.platform == Platform.CISCO_IOSXE and len(parts) >= 6:
+                        if parts[0].startswith(("Gigabit", "Loop")):
+                            interfaces[parts[0]] = InterfaceState(status=parts[4], protocol=parts[5])
+                    elif (
+                        target.platform == Platform.ARISTA_EOS
+                        and len(parts) >= 4
+                        and parts[0].startswith(("Ethernet", "Loop"))
+                    ):
                         status = "up" if "up" in parts[1].lower() else "down"
                         proto = "up" if "up" in parts[2].lower() else "down"
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
 
             if expected:
                 for peer in expected.bgp_peers:
-                    ping_cmd = (
-                        f"ping {peer} repeat 5"
-                        if target.platform == Platform.CISCO_IOSXE
-                        else f"ping {peer} count 5"
-                    )
+                    if target.platform == Platform.CISCO_IOSXE:
+                        ping_cmd = f"ping {peer} repeat 5"
+                    elif target.platform == Platform.HUAWEI_VRP:
+                        ping_cmd = f"ping -c 5 {peer}"
+                    else:
+                        ping_cmd = f"ping {peer} count 5"
                     ping_out = conn.send_command(ping_cmd).result
-                    rate_match = re.search(r"Success rate is (\d+) percent", ping_out)
+                    rate_match = re.search(r"(?:Success rate is |packet loss, |transmitted, \d+ received, )(\d+)%", ping_out)
                     ping_losses[peer] = (100.0 - float(rate_match.group(1))) if rate_match else 0.0
 
         return HealthSnapshot(

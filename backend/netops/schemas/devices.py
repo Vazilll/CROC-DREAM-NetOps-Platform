@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from ipaddress import IPv4Address
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +43,9 @@ class DeviceRead(BaseModel):
     role: DeviceRole
     auth_profile: str
     status: DeviceStatus
+    oper_status: Literal["UP", "DOWN", "DEGRADED"] = "UP"
+    sparkline: list[float] = Field(default_factory=list)
+    state_timeline: list[str] = Field(default_factory=list)
     last_checked_at: datetime | None
     created_at: datetime
     updated_at: datetime

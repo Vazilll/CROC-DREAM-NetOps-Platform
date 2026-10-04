@@ -1,7 +1,7 @@
 // API client for CROC DREAM NetOps Platform
 
-export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp';
-export type DeviceRole = 'spine' | 'leaf' | 'border';
+export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp' | 'juniper_junos' | 'eltex_mes' | 'yadro_kornfe';
+export type DeviceRole = 'spine' | 'leaf' | 'border' | 'border_firewall';
 export type DeviceStatus = 'UNKNOWN' | 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE' | 'IN_PROGRESS';
 export type DriftStatus = 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE';
 export type JobType = 'DRY_RUN' | 'DEPLOY' | 'DRIFT_SCAN' | 'DRIFT_REMEDIATE';
@@ -9,6 +9,8 @@ export type JobStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 export type TargetStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ROLLED_BACK';
 export type LogLevel = 'INFO' | 'WARNING' | 'ERROR';
 export type UserRole = 'viewer' | 'operator' | 'admin';
+
+export type OperStatus = 'UP' | 'DOWN' | 'DEGRADED';
 
 export interface Device {
   id: number;
@@ -19,6 +21,9 @@ export interface Device {
   role: DeviceRole;
   auth_profile: string;
   status: DeviceStatus;
+  oper_status?: OperStatus;
+  sparkline?: number[];
+  state_timeline?: string[];
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
@@ -147,6 +152,48 @@ export interface DriftReportItem {
   error: string | null;
 }
 
+export interface ForecastEvent {
+  type: 'DEPLOY' | 'DRIFT_DETECTED' | 'REMEDIATE' | 'CHAOS';
+  timestamp: string;
+  title: string;
+  description: string;
+  severity: 'info' | 'warning' | 'critical' | 'success';
+  relative_index?: number;
+}
+
+export interface Forecast {
+  device_id: number;
+  hostname: string;
+  metric: string;
+  label: string;
+  unit: string;
+  threshold: number;
+  simulated: boolean;
+  step_seconds: number;
+  end_ts?: string;
+  history: number[];
+  median: number[];
+  lower: number[];
+  upper: number[];
+  provider: string;
+  breach_in_minutes: number | null;
+  events?: ForecastEvent[];
+}
+
+export interface ForecastAlert {
+  device_id: number;
+  hostname: string;
+  metric: string;
+  label: string;
+  threshold: number;
+  breach_in_minutes: number;
+}
+
+export interface CopilotReply {
+  answer: string;
+  provider: string;
+}
+
 const API_BASE = '/api/v1';
 
 export class NetOpsApiClient {
@@ -231,9 +278,10 @@ export class NetOpsApiClient {
 
   // Drift
   async scanDrift(deviceIds?: number[]): Promise<{ job_id: string; status: JobStatus }> {
+    const validIds = deviceIds && deviceIds.length > 0 ? deviceIds : null;
     return this.request('/drift/scan', {
       method: 'POST',
-      body: JSON.stringify({ device_ids: deviceIds || null }),
+      body: JSON.stringify({ device_ids: validIds }),
     });
   }
 
@@ -266,6 +314,21 @@ export class NetOpsApiClient {
     const query = hostname ? `?hostname=${encodeURIComponent(hostname)}` : '';
     return this.request<RiskExplanation>(`/jobs/${jobId}/explain${query}`, {
       method: 'POST',
+    });
+  }
+
+  async getForecast(deviceId: number, metric: string, horizon = 72): Promise<Forecast> {
+    return this.request<Forecast>(`/devices/${deviceId}/forecast?metric=${metric}&horizon=${horizon}`);
+  }
+
+  async getForecastAlerts(): Promise<ForecastAlert[]> {
+    return this.request<ForecastAlert[]>('/forecast/alerts');
+  }
+
+  async askCopilot(message: string, deviceId?: number): Promise<CopilotReply> {
+    return this.request<CopilotReply>('/copilot/chat', {
+      method: 'POST',
+      body: JSON.stringify({ message, device_id: deviceId ?? null }),
     });
   }
 }

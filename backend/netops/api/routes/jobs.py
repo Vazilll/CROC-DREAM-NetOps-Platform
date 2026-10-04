@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from netops.api.deps import ContainerDep, JobServiceDep, Operator, Viewer
 from netops.enums import JobStatus, JobType
 from netops.errors import NotFoundError
 from netops.models import Job, JobLog
-from netops.services.llm import RiskExplanation, explain_change_with_llm
 from netops.schemas.jobs import (
     DeployRequest,
     DeviceDiffRead,
@@ -20,6 +22,7 @@ from netops.schemas.jobs import (
     JobRead,
     JobSummary,
 )
+from netops.services.llm import RiskExplanation, explain_change_with_llm
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -85,6 +88,61 @@ def get_job_logs(
 
 
 @router.get(
+    "/{job_id}/stream",
+    summary="Live Server-Sent Events (SSE) stream for job progress and terminal logs",
+)
+async def stream_job_logs(
+    job_id: uuid.UUID,
+    service: JobServiceDep,
+    request: Request,
+    _: Viewer,
+) -> StreamingResponse:
+    async def event_generator():
+        last_id = 0
+        while True:
+            if await request.is_disconnected():
+                break
+
+            job = service.get(job_id)
+            new_logs = list(service.logs(job_id, after_id=last_id, limit=200))
+            for log in new_logs:
+                last_id = max(last_id, log.id)
+                data = {
+                    "id": log.id,
+                    "step": log.step,
+                    "hostname": log.hostname,
+                    "level": log.level.value if hasattr(log.level, "value") else str(log.level),
+                    "message": log.message,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "progress": job.progress,
+                    "status": job.status.value,
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+
+            if job.status in {JobStatus.SUCCESS, JobStatus.FAILED}:
+                final_data = {
+                    "event": "done",
+                    "status": job.status.value,
+                    "progress": job.progress,
+                    "error": job.error,
+                }
+                yield f"event: done\ndata: {json.dumps(final_data)}\n\n"
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get(
     "/{job_id}/diff",
     response_model=JobDiffRead,
     summary="Текущий и целевой конфиг, патчи наката и отката",
@@ -134,12 +192,19 @@ async def explain_job_diff(
         if not target:
             raise NotFoundError(f"Target device {hostname!r} not found in job {job_id}")
     else:
-        target = next((t for t in job.targets if t.remediation_config), job.targets[0] if job.targets else None)
+        target = next(
+            (t for t in job.targets if t.remediation_config),
+            job.targets[0] if job.targets else None,
+        )
 
     if not target:
         raise NotFoundError(f"No targets found in job {job_id}")
 
-    platform_str = target.device.platform.value if (target.device and hasattr(target.device, "platform")) else "cisco_iosxe"
+    platform_str = (
+        target.device.platform.value
+        if (target.device and hasattr(target.device, "platform"))
+        else "cisco_iosxe"
+    )
 
     return await explain_change_with_llm(
         settings=container.settings,
