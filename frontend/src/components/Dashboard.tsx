@@ -11,10 +11,8 @@ import {
   Clock,
   ShieldCheck,
   Plus,
-  Download,
   ArrowRight,
   Presentation,
-  RefreshCw,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../api';
@@ -77,7 +75,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
   const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     if (devices.length > 0) {
