@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     intent_repo_path: Path = Path("intent")
+    inventory_file: str = "inventory.yaml"
     templates_path: Path = Path("templates")
     normalization_rules_path: Path | None = None
 

@@ -67,7 +67,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
             health_probe = driver
 
     return Toolchain(
-        intents=IntentRepository(settings.intent_repo_path),
+        intents=IntentRepository(settings.intent_repo_path, inventory_file=settings.inventory_file),
         renderer=JinjaConfigRenderer(settings.templates_path),
         normalizer=ConfigNormalizer.from_file(settings.normalization_rules_path),
         diff_engine=HierConfigDiffEngine(),

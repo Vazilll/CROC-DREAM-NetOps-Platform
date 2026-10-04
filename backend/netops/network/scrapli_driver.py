@@ -25,8 +25,115 @@ from netops.network.base import (
 logger = logging.getLogger(__name__)
 
 
+class _ScrapliResponse:
+    """Mock Scrapli response wrapper for Paramiko operations."""
+
+    def __init__(self, result: str, failed: bool = False) -> None:
+        self.result = result
+        self.failed = failed
+
+
+class _ParamikoConnAdapter:
+    """Transparent SSH adapter for environments where native Scrapli transport is unavailable."""
+
+    def __init__(self, target: DeviceTarget, timeout: int = 15) -> None:
+        self.target = target
+        self.timeout = timeout
+        self.client = None
+        self.shell = None
+
+    def __enter__(self):
+        import time  # noqa: PLC0415
+        import paramiko  # noqa: PLC0415
+
+        self.client = paramiko.SSHClient()
+        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self.client.connect(
+            self.target.host,
+            port=self.target.port,
+            username=self.target.credentials.username,
+            password=getattr(self.target.credentials, "password", ""),
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=self.timeout,
+        )
+        self.shell = self.client.invoke_shell()
+        time.sleep(0.5)
+        if self.shell.recv_ready():
+            _ = self.shell.recv(8192)
+
+        if self.target.platform == Platform.ARISTA_EOS:
+            self.shell.send("enable\nterminal length 0\n")
+        elif self.target.platform == Platform.CISCO_IOSXE:
+            self.shell.send("terminal length 0\n")
+        elif self.target.platform == Platform.HUAWEI_VRP:
+            self.shell.send("screen-length 0 temporary\n")
+
+        time.sleep(0.5)
+        if self.shell.recv_ready():
+            _ = self.shell.recv(8192)
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        if self.client:
+            self.client.close()
+
+    def send_command(self, cmd: str) -> _ScrapliResponse:
+        import time  # noqa: PLC0415
+
+        if self.shell is None:
+            raise RuntimeError("SSH shell session is not initialized")
+        self.shell.send(f"{cmd}\n")
+        time.sleep(0.8)
+        output = ""
+        deadline = time.time() + self.timeout
+        while time.time() < deadline:
+            if self.shell.recv_ready():
+                output += self.shell.recv(8192).decode("utf-8", errors="ignore")
+                time.sleep(0.1)
+            elif output:
+                time.sleep(0.2)
+                if not self.shell.recv_ready():
+                    break
+            else:
+                time.sleep(0.2)
+        return _ScrapliResponse(output)
+
+    def send_configs(self, lines: Sequence[str]) -> _ScrapliResponse:
+        import time  # noqa: PLC0415
+
+        if self.shell is None:
+            raise RuntimeError("SSH shell session is not initialized")
+
+        if self.target.platform == Platform.HUAWEI_VRP:
+            self.shell.send("system-view\n")
+            time.sleep(0.3)
+            for line in lines:
+                self.shell.send(f"{line}\n")
+                time.sleep(0.1)
+            self.shell.send("return\n")
+        elif self.target.platform == Platform.ARISTA_EOS:
+            for line in lines:
+                self.shell.send(f"{line}\n")
+                time.sleep(0.1)
+        else:
+            self.shell.send("configure terminal\n")
+            time.sleep(0.3)
+            for line in lines:
+                self.shell.send(f"{line}\n")
+                time.sleep(0.1)
+            self.shell.send("end\n")
+
+        time.sleep(1.0)
+        output = ""
+        while self.shell.recv_ready():
+            output += self.shell.recv(8192).decode("utf-8", errors="ignore")
+            time.sleep(0.1)
+        return _ScrapliResponse(output)
+
+
 class ScrapliNetworkDriver:
-    """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli."""
+    """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
 
     def __init__(self, max_workers: int = 4, timeout_socket: int = 15) -> None:
         self.max_workers = max_workers
@@ -35,30 +142,36 @@ class ScrapliNetworkDriver:
     def _get_connection(self, target: DeviceTarget):
         try:
             from scrapli.driver.core import EOSDriver, IOSXEDriver  # noqa: PLC0415
-        except ImportError:
-            raise RuntimeError("Scrapli is not installed in the environment.") from None
 
-        if target.platform == Platform.CISCO_IOSXE:
-            driver_cls = IOSXEDriver
-        elif target.platform == Platform.HUAWEI_VRP:
-            try:
-                from scrapli_community.huawei.vrp.driver import HuaweiVRPDriver  # noqa: PLC0415
-                driver_cls = HuaweiVRPDriver
-            except ImportError:
+            if target.platform == Platform.CISCO_IOSXE:
+                driver_cls = IOSXEDriver
+            elif target.platform == Platform.HUAWEI_VRP:
+                try:
+                    from scrapli_community.huawei.vrp.driver import HuaweiVRPDriver  # noqa: PLC0415
+
+                    driver_cls = HuaweiVRPDriver
+                except ImportError:
+                    driver_cls = EOSDriver
+            else:
                 driver_cls = EOSDriver
-        else:
-            driver_cls = EOSDriver
 
-        creds = target.credentials
-        return driver_cls(
-            host=target.host,
-            port=target.port,
-            auth_username=creds.username,
-            auth_password=getattr(creds, "password", ""),
-            auth_strict_key=False,
-            transport="system",
-            timeout_socket=self.timeout_socket,
-        )
+            creds = target.credentials
+            return driver_cls(
+                host=target.host,
+                port=target.port,
+                auth_username=creds.username,
+                auth_password=getattr(creds, "password", ""),
+                auth_strict_key=False,
+                transport="system",
+                timeout_socket=self.timeout_socket,
+            )
+        except Exception as exc:
+            logger.debug(
+                "Scrapli native driver unavailable (%s), using Paramiko SSH adapter for %s",
+                exc,
+                target.hostname,
+            )
+            return _ParamikoConnAdapter(target, timeout=self.timeout_socket)
 
     def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
         results: dict[str, FetchResult] = {}

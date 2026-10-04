@@ -33,12 +33,17 @@ class IntentSnapshot:
 
 
 class IntentRepository:
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, inventory_file: str = INVENTORY_FILE) -> None:
         self._root = root
+        self._inventory_file = inventory_file
 
     @property
     def root(self) -> Path:
         return self._root
+
+    @property
+    def inventory_file(self) -> str:
+        return self._inventory_file
 
     def load(self) -> IntentSnapshot:
         inventory, intents, issues = self._collect()
@@ -118,9 +123,9 @@ class IntentRepository:
         return inventory, intents, issues
 
     def _parse_inventory(self, issues: list[IntentIssue]) -> Inventory | None:
-        path = self._root / INVENTORY_FILE
+        path = self._root / self._inventory_file
         if not path.is_file():
-            issues.append(IntentIssue(INVENTORY_FILE, "", "Inventory file is missing"))
+            issues.append(IntentIssue(self._inventory_file, "", "Inventory file is missing"))
             return None
         return self._parse_file(path, Inventory, issues)
 
