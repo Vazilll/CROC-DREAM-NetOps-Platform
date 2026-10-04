@@ -1,27 +1,15 @@
 [
   {
     "type": "CHAOS",
-    "scenario": "acl_drift",
+    "scenario": "ai_blackhole",
     "target_hostnames": [
-      "leaf-1.croc.lab",
-      "leaf-1"
+      "leaf-3.croc.lab",
+      "leaf-3"
     ],
-    "title": "Chaos: Внедрение несанкционированного ACL",
-    "description": "Внедрен несанкционированный ACL в leaf-1.croc.lab (Дрейф создан!)",
-    "severity": "warning",
-    "timestamp": "2026-10-04T18:30:13.305427+00:00"
-  },
-  {
-    "type": "CHAOS",
-    "scenario": "acl_drift",
-    "target_hostnames": [
-      "leaf-1.croc.lab",
-      "leaf-1"
-    ],
-    "title": "Chaos: Внедрение несанкционированного ACL",
-    "description": "Внедрен несанкционированный ACL в leaf-1.croc.lab (Дрейф создан!)",
-    "severity": "warning",
-    "timestamp": "2026-10-04T18:31:51.047304+00:00"
+    "title": "Chaos: Моделирование 'тихой аварии' (Blackhole / 0 трафика)",
+    "description": "Имитация падения трафика при статусе портов up/up для проверки TimesFM 3.0",
+    "severity": "critical",
+    "timestamp": "2026-10-04T20:27:44.406166+00:00"
   },
   {
     "type": "CHAOS",
@@ -33,7 +21,7 @@
     "title": "Chaos: Отключение интерфейса GigabitEthernet3",
     "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
     "severity": "critical",
-    "timestamp": "2026-10-04T18:31:52.335019+00:00"
+    "timestamp": "2026-10-04T20:27:53.632099+00:00"
   },
   {
     "type": "CHAOS",
@@ -45,7 +33,7 @@
     "title": "Chaos: Отключение интерфейса GigabitEthernet3",
     "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
     "severity": "critical",
-    "timestamp": "2026-10-04T18:31:53.710291+00:00"
+    "timestamp": "2026-10-04T20:27:54.892220+00:00"
   },
   {
     "type": "CHAOS",
@@ -57,7 +45,7 @@
     "title": "Chaos: Отключение интерфейса GigabitEthernet3",
     "description": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
     "severity": "critical",
-    "timestamp": "2026-10-04T18:31:56.000910+00:00"
+    "timestamp": "2026-10-04T20:27:55.788136+00:00"
   },
   {
     "type": "CHAOS",
@@ -68,6 +56,6 @@
     "title": "Chaos: Сброс фабрики к Git SoT",
     "description": "Устройства успешно сброшены к чистому эталону Git SoT",
     "severity": "info",
-    "timestamp": "2026-10-04T18:31:58.237822+00:00"
+    "timestamp": "2026-10-04T20:27:57.343502+00:00"
   }
 ]
