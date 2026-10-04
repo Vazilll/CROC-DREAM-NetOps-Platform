@@ -1,14 +1,14 @@
 // API client for CROC DREAM NetOps Platform
 
-export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp' | 'juniper_junos' | 'eltex_mes' | 'yadro_kornfe';
-export type DeviceRole = 'spine' | 'leaf' | 'border' | 'border_firewall';
+export type Platform = 'cisco_iosxe' | 'arista_eos' | 'huawei_vrp' | 'juniper_junos' | 'eltex_mes' | 'yadro_kornfe' | 'linux_server';
+export type DeviceRole = 'spine' | 'leaf' | 'border' | 'border_firewall' | 'server';
 export type DeviceStatus = 'UNKNOWN' | 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE' | 'IN_PROGRESS';
 export type DriftStatus = 'IN_SYNC' | 'DRIFT_DETECTED' | 'UNREACHABLE';
 export type JobType = 'DRY_RUN' | 'DEPLOY' | 'DRIFT_SCAN' | 'DRIFT_REMEDIATE';
 export type JobStatus = 'PENDING' | 'RUNNING' | 'SUCCESS' | 'FAILED';
 export type TargetStatus = 'PENDING' | 'SUCCESS' | 'FAILED' | 'SKIPPED' | 'ROLLED_BACK';
 export type LogLevel = 'INFO' | 'WARNING' | 'ERROR';
-export type UserRole = 'viewer' | 'operator' | 'admin';
+export type UserRole = 'viewer' | 'operator' | 'admin' | 'owner';
 
 export type OperStatus = 'UP' | 'DOWN' | 'DEGRADED';
 
@@ -21,12 +21,43 @@ export interface Device {
   role: DeviceRole;
   auth_profile: string;
   status: DeviceStatus;
+  management_mode?: 'MONITORING_ONLY' | 'MANAGED';
+  proxy_jump?: string | null;
+  hardware_specs?: string | null;
   oper_status?: OperStatus;
   sparkline?: number[];
   state_timeline?: string[];
   last_checked_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DeviceProbeRequest {
+  management_ip: string;
+  management_port?: number;
+  username?: string;
+  password?: string;
+  proxy_jump?: string;
+}
+
+export interface DeviceProbeResult {
+  reachable: boolean;
+  detected_platform: Platform;
+  detected_role: DeviceRole;
+  hostname: string;
+  os_version?: string;
+  cpu_cores?: number;
+  ram_gb?: number;
+  disk_gb?: number;
+  interfaces?: string[];
+  lldp_neighbors?: Array<{ local_port: string; remote_chassis: string; remote_port: string }>;
+  message: string;
+}
+
+export interface DeviceEmergencyAction {
+  action: 'rollback_last_commit' | 'reset_bgp_sessions' | 'restart_services' | 'reboot';
+  force?: boolean;
+  reason?: string;
 }
 
 export interface RiskExplanation {
@@ -261,6 +292,39 @@ export class NetOpsApiClient {
     return this.request<DeviceDetail>(`/devices/${id}`);
   }
 
+  async probeDevice(data: DeviceProbeRequest): Promise<DeviceProbeResult> {
+    return this.request<DeviceProbeResult>('/devices/probe', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async createDevice(data: Partial<Device> & { auth_profile?: string }): Promise<Device> {
+    return this.request<Device>('/devices', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async promoteDevice(id: number): Promise<Device> {
+    return this.request<Device>(`/devices/${id}/promote`, {
+      method: 'POST',
+    });
+  }
+
+  async deviceEmergencyAction(id: number, data: DeviceEmergencyAction): Promise<{ status: string; message: string }> {
+    return this.request<{ status: string; message: string }>(`/devices/${id}/emergency-action`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteDevice(id: number): Promise<void> {
+    return this.request<void>(`/devices/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   async syncInventory(): Promise<{ created: string[]; updated: string[]; unchanged: string[] }> {
     return this.request('/inventory/sync', { method: 'POST' });
   }
@@ -430,18 +494,26 @@ export class NetOpsApiClient {
   }
 
   // Persona / Role helper
-  getRole(): 'operator' | 'admin' {
-    return localStorage.getItem('netops_user_role') === 'admin' ? 'admin' : 'operator';
+  getRole(): UserRole {
+    return (localStorage.getItem('netops_user_role') as UserRole) || 'operator';
   }
 
-  setRole(role: 'operator' | 'admin') {
+  setRole(role: UserRole) {
     localStorage.setItem('netops_user_role', role);
-    this.setToken(role === 'admin' ? 'dev-admin-token' : 'dev-operator-token');
+    const tokenMap: Record<UserRole, string> = {
+      owner: 'dev-owner-token',
+      admin: 'dev-admin-token',
+      operator: 'dev-operator-token',
+      viewer: 'dev-viewer-token',
+    };
+    this.setToken(tokenMap[role] || 'dev-operator-token');
   }
 }
 
 export const api = new NetOpsApiClient(
-  (typeof window !== 'undefined' && localStorage.getItem('netops_user_role') === 'admin')
+  (typeof window !== 'undefined' && localStorage.getItem('netops_user_role') === 'owner')
+    ? 'dev-owner-token'
+    : (typeof window !== 'undefined' && localStorage.getItem('netops_user_role') === 'admin')
     ? 'dev-admin-token'
     : 'dev-operator-token'
 );

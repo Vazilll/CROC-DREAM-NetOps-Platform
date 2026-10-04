@@ -44,6 +44,7 @@ export function App() {
   // Sync token whenever role changes
   useEffect(() => {
     const tokenMap: Record<UserRole, string> = {
+      owner: 'dev-owner-token',
       admin: 'dev-admin-token',
       operator: 'dev-operator-token',
       viewer: 'dev-viewer-token',
@@ -277,6 +278,7 @@ export function App() {
           {activeTab === 'device' && deviceId !== null && (
             <DevicePage
               deviceId={deviceId}
+              userRole={userRole}
               onBack={() => setActiveTab('devices')}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}
@@ -297,6 +299,7 @@ export function App() {
             <DeviceList
               devices={devices}
               loading={loading}
+              userRole={userRole}
               onRefresh={refreshAll}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}

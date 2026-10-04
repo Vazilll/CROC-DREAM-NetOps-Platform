@@ -21,6 +21,7 @@ const VENDOR_BADGE: Record<string, { bg: string; stroke: string; text: string; l
   arista_eos: { bg: 'rgba(99, 102, 241, 0.22)', stroke: 'rgba(129, 140, 248, 0.45)', text: '#c7d2fe', label: 'EOS' },
   cisco_iosxe: { bg: 'rgba(14, 165, 233, 0.22)', stroke: 'rgba(56, 189, 248, 0.45)', text: '#bae6fd', label: 'IOS-XE' },
   huawei_vrp: { bg: 'rgba(244, 63, 94, 0.22)', stroke: 'rgba(251, 113, 133, 0.45)', text: '#fecdd3', label: 'VRP' },
+  linux_server: { bg: 'rgba(234, 179, 8, 0.22)', stroke: 'rgba(250, 204, 21, 0.45)', text: '#fef08a', label: 'LINUX' },
 };
 
 
@@ -58,32 +59,34 @@ export const TopologyMap: React.FC<Props> = ({
   }, []);
 
   const hasBorder = devices.some((d) => ['border', 'border_firewall'].includes(d.role));
-  const activeLayers = useMemo(() => (
-    hasBorder
-      ? [
-          { roles: ['border', 'border_firewall'], y: 24, label: 'Border' },
-          { roles: ['spine'], y: 130, label: 'Spine' },
-          { roles: ['leaf'], y: 236, label: 'Leaf' },
-        ]
-      : [
-          { roles: ['spine'], y: 55, label: 'Spine' },
-          { roles: ['leaf'], y: 215, label: 'Leaf' },
-        ]
-  ), [hasBorder]);
+  const hasServer = devices.some((d) => d.role === 'server' || d.platform === 'linux_server');
+
+  const activeLayers = useMemo(() => {
+    const layers = [];
+    if (hasBorder) layers.push({ roles: ['border', 'border_firewall'], y: 24, label: 'Border' });
+    layers.push({ roles: ['spine'], y: hasBorder ? 110 : (hasServer ? 42 : 55), label: 'Spine' });
+    layers.push({ roles: ['leaf'], y: hasBorder ? 190 : (hasServer ? 135 : 215), label: 'Leaf' });
+    if (hasServer) layers.push({ roles: ['server'], y: 236, label: 'Compute / Servers' });
+    return layers;
+  }, [hasBorder, hasServer]);
 
   const { nodes, links } = useMemo(() => {
     const pos = new Map<number, { x: number; y: number }>();
-    const byLayer = activeLayers.map((layer) => devices.filter((d) => layer.roles.includes(d.role)));
+    const byLayer = activeLayers.map((layer) =>
+      devices.filter((d) => layer.roles.includes(d.role) || (layer.roles.includes('server') && d.platform === 'linux_server'))
+    );
     byLayer.forEach((list, li) =>
       list.forEach((d, i) => pos.set(d.id, { x: ((i + 1) * W) / (list.length + 1), y: activeLayers[li].y }))
     );
     const spine = devices.filter((d) => d.role === 'spine');
     const leaf = devices.filter((d) => d.role === 'leaf');
     const border = devices.filter((d) => ['border', 'border_firewall'].includes(d.role));
+    const server = devices.filter((d) => d.role === 'server' || d.platform === 'linux_server');
 
     const pairs: [Device, Device][] = [
       ...border.flatMap((b) => spine.map((s): [Device, Device] => [b, s])),
       ...spine.flatMap((s) => leaf.map((l): [Device, Device] => [s, l])),
+      ...server.flatMap((srv) => leaf.slice(0, 2).map((l): [Device, Device] => [l, srv])),
     ];
     return {
       nodes: devices.filter((d) => pos.has(d.id)).map((d) => ({ d, ...pos.get(d.id)! })),
@@ -122,7 +125,19 @@ export const TopologyMap: React.FC<Props> = ({
     }
   };
 
-  if (!devices.length) return <div className="py-12 text-center text-xs text-zinc-500">Нет устройств для карты</div>;
+  if (!devices.length) {
+    return (
+      <div className="flex flex-col items-center justify-center p-12 text-center rounded-xl border border-dashed border-white/[0.08] bg-[#0c0d12]/60">
+        <div className="w-12 h-12 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-3 shadow-[0_0_15px_rgba(99,102,241,0.2)]">
+          <Network className="w-6 h-6" />
+        </div>
+        <h3 className="text-sm font-semibold text-white">Топология пуста: нет подключенных устройств</h3>
+        <p className="text-xs text-zinc-400 max-w-md mt-1">
+          Платформа ожидает добавления оборудования. Подключите сетевой узел или сервер (с автопроверкой по SSH), чтобы динамически построить граф фабрики.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="relative">

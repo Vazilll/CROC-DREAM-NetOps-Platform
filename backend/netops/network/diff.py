@@ -17,6 +17,7 @@ HIER_CONFIG_PLATFORMS: Mapping[Platform, HierPlatform] = MappingProxyType(
         Platform.JUNIPER_JUNOS: HierPlatform.JUNIPER_JUNOS,
         Platform.ELTEX_MES: HierPlatform.CISCO_IOS,
         Platform.YADRO_KORNFE: HierPlatform.GENERIC,
+        Platform.LINUX_SERVER: HierPlatform.GENERIC,
     }
 )
 

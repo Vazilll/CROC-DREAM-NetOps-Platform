@@ -33,7 +33,7 @@ os.environ.setdefault("NETOPS_NETWORK_DRIVER", default_driver)
 os.environ.setdefault("NETOPS_CORS_ORIGINS", '["*"]')
 os.environ.setdefault(
     "NETOPS_API_TOKENS",
-    '{"dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}}',
+    '{"dev-owner-token": {"username": "owner", "role": "owner"}, "dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}}',
 )
 os.environ.setdefault(
     "NETOPS_AUTH_PROFILES",

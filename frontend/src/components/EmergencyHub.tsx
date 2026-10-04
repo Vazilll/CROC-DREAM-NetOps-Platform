@@ -14,7 +14,6 @@ import {
   Copy,
   Check,
   History,
-  Clock,
   User,
 } from 'lucide-react';
 import { api } from '../api';

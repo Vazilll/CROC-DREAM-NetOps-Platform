@@ -148,11 +148,15 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Styled Role Picker Badge */}
       <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-all ${
-        userRole === 'admin'
+        userRole === 'owner'
+          ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+          : userRole === 'admin'
           ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
           : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
       }`}>
-        {userRole === 'admin' ? (
+        {userRole === 'owner' ? (
+          <Shield className="w-3.5 h-3.5 text-purple-400" />
+        ) : userRole === 'admin' ? (
           <Shield className="w-3.5 h-3.5 text-amber-400" />
         ) : (
           <Activity className="w-3.5 h-3.5 text-emerald-400" />
@@ -162,14 +166,15 @@ export const Header: React.FC<HeaderProps> = ({
           onChange={(e) => {
             const newRole = e.target.value as UserRole;
             setUserRole(newRole);
-            if (newRole === 'admin' || newRole === 'operator') {
+            if (newRole === 'admin' || newRole === 'operator' || newRole === 'owner') {
               api.setRole(newRole);
             }
           }}
           className="bg-transparent text-[11px] font-semibold text-current focus:outline-none cursor-pointer"
         >
-          <option value="operator" className="bg-[#0d0f14] text-emerald-400">Оператор</option>
+          <option value="owner" className="bg-[#0d0f14] text-purple-400">Владелец (Owner)</option>
           <option value="admin" className="bg-[#0d0f14] text-amber-400">Администратор</option>
+          <option value="operator" className="bg-[#0d0f14] text-emerald-400">Оператор</option>
           <option value="viewer" className="bg-[#0d0f14] text-zinc-400">Наблюдатель</option>
         </select>
       </div>
