@@ -204,3 +204,19 @@ def test_intent_lint_endpoint(client: TestClient, intent_repo: Path) -> None:
     report = client.get("/api/v1/intent/lint", headers=VIEWER).json()
     assert report["valid"] is False
     assert {issue["code"] for issue in report["issues"]} == {"duplicate_router_id"}
+
+
+def test_list_devices_enriched_telemetry(client: TestClient, devices: dict[str, Device]) -> None:
+    response = client.get("/api/v1/devices", headers=VIEWER)
+    assert response.status_code == 200
+    items = response.json()
+    assert len(items) == len(devices)
+    for dev in items:
+        assert "oper_status" in dev
+        assert dev["oper_status"] in {"UP", "DOWN", "DEGRADED"}
+        assert "sparkline" in dev
+        assert len(dev["sparkline"]) == 24
+        assert all(isinstance(p, (int, float)) and 0.0 <= p <= 100.0 for p in dev["sparkline"])
+        assert "state_timeline" in dev
+        assert len(dev["state_timeline"]) == 24
+        assert all(s in {"UP", "DOWN", "DEGRADED"} for s in dev["state_timeline"])

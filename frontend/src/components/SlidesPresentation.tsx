@@ -37,7 +37,6 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
   const [activeVendorTab, setActiveVendorTab] = useState<'cisco' | 'arista' | 'juniper' | 'eltex' | 'yadro'>('arista');
 
   const slides: SlideItem[] = [
-    // SLIDE 1: Title & Vision
     {
       id: 1,
       category: 'ОБЗОР ПЛАТФОРМЫ',
@@ -85,7 +84,7 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
             <div className="space-y-1 text-center md:text-left">
               <div className="text-xs text-zinc-400 font-mono">СТЕК РЕШЕНИЯ</div>
               <div className="text-sm text-zinc-200 font-medium">
-                Python 3.11 • FastAPI • SQLite / PostgreSQL • Celery + Redis • Jinja2 • hier_config • Scrapli • React 19 + Three.js
+                Python 3.11 • FastAPI • SQLite / PostgreSQL • Celery + Redis • Jinja2 • hier_config • Scrapli • React 19
               </div>
             </div>
             {onLaunchDemo && (
@@ -102,7 +101,6 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
       ),
     },
 
-    // SLIDE 2: 4 Goals from Yandex Annushka
     {
       id: 2,
       category: 'МЕТОДОЛОГИЯ & ПРИНЦИПЫ',
@@ -158,7 +156,6 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
       ),
     },
 
-    // SLIDE 3: End-to-End Pipeline
     {
       id: 3,
       category: 'ЖИЗНЕННЫЙ ЦИКЛ',
@@ -205,7 +202,6 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
       ),
     },
 
-    // SLIDE 4: Heterogeneous Matrix
     {
       id: 4,
       category: 'ГЕТЕРОГЕННОСТЬ',
@@ -313,7 +309,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
       ),
     },
 
-    // SLIDE 5: Hierarchical Diff vs Plain Diff
     {
       id: 5,
       category: 'ИНЖЕНЕРНОЕ ЯДРО',
@@ -354,7 +349,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
       ),
     },
 
-    // SLIDE 6: AI Assistant & Risk Scoring
     {
       id: 6,
       category: 'БЕЗОПАСНОСТЬ & AI',
@@ -403,7 +397,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
       ),
     },
 
-    // SLIDE 7: Chaos Lab & Drift Guard
     {
       id: 7,
       category: 'CHAOS ENGINEERING',
@@ -451,7 +444,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
       ),
     },
 
-    // SLIDE 8: Summary & Hackathon Defense
     {
       id: 8,
       category: 'ИТОГИ & ЗАЩИТА',
@@ -486,7 +478,7 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
             <div className="space-y-1 text-center md:text-left">
               <h3 className="text-white text-base font-bold">Готовы увидеть платформу в действии?</h3>
               <p className="text-zinc-300 text-xs">
-                Перейдите к интерактивной 3D-топологии и запустите холодный прогон на всех устройствах.
+                Перейдите к интерактивной топологии и запустите холодный прогон на всех устройствах.
               </p>
             </div>
             {onLaunchDemo && (
@@ -529,7 +521,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
 
   return (
     <div className={`space-y-4 ${isFullscreen ? 'fixed inset-0 z-50 bg-[#08090c] p-6 overflow-y-auto' : ''}`}>
-      {/* Slide Navigation Header */}
       <div className="flex items-center justify-between p-3 rounded-xl bg-zinc-950/80 border border-white/[0.08]">
         <div className="flex items-center space-x-3">
           <div className="flex items-center space-x-1.5">
@@ -542,7 +533,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
           <span className="text-xs text-zinc-400 font-mono hidden sm:inline">{current.category}</span>
         </div>
 
-        {/* Thumbnail Dots */}
         <div className="flex items-center space-x-1.5">
           {slides.map((s, idx) => (
             <button
@@ -556,7 +546,6 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
           ))}
         </div>
 
-        {/* Control Buttons */}
         <div className="flex items-center space-x-2">
           <button
             onClick={prevSlide}
@@ -582,14 +571,11 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
         </div>
       </div>
 
-      {/* Slide Canvas Card */}
       <div className="p-6 md:p-8 rounded-2xl bg-[#0c0e14] border border-white/[0.08] shadow-2xl relative overflow-hidden min-h-[460px] flex flex-col justify-between">
-        {/* Subtle background glow */}
         <div className="absolute top-0 right-0 w-96 h-96 bg-cyan-500/[0.03] rounded-full blur-3xl pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-96 h-96 bg-indigo-500/[0.03] rounded-full blur-3xl pointer-events-none" />
 
         <div className="space-y-6 relative z-10">
-          {/* Header of the slide */}
           <div className="space-y-2 border-b border-white/[0.06] pb-4">
             <div className="flex items-center justify-between">
               <span className="text-[11px] font-mono font-bold tracking-wider text-cyan-400 uppercase">
@@ -609,11 +595,9 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
             </p>
           </div>
 
-          {/* Slide Interactive Body */}
           <div className="py-2">{current.content}</div>
         </div>
 
-        {/* Slide Footer */}
         <div className="pt-6 border-t border-white/[0.06] flex items-center justify-between text-[11px] text-zinc-500 font-mono relative z-10">
           <div>
             <span>CROC DREAM NetOps • </span>

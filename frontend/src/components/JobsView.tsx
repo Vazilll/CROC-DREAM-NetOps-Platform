@@ -129,7 +129,6 @@ export const JobsView: React.FC<JobsViewProps> = ({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-      {/* Left Column: Job History */}
       <div className="lg:col-span-4 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
           <div className="flex items-center space-x-2">
@@ -180,11 +179,9 @@ export const JobsView: React.FC<JobsViewProps> = ({
         </div>
       </div>
 
-      {/* Right Column: Active Job Details & Streaming Terminal */}
       <div className="lg:col-span-8 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-4">
         {activeJobDetail ? (
           <>
-            {/* Header info */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/[0.06]">
               <div>
                 <div className="flex items-center space-x-2">
@@ -197,7 +194,6 @@ export const JobsView: React.FC<JobsViewProps> = ({
                 </div>
               </div>
 
-              {/* Action buttons */}
               <div className="flex items-center space-x-2">
                 <button
                   onClick={() => onOpenDiff(activeJobDetail.id)}
@@ -218,7 +214,6 @@ export const JobsView: React.FC<JobsViewProps> = ({
               </div>
             </div>
 
-            {/* Target Devices Execution Matrix */}
             <div className="space-y-2">
               <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
                 Целевые Устройства ({activeJobDetail.targets.length})
@@ -251,7 +246,6 @@ export const JobsView: React.FC<JobsViewProps> = ({
               </div>
             </div>
 
-            {/* Terminal Logs Window */}
             <div className="space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
                 <div className="flex items-center space-x-2 text-zinc-400">
@@ -259,7 +253,6 @@ export const JobsView: React.FC<JobsViewProps> = ({
                   <span>ЖУРНАЛ ВЫПОЛНЕНИЯ (LIVE TELEMETRY)</span>
                 </div>
                 <div className="flex items-center space-x-3 text-[11px]">
-                  {/* Log Filter Pills */}
                   <div className="flex items-center space-x-1 bg-zinc-950 p-0.5 rounded-lg border border-white/[0.06]">
                     {(['ALL', 'INFO', 'WARNING', 'ERROR'] as const).map((lvl) => (
                       <button

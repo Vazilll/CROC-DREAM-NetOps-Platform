@@ -10,7 +10,6 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Endpoint to mutate or reset local running configs
   const handleInjectChaos = async (scenario: 'acl_drift' | 'port_down' | 'reset_lab') => {
     setLoading(true);
     setStatusMessage(null);
@@ -29,7 +28,6 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner */}
       <div className="p-6 rounded-2xl bg-gradient-to-r from-amber-500/[0.05] via-[#0c0e14] to-[#0c0e14] border border-amber-500/20">
         <div className="flex items-center space-x-3 mb-2">
           <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
@@ -52,9 +50,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
         </div>
       )}
 
-      {/* Scenarios Grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Scenario 1: ACL Drift */}
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-amber-500/40 transition">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -75,7 +71,6 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
           </button>
         </div>
 
-        {/* Scenario 2: Interface Down */}
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-rose-500/40 transition">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
@@ -96,7 +91,6 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
           </button>
         </div>
 
-        {/* Scenario 3: Reset Lab */}
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-emerald-500/40 transition">
           <div className="space-y-2">
             <div className="flex items-center justify-between">

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Query, Response, status
 from netops.api.deps import Admin, ContainerDep, DeviceServiceDep, Viewer
 from netops.enums import DeviceRole, DeviceStatus, Platform
 from netops.intent import IntentValidationError
+from netops.intent.netbox import load_netbox_inventory
 from netops.models import Device
 from netops.schemas.devices import (
     DeviceCreate,
@@ -78,9 +79,14 @@ def delete_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Respon
 @router.post(
     "/inventory/sync",
     response_model=InventorySyncResult,
-    summary="Import devices from inventory.yaml of the intent repository",
+    summary="Import devices from NetBox (if configured) or inventory.yaml of the intent repository",
 )
 def sync_inventory(
     service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> InventorySyncResult:
-    return service.sync_inventory(container.intents.load_inventory())
+    settings = container.settings
+    if settings.netbox_url and settings.netbox_token:
+        inventory = load_netbox_inventory(settings.netbox_url, settings.netbox_token.get_secret_value())
+    else:
+        inventory = container.intents.load_inventory()
+    return service.sync_inventory(inventory)

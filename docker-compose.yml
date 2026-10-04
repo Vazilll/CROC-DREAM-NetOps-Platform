@@ -80,12 +80,12 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
-  # The React UI joins here once its image exists; monitoring (Prometheus,
-  # Grafana) will be added later as well. For example:
-  # frontend:
-  #   build: ./frontend
-  #   ports: ["${FRONTEND_PORT:-5173}:80"]
-  #   depends_on: [api]
+  frontend:
+    build: ./frontend
+    ports: ["${FRONTEND_PORT:-5173}:80"]
+    depends_on: [api]
+
+  # Monitoring (Prometheus, Grafana) will be added later.
 
 volumes:
   postgres-data:

@@ -1,22 +1,23 @@
-import { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Server,
-  Play,
-  RotateCw,
   Search,
-  CheckCircle2,
-  AlertTriangle,
-  HelpCircle,
-  ExternalLink,
+  Play,
   ShieldCheck,
   RefreshCw,
-  GitBranch,
-  Terminal,
-  Cpu,
-  Activity,
+  FileCheck2,
+  ArrowUpDown,
+  GitCompare,
+  ExternalLink,
 } from 'lucide-react';
-import type { Device, DeviceStatus } from '../api';
-import { DeviceDetailModal } from './DeviceDetailModal';
+import type { Device } from '../api';
+import {
+  PLATFORM_NAMES,
+  ROLE_NAMES,
+  OperStatusBadge,
+  IntentStatusBadge,
+  Sparkline,
+  StateTimeline,
+} from './ui';
 
 interface DeviceListProps {
   devices: Device[];
@@ -26,7 +27,41 @@ interface DeviceListProps {
   onScanDrift: (deviceIds?: number[]) => void;
   onSyncInventory: () => void;
   onLintIntent: () => void;
+  onOpenDevice: (deviceId: number) => void;
+  onOpenDiff?: (deviceId?: number) => void;
 }
+
+type SortKey = 'hostname' | 'role' | 'platform' | 'management_ip' | 'oper_status' | 'status';
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: 'hostname', label: 'Устройство' },
+  { key: 'role', label: 'Роль' },
+  { key: 'platform', label: 'Платформа' },
+  { key: 'oper_status', label: 'Oper Status' },
+  { key: 'status', label: 'Intent Status' },
+];
+
+const Filter: React.FC<{
+  value: string;
+  onChange: (v: string) => void;
+  label: string;
+  options: Record<string, string>;
+}> = ({ value, onChange, label, options }) => (
+  <select
+    value={value}
+    onChange={(e) => onChange(e.target.value)}
+    className="bg-zinc-900 border border-white/[0.08] rounded-md px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500/50"
+  >
+    <option value="">{label}: все</option>
+    {Object.entries(options).map(([k, v]) => (
+      <option key={k} value={k}>
+        {v}
+      </option>
+    ))}
+  </select>
+);
+
+const ipKey = (ip: string) => ip.split('.').reduce((acc, p) => acc * 256 + Number(p), 0);
 
 export const DeviceList: React.FC<DeviceListProps> = ({
   devices,
@@ -36,402 +71,312 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   onScanDrift,
   onSyncInventory,
   onLintIntent,
+  onOpenDevice,
+  onOpenDiff,
 }) => {
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
-  const [selectedDeviceModalId, setSelectedDeviceModalId] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [query, setQuery] = useState('');
+  const [platform, setPlatform] = useState('');
+  const [role, setRole] = useState('');
+  const [status, setStatus] = useState('');
+  const [operStatus, setOperStatus] = useState('');
+  const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'hostname', dir: 1 });
+  const [selected, setSelected] = useState<number[]>([]);
 
-  const toggleSelectAll = () => {
-    if (selectedIds.length === devices.length) {
-      setSelectedIds([]);
-    } else {
-      setSelectedIds(devices.map((d) => d.id));
-    }
-  };
+  const rows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return devices
+      .filter(
+        (d) =>
+          (!q || `${d.hostname} ${d.management_ip}`.toLowerCase().includes(q)) &&
+          (!platform || d.platform === platform) &&
+          (!role || d.role === role) &&
+          (!status || d.status === status) &&
+          (!operStatus || (d.oper_status ?? 'UP') === operStatus)
+      )
+      .sort((a, b) => {
+        let x: any;
+        let y: any;
+        if (sort.key === 'management_ip') {
+          x = ipKey(a.management_ip);
+          y = ipKey(b.management_ip);
+        } else if (sort.key === 'oper_status') {
+          x = a.oper_status ?? 'UP';
+          y = b.oper_status ?? 'UP';
+        } else {
+          x = a[sort.key];
+          y = b[sort.key];
+        }
+        return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
+      });
+  }, [devices, query, platform, role, status, operStatus, sort]);
 
-  const toggleSelectOne = (id: number) => {
-    setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
-    );
-  };
+  const toggle = (id: number) =>
+    setSelected((s) => (s.includes(id) ? s.filter((i) => i !== id) : [...s, id]));
+  const allSelected = rows.length > 0 && rows.every((d) => selected.includes(d.id));
+  const targets = selected.length ? selected : rows.map((d) => d.id);
+  const scope = selected.length ? `выбрано: ${selected.length}` : 'все в списке';
 
-  const filteredDevices = devices.filter(
-    (d) =>
-      d.hostname.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.management_ip.includes(searchQuery) ||
-      d.platform.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      d.role.toLowerCase().includes(searchQuery.toLowerCase())
-  );
-
-  const inSyncCount = devices.filter((d) => d.status === 'IN_SYNC').length;
-  const driftCount = devices.filter((d) => d.status === 'DRIFT_DETECTED').length;
-  const unreachableCount = devices.filter((d) => d.status === 'UNREACHABLE').length;
-
-  const getStatusBadge = (status: DeviceStatus) => {
-    switch (status) {
-      case 'IN_SYNC':
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>IN_SYNC</span>
-          </span>
-        );
-      case 'DRIFT_DETECTED':
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25">
-            <AlertTriangle className="w-3 h-3 text-amber-400" />
-            <span>DRIFT DETECTED</span>
-          </span>
-        );
-      case 'UNREACHABLE':
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/25">
-            <AlertTriangle className="w-3 h-3 text-rose-400" />
-            <span>UNREACHABLE</span>
-          </span>
-        );
-      case 'IN_PROGRESS':
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 animate-pulse">
-            <RotateCw className="w-3 h-3 animate-spin" />
-            <span>IN PROGRESS</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-zinc-800 text-zinc-400 border border-white/[0.08]">
-            <HelpCircle className="w-3 h-3" />
-            <span>UNKNOWN</span>
-          </span>
-        );
-    }
-  };
-
-  const getPlatformBadge = (platform: string) => {
-    switch (platform) {
-      case 'arista_eos':
-        return (
-          <span className="px-2 py-0.5 rounded bg-blue-500/10 text-blue-300 border border-blue-500/25 text-[10px] font-mono">
-            Arista EOS
-          </span>
-        );
-      case 'cisco_iosxe':
-        return (
-          <span className="px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/25 text-[10px] font-mono">
-            Cisco IOS-XE
-          </span>
-        );
-      case 'juniper_junos':
-        return (
-          <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/25 text-[10px] font-mono">
-            Juniper Junos
-          </span>
-        );
-      case 'eltex_mes':
-        return (
-          <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/25 text-[10px] font-mono">
-            Eltex MES
-          </span>
-        );
-      case 'yadro_kornfe':
-        return (
-          <span className="px-2 py-0.5 rounded bg-purple-500/10 text-purple-300 border border-purple-500/25 text-[10px] font-mono">
-            YADRO Kornfe
-          </span>
-        );
-      default:
-        return (
-          <span className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[10px] font-mono">
-            {platform}
-          </span>
-        );
-    }
-  };
-
-  const getRoleBadge = (role: string) => {
-    switch (role) {
-      case 'spine':
-        return <span className="text-[10px] font-mono text-purple-400">SPINE</span>;
-      case 'leaf':
-        return <span className="text-[10px] font-mono text-cyan-400">LEAF</span>;
-      case 'border_firewall':
-        return <span className="text-[10px] font-mono text-amber-400">BORDER FW</span>;
-      default:
-        return <span className="text-[10px] font-mono text-zinc-500">{role.toUpperCase()}</span>;
-    }
-  };
+  const btn =
+    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors disabled:opacity-40';
 
   return (
-    <div className="space-y-6">
-      {/* Yandex Annushka Process Lifecycle Flow Banner */}
-      <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] shadow-lg">
-        <div className="flex items-center justify-between pb-3 border-b border-white/[0.06] mb-3">
-          <div className="flex items-center space-x-2">
-            <span className="text-[10px] font-mono font-bold tracking-wider text-cyan-400 uppercase">
-              КОНВЕЙЕР УПРАВЛЕНИЯ КОНФИГУРАЦИЕЙ
+    <div className="space-y-4">
+      {/* Title & Top Toolbar */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-lg font-semibold text-white tracking-tight">
+            Инвентарь оборудования{' '}
+            <span className="text-zinc-500 font-normal text-sm ml-1 font-mono">
+              {rows.length} из {devices.length}
             </span>
-            <span className="text-[10px] text-zinc-500 font-mono">| Яндекс Аннушка Pipeline</span>
-          </div>
-          <div className="text-[10px] font-mono text-zinc-400">
-            Безопасный цикл: <span className="text-emerald-400 font-semibold">Commit Confirmed 180s</span>
-          </div>
+          </h1>
+          <p className="text-xs text-zinc-400 mt-0.5">
+            Учет физического состояния фабрики (Oper Status) и соответствия намерениям Git SoT (Intent Status)
+          </p>
         </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-6 gap-2">
-          {[
-            { step: '01', name: 'Git SoT', desc: 'inventory.yaml', icon: GitBranch, color: 'text-cyan-400' },
-            { step: '02', name: 'Jinja2', desc: 'Шаблонизация', icon: Cpu, color: 'text-purple-400' },
-            { step: '03', name: 'hier_config', desc: 'AST-сравнение', icon: Terminal, color: 'text-indigo-400' },
-            { step: '04', name: 'AI Risk Guard', desc: 'Аудит рисков', icon: ShieldCheck, color: 'text-amber-400' },
-            { step: '05', name: 'Commit Confirmed', desc: 'Накат сессии', icon: Play, color: 'text-emerald-400' },
-            { step: '06', name: 'Telemetry', desc: 'BGP & Link check', icon: Activity, color: 'text-rose-400' },
-          ].map((st, i) => {
-            const Icon = st.icon;
-            return (
-              <div key={i} className="p-2.5 rounded-xl bg-white/[0.02] border border-white/[0.05] flex items-center space-x-2">
-                <Icon className={`w-3.5 h-3.5 ${st.color} shrink-0`} />
-                <div className="min-w-0 flex-1">
-                  <div className="text-white text-xs font-medium truncate">{st.name}</div>
-                  <div className="text-zinc-500 text-[10px] truncate">{st.desc}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Aeza-style Metric Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Card 1 */}
-        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-zinc-400">Узлы Фабрики</span>
-            <Server className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="mt-3">
-            <div className="text-3xl font-bold font-mono text-white tracking-tight">{devices.length}</div>
-            <div className="mt-1 text-[11px] text-zinc-500 font-mono">
-              2x Arista, 2x Cisco, 2x Juniper
-            </div>
-          </div>
-        </div>
-
-        {/* Card 2 */}
-        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-emerald-400">В Синхронизации</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="mt-3">
-            <div className="text-3xl font-bold font-mono text-emerald-300 tracking-tight">{inSyncCount}</div>
-            <div className="mt-1 text-[11px] text-emerald-500/80 font-mono">
-              Running = Intended
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3 */}
-        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-amber-400">Обнаружен Дрейф</span>
-            <AlertTriangle className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="mt-3">
-            <div className="text-3xl font-bold font-mono text-amber-300 tracking-tight">{driftCount}</div>
-            <div className="mt-1 text-[11px] text-amber-500/80 font-mono">
-              Ожидает Remediate
-            </div>
-          </div>
-        </div>
-
-        {/* Card 4 */}
-        <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] relative overflow-hidden flex flex-col justify-between">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-cyan-400">SSH Связность</span>
-            <ShieldCheck className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="mt-3">
-            <div className="text-3xl font-bold font-mono text-white tracking-tight">
-              {devices.length - unreachableCount}/{devices.length}
-            </div>
-            <div className="mt-1 text-[11px] text-cyan-500/80 font-mono">
-              Scrapli Driver Ready
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Action Toolbar */}
-      <div className="p-3.5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col md:flex-row items-center justify-between gap-3">
-        {/* Search */}
-        <div className="relative w-full md:w-80">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-3 top-2.5" />
-          <input
-            type="text"
-            placeholder="Поиск по хосту, IP или ОС (Cisco, Arista...)"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-1.5 bg-zinc-950 border border-white/[0.08] rounded-xl text-xs font-mono text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-cyan-500/50 transition"
-          />
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto justify-end">
-          <button
-            onClick={onRefresh}
-            className="p-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white border border-white/[0.08] rounded-xl transition cursor-pointer"
-            title="Обновить устройства"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-          </button>
-
+        <div className="flex items-center gap-2">
           <button
             onClick={onSyncInventory}
-            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
-            title="Перечитать inventory.yaml из репозитория Git"
+            className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
           >
-            <GitBranch className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Синхр. Git</span>
+            <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать инвентарь
           </button>
-
           <button
             onClick={onLintIntent}
-            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-white/[0.08] rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
-            title="Pre-flight проверка Pydantic моделей"
+            className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
           >
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Pre-flight Lint</span>
-          </button>
-
-          <button
-            onClick={() => onScanDrift(selectedIds.length > 0 ? selectedIds : undefined)}
-            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-medium flex items-center space-x-1.5 transition cursor-pointer"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Скан дрейфа</span>
-          </button>
-
-          <button
-            onClick={() => onRunDryRun(selectedIds.length > 0 ? selectedIds : devices.map((d) => d.id))}
-            className="px-4 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-cyan-500/20 cursor-pointer"
-          >
-            <Play className="w-3 h-3 fill-current" />
-            <span>
-              {selectedIds.length > 0
-                ? `Холостой прогон (${selectedIds.length})`
-                : 'Холостой прогон (Все)'}
-            </span>
+            <FileCheck2 className="w-3.5 h-3.5" /> Pre-flight Lint
           </button>
         </div>
       </div>
 
-      {/* Device Table */}
-      <div className="rounded-2xl bg-[#0c0e14] border border-white/[0.08] overflow-hidden">
+      {/* Filter Toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Имя или IP…"
+            className="bg-zinc-900 border border-white/[0.08] rounded-md pl-8 pr-3 py-1.5 text-xs text-zinc-200 w-48 focus:outline-none focus:border-cyan-500/50"
+          />
+        </div>
+        <Filter value={role} onChange={setRole} label="Роль" options={ROLE_NAMES} />
+        <Filter value={platform} onChange={setPlatform} label="Платформа" options={PLATFORM_NAMES} />
+        <Filter
+          value={operStatus}
+          onChange={setOperStatus}
+          label="Oper"
+          options={{ UP: 'UP (Доступен)', DOWN: 'DOWN (Авария)', DEGRADED: 'DEGRADED (Снижен)' }}
+        />
+        <Filter
+          value={status}
+          onChange={setStatus}
+          label="Intent"
+          options={{
+            IN_SYNC: 'В синхроне',
+            DRIFT_DETECTED: 'Дрейф',
+            UNREACHABLE: 'Недоступно',
+            UNKNOWN: 'Неизвестно',
+          }}
+        />
+
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-[11px] text-zinc-500 font-mono">{scope}</span>
+          <button
+            disabled={!targets.length}
+            onClick={() => onRunDryRun(targets)}
+            className={`${btn} bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-semibold shadow-sm`}
+          >
+            <Play className="w-3.5 h-3.5 fill-current" /> Dry-run
+          </button>
+          <button
+            disabled={!targets.length}
+            onClick={() => onScanDrift(selected.length ? selected : undefined)}
+            className={`${btn} border border-white/[0.1] text-zinc-200 hover:bg-white/[0.05]`}
+          >
+            <ShieldCheck className="w-3.5 h-3.5" /> Скан дрейфа
+          </button>
+          <button
+            onClick={onRefresh}
+            className={`${btn} text-zinc-400 hover:text-white p-2`}
+            title="Обновить"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      </div>
+
+      {/* High-Density Inventory Table */}
+      <div className="rounded-lg border border-white/[0.08] bg-[#0c0e14] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-zinc-950/80 border-b border-white/[0.08] text-zinc-400 font-mono text-[11px]">
-              <tr>
-                <th className="py-3 px-4 w-10">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-zinc-400 border-b border-white/[0.06]">
+                <th className="w-10 px-3 py-2.5">
                   <input
                     type="checkbox"
-                    checked={devices.length > 0 && selectedIds.length === devices.length}
-                    onChange={toggleSelectAll}
-                    className="rounded bg-zinc-900 border-white/[0.2] text-cyan-500 focus:ring-0 cursor-pointer"
+                    checked={allSelected}
+                    onChange={() => setSelected(allSelected ? [] : rows.map((d) => d.id))}
+                    className="rounded bg-zinc-900 border-zinc-700 cursor-pointer"
                   />
                 </th>
-                <th className="py-3 px-4">Устройство (Hostname)</th>
-                <th className="py-3 px-4">Роль в CLOS</th>
-                <th className="py-3 px-4">Платформа / ОС</th>
-                <th className="py-3 px-4">Management IP</th>
-                <th className="py-3 px-4">Статус Синхронизации</th>
-                <th className="py-3 px-4 text-right">Действия</th>
+                {COLUMNS.map((c) => (
+                  <th key={c.key} className="px-3 py-2.5 font-medium">
+                    <button
+                      onClick={() =>
+                        setSort((s) => ({
+                          key: c.key,
+                          dir: s.key === c.key ? (-s.dir as 1 | -1) : 1,
+                        }))
+                      }
+                      className="flex items-center gap-1 uppercase tracking-wide cursor-pointer hover:text-white transition-colors"
+                    >
+                      {c.label}
+                      <ArrowUpDown
+                        className={`w-3 h-3 ${sort.key === c.key ? 'text-cyan-400' : 'opacity-30'}`}
+                      />
+                    </button>
+                  </th>
+                ))}
+                <th className="px-3 py-2.5 font-medium">Нагрузка (тренд)</th>
+                <th className="px-3 py-2.5 font-medium">24h Timeline</th>
+                <th className="px-3 py-2.5 font-medium text-right">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/[0.04]">
-              {loading && devices.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-12 text-center text-zinc-500">
-                    <RotateCw className="w-5 h-5 mx-auto animate-spin text-cyan-400 mb-2" />
-                    Загрузка инвентаря устройств...
+              {rows.map((d) => (
+                <tr
+                  key={d.id}
+                  onClick={() => onOpenDevice(d.id)}
+                  className="hover:bg-white/[0.03] cursor-pointer transition-colors group"
+                >
+                  {/* Select Checkbox */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.includes(d.id)}
+                      onChange={() => toggle(d.id)}
+                      className="rounded bg-zinc-900 border-zinc-700 cursor-pointer"
+                    />
+                  </td>
+
+                  {/* Device Hostname & IP */}
+                  <td className="px-3 py-2">
+                    <div className="flex flex-col">
+                      <span className="font-semibold text-cyan-300 font-mono tracking-tight group-hover:text-cyan-200">
+                        {d.hostname}
+                      </span>
+                      <span className="font-mono text-[11px] text-zinc-500">
+                        {d.management_ip}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Role Pill */}
+                  <td className="px-3 py-2">
+                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-300 border border-white/[0.06]">
+                      {ROLE_NAMES[d.role] ?? d.role}
+                    </span>
+                  </td>
+
+                  {/* Platform Pill */}
+                  <td className="px-3 py-2">
+                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-400 border border-white/[0.06]">
+                      {PLATFORM_NAMES[d.platform] ?? d.platform}
+                    </span>
+                  </td>
+
+                  {/* Oper Status (Physical Link Reachability) */}
+                  <td className="px-3 py-2">
+                    <OperStatusBadge status={d.oper_status ?? 'UP'} />
+                  </td>
+
+                  {/* Intent Status (Git SoT Sync) */}
+                  <td className="px-3 py-2">
+                    <IntentStatusBadge status={d.status} />
+                  </td>
+
+                  {/* Micro-Sparkline */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="sparkline" data-testid="sparkline">
+                      <Sparkline
+                        className="sparkline"
+                        points={
+                          d.sparkline && d.sparkline.length > 0
+                            ? d.sparkline
+                            : [20, 22, 24, 25, 23, 27, 28, 26, 30, 32, 34, 33]
+                        }
+                        width={70}
+                        height={18}
+                      />
+                    </div>
+                  </td>
+
+                  {/* 24h State Timeline */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="state-timeline" data-testid="state-timeline">
+                      <StateTimeline
+                        states={
+                          d.state_timeline && d.state_timeline.length > 0
+                            ? d.state_timeline
+                            : Array(24).fill(
+                                d.status === 'IN_SYNC' ? 'UP' : d.status === 'DRIFT_DETECTED' ? 'DRIFT' : 'DOWN'
+                              )
+                        }
+                      />
+                    </div>
+                  </td>
+
+                  {/* 1-Click Action Buttons */}
+                  <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="inline-flex items-center gap-1.5">
+                      <button
+                        onClick={() => onOpenDevice(d.id)}
+                        className="px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-white/[0.06]"
+                        title="Открыть карточку устройства"
+                      >
+                        <ExternalLink className="w-3 h-3 text-cyan-400" />
+                        <span>Карточка</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (onOpenDiff) onOpenDiff(d.id);
+                          else onOpenDevice(d.id);
+                        }}
+                        className="px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-white/[0.06]"
+                        title="Сверить конфигурации (Diff)"
+                      >
+                        <GitCompare className="w-3 h-3 text-amber-400" />
+                        <span>Diff</span>
+                      </button>
+
+                      <button
+                        onClick={() => onRunDryRun([d.id])}
+                        className="px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Запустить префлайт Dry-run"
+                      >
+                        <Play className="w-3 h-3 text-emerald-400" />
+                        <span>Dry-run</span>
+                      </button>
+                    </div>
                   </td>
                 </tr>
-              ) : filteredDevices.length === 0 ? (
+              ))}
+              {rows.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-zinc-500">
-                    Устройства не найдены по запросу «{searchQuery}»
+                  <td colSpan={10} className="px-3 py-12 text-center text-zinc-500">
+                    {devices.length
+                      ? 'Нет устройств под выбранные фильтры'
+                      : 'Инвентарь пуст — нажмите «Синхронизировать инвентарь»'}
                   </td>
                 </tr>
-              ) : (
-                filteredDevices.map((dev) => {
-                  const isSelected = selectedIds.includes(dev.id);
-                  return (
-                    <tr
-                      key={dev.id}
-                      className={`hover:bg-white/[0.02] transition font-mono ${
-                        isSelected ? 'bg-cyan-500/[0.03]' : ''
-                      }`}
-                    >
-                      <td className="py-3 px-4">
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => toggleSelectOne(dev.id)}
-                          className="rounded bg-zinc-900 border-white/[0.2] text-cyan-500 focus:ring-0 cursor-pointer"
-                        />
-                      </td>
-
-                      <td className="py-3 px-4">
-                        <div className="flex items-center space-x-2">
-                          <Server className="w-3.5 h-3.5 text-zinc-500" />
-                          <span className="font-bold text-white tracking-wide">{dev.hostname}</span>
-                        </div>
-                      </td>
-
-                      <td className="py-3 px-4">{getRoleBadge(dev.role)}</td>
-
-                      <td className="py-3 px-4">{getPlatformBadge(dev.platform)}</td>
-
-                      <td className="py-3 px-4 text-zinc-300">
-                        {dev.management_ip}:{dev.management_port}
-                      </td>
-
-                      <td className="py-3 px-4">{getStatusBadge(dev.status)}</td>
-
-                      <td className="py-3 px-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button
-                            onClick={() => setSelectedDeviceModalId(dev.id)}
-                            className="px-2.5 py-1 rounded bg-white/[0.04] hover:bg-white/[0.08] text-zinc-300 border border-white/[0.06] text-[11px] font-sans transition flex items-center space-x-1 cursor-pointer"
-                          >
-                            <span>Параметры</span>
-                            <ExternalLink className="w-3 h-3 text-zinc-400" />
-                          </button>
-
-                          <button
-                            onClick={() => onRunDryRun([dev.id])}
-                            className="p-1 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
-                            title="Холостой прогон (Dry Run)"
-                          >
-                            <Play className="w-3 h-3 fill-current" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
               )}
             </tbody>
           </table>
         </div>
       </div>
-
-      {/* Modal for Device Parameters */}
-      {selectedDeviceModalId !== null && (
-        <DeviceDetailModal
-          deviceId={selectedDeviceModalId}
-          onClose={() => setSelectedDeviceModalId(null)}
-        />
-      )}
     </div>
   );
 };

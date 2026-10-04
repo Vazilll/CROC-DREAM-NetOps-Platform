@@ -38,7 +38,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   } | null>(null);
   const [analyzingAi, setAnalyzingAi] = useState(false);
 
-  // Filter jobs that have diffs (usually DRY_RUN or DEPLOY)
   const diffJobs = jobs.filter((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
 
   useEffect(() => {
@@ -66,7 +65,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   const activeDeviceDiff: DeviceDiff | undefined = diffData?.devices[selectedDeviceIndex];
 
-  // AI Diff Explainer: invokes backend LLM service (MiMo-V2.6-Flash) with graceful fallback
   const handleAnalyzeWithAI = async () => {
     if (!activeDeviceDiff || !selectedJobId) return;
     setAnalyzingAi(true);
@@ -125,7 +123,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Selector Toolbar */}
       <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center space-x-3 w-full md:w-auto">
           <div className="p-2 rounded-lg bg-zinc-900 border border-white/[0.08]">
@@ -144,7 +141,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
           </div>
         </div>
 
-        {/* Job selector & Deploy CTA */}
         <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
           <label className="text-xs font-mono text-zinc-400">Задача:</label>
           <select
@@ -171,12 +167,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         </div>
       </div>
 
-      {/* Main Diff Work Area */}
       {diffData && diffData.devices.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left: Device Tabs & AI Summary */}
           <div className="lg:col-span-3 space-y-4">
-            {/* Device list for this job */}
             <div className="p-3 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-1.5">
               <span className="text-[11px] font-mono font-semibold uppercase tracking-wider text-zinc-400 px-2 py-1 block">
                 Устройства ({diffData.devices.length})
@@ -215,7 +208,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               })}
             </div>
 
-            {/* AI Assistant Card */}
             <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-1.5">
@@ -289,9 +281,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             </div>
           </div>
 
-          {/* Right: Monaco Editor Area */}
           <div className="lg:col-span-9 p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] overflow-hidden flex flex-col min-h-[620px]">
-            {/* View Mode Bar */}
             <div className="px-3 py-2 bg-zinc-950/80 rounded-xl border border-white/[0.06] flex flex-wrap items-center justify-between gap-2 mb-3">
               <div className="flex items-center space-x-2">
                 <button
@@ -338,7 +328,6 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               )}
             </div>
 
-            {/* Monaco Container */}
             <div className="flex-1 w-full h-[560px] rounded-xl overflow-hidden border border-white/[0.04]">
               {activeDeviceDiff ? (
                 activeViewMode === 'diff' ? (
@@ -348,6 +337,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                     original={activeDeviceDiff.running_config || '# Running config empty'}
                     modified={activeDeviceDiff.intended_config || '# Intended config empty'}
                     language="shell"
+                    keepCurrentOriginalModel={true}
+                    keepCurrentModifiedModel={true}
                     options={{
                       readOnly: true,
                       renderSideBySide: true,
@@ -365,6 +356,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                       '! No remediation commands needed (Already in sync)'
                     }
                     language="shell"
+                    keepCurrentModel={true}
                     options={{
                       readOnly: true,
                       minimap: { enabled: false },
@@ -381,6 +373,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                       '! No rollback commands needed'
                     }
                     language="shell"
+                    keepCurrentModel={true}
                     options={{
                       readOnly: true,
                       minimap: { enabled: false },

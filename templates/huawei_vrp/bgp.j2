@@ -1,9 +1,11 @@
 {% if intent.bgp %}
-bgp {{ intent.bgp.as_number }}
+bgp {{ intent.bgp.asn }}
  router-id {{ intent.bgp.router_id }}
-{% for peer in intent.bgp.peers %}
- peer {{ peer.peer_ip }} as-number {{ peer.remote_as }}
- peer {{ peer.peer_ip }} description {{ peer.description }}
+{% for neighbor in intent.bgp.neighbors %}
+ peer {{ neighbor.peer_ip }} as-number {{ neighbor.remote_asn }}
+{% if neighbor.description %}
+ peer {{ neighbor.peer_ip }} description {{ neighbor.description }}
+{% endif %}
 {% endfor %}
 #
 {% endif %}

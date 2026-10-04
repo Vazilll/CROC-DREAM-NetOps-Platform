@@ -47,7 +47,6 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Summary */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex items-center justify-between">
           <div>
@@ -109,7 +108,6 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
         </div>
       </div>
 
-      {/* Report Cards by Device */}
       <div className="space-y-4">
         <h3 className="text-xs font-bold font-mono uppercase tracking-wider text-white flex items-center space-x-2">
           <Terminal className="w-4 h-4 text-cyan-400" />
@@ -164,10 +162,8 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
               </div>
             </div>
 
-            {/* Unauthorized & Missing lines */}
             {item.status === 'DRIFT_DETECTED' ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-mono pt-3">
-                {/* Unauthorized lines */}
                 <div className="p-3.5 rounded-xl bg-zinc-950 border border-rose-500/20 space-y-2">
                   <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider block">
                     Несанкционированные строки (+) ({item.unauthorized_lines.length})
@@ -184,7 +180,6 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
                   </div>
                 </div>
 
-                {/* Missing lines */}
                 <div className="p-3.5 rounded-xl bg-zinc-950 border border-amber-500/20 space-y-2">
                   <span className="text-[11px] font-bold text-amber-400 uppercase tracking-wider block">
                     Отсутствующие строки из эталона (-) ({item.missing_lines.length})

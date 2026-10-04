@@ -30,7 +30,7 @@ class AuthProfile(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NETOPS_",
-        env_file=".env",
+        env_file=(".env", "backend/.env", str(Path(__file__).resolve().parent.parent / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -64,10 +64,33 @@ class Settings(BaseSettings):
     # {"lab": {"username": "admin", "password": "admin"}}
     auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
 
-    # LLM Risk Assistant settings (Xiaomi MiMo-V2.6-Flash or any OpenAI-compatible API)
+    # LLM Risk Assistant settings (Multi-provider cascade: Groq -> Gemini -> MiMo -> Heuristic)
+    # 1. Groq (Ultra-fast Qwen 3.8 27B / GPT-OSS 120B)
+    groq_api_key: SecretStr | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_timeout_seconds: float = 2.0
+
+    # 2. Google Gemini (Cloud Backup with fast 2.0s timeout)
+    gemini_api_key: SecretStr | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_timeout_seconds: float = 2.0
+
+    # 3. Team / Default provider (Xiaomi MiMo or custom proxy)
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://api.hcnsec.cn/v1"
     llm_model: str = "MiMo-V2.6-Flash"
+    llm_timeout_seconds: float = 2.0
+
+    # Time-series forecasting: TimesFM runs as a separate process (backend/tools/timesfm_server.py)
+    # so torch stays out of the API dependencies. Empty URL = statistical fallback only.
+    forecast_url: str = "http://127.0.0.1:8100/forecast"
+    forecast_timeout_seconds: float = 5.0
+
+    # NetBox as the inventory source (empty URL = inventory.yaml of the intent repository).
+    netbox_url: str = ""
+    netbox_token: SecretStr | None = None
 
     # Browser origins allowed to call the API (the Vite dev server by default).
     cors_origins: list[str] = Field(
