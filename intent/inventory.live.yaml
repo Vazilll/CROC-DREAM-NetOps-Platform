@@ -1,0 +1,37 @@
+devices:
+  - hostname: spine-1.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2211
+    platform: arista_eos
+    role: spine
+    auth_profile: lab
+  - hostname: spine-2.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2212
+    platform: arista_eos
+    role: spine
+    auth_profile: lab
+  - hostname: leaf-1.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2221
+    platform: cisco_iosxe
+    role: leaf
+    auth_profile: lab
+  - hostname: leaf-2.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2222
+    platform: cisco_iosxe
+    role: leaf
+    auth_profile: lab
+  - hostname: leaf-3.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2231
+    platform: huawei_vrp
+    role: leaf
+    auth_profile: lab
+  - hostname: leaf-4.croc.lab
+    management_ip: 5.228.243.54
+    management_port: 2232
+    platform: huawei_vrp
+    role: leaf
+    auth_profile: lab

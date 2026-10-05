@@ -83,6 +83,7 @@ def require_role(role: UserRole) -> Callable[[ApiPrincipal], ApiPrincipal]:
 Viewer = Annotated[ApiPrincipal, Depends(require_role(UserRole.VIEWER))]
 Operator = Annotated[ApiPrincipal, Depends(require_role(UserRole.OPERATOR))]
 Admin = Annotated[ApiPrincipal, Depends(require_role(UserRole.ADMIN))]
+Owner = Annotated[ApiPrincipal, Depends(require_role(UserRole.OWNER))]
 
 
 def get_device_service(session: SessionDep) -> DeviceService:

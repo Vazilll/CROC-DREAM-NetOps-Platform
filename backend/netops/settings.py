@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from netops.enums import UserRole
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     intent_repo_path: Path = Path("intent")
+    inventory_file: str = "inventory.yaml"
     templates_path: Path = Path("templates")
     normalization_rules_path: Path | None = None
 
@@ -53,7 +54,9 @@ class Settings(BaseSettings):
     # {"<токен>": {"username": "alice", "role": "admin"}}
     api_tokens: dict[str, ApiPrincipal] = Field(default_factory=dict)
     # {"lab": {"username": "admin", "password": "admin"}}
-    auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
+    auth_profiles: dict[str, AuthProfile] = Field(
+        default_factory=lambda: {"lab": AuthProfile(username="admin", password=SecretStr("admin"))}
+    )
 
     # LLM Risk Assistant settings (Multi-provider cascade: Groq -> Gemini -> MiMo -> Heuristic)
     # 1. Groq (Ultra-fast Qwen 3.8 27B / GPT-OSS 120B)
@@ -87,6 +90,20 @@ class Settings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
+
+    @field_validator("intent_repo_path", "templates_path", "offline_lab_path", mode="after")
+    @classmethod
+    def _resolve_paths(cls, path: Path) -> Path:
+        if path.is_absolute():
+            return path
+        if not path.exists():
+            backend_dir = Path(__file__).resolve().parent.parent
+            root_dir = backend_dir.parent
+            if (root_dir / path).exists():
+                return (root_dir / path).resolve()
+            if (root_dir / path.name).exists():
+                return (root_dir / path.name).resolve()
+        return path
 
     # Повторы post-check не должны занимать больше половины таймера commit confirmed.
     @model_validator(mode="after")

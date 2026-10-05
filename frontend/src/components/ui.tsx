@@ -158,6 +158,7 @@ export const PLATFORM_NAMES: Record<string, string> = {
   juniper_junos: 'Juniper Junos',
   eltex_mes: 'Eltex MES',
   yadro_kornfe: 'YADRO Kornfe',
+  linux_server: 'Linux Server',
 };
 
 export const ROLE_NAMES: Record<string, string> = {
@@ -165,6 +166,24 @@ export const ROLE_NAMES: Record<string, string> = {
   leaf: 'Leaf',
   border: 'Border',
   border_firewall: 'Border FW',
+  server: 'Server / Compute',
+};
+
+export const ManagementModeBadge: React.FC<{ mode?: string; className?: string }> = ({ mode = 'MONITORING_ONLY', className = '' }) => {
+  const isManaged = mode === 'MANAGED';
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-mono font-medium ${
+        isManaged
+          ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+          : 'bg-zinc-800/80 text-zinc-400 border-zinc-700'
+      } ${className}`}
+      title={isManaged ? 'Управляемое: разрешены деплой и мутации' : 'Только наблюдение: безопасный режим чтения'}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${isManaged ? 'bg-indigo-400 shadow-[0_0_6px_rgba(129,140,248,0.8)]' : 'bg-zinc-500'}`} />
+      <span>{isManaged ? 'УПРАВЛЯЕМОЕ' : 'НАБЛЮДЕНИЕ'}</span>
+    </span>
+  );
 };
 
 export const Panel: React.FC<{

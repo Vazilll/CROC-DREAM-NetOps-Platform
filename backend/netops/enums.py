@@ -10,6 +10,7 @@ class Platform(StrEnum):
     JUNIPER_JUNOS = "juniper_junos"
     ELTEX_MES = "eltex_mes"
     YADRO_KORNFE = "yadro_kornfe"
+    LINUX_SERVER = "linux_server"
 
 
 class DeviceRole(StrEnum):
@@ -17,6 +18,12 @@ class DeviceRole(StrEnum):
     LEAF = "leaf"
     BORDER = "border"
     BORDER_FIREWALL = "border_firewall"
+    SERVER = "server"
+
+
+class ManagementMode(StrEnum):
+    MONITORING_ONLY = "MONITORING_ONLY"
+    MANAGED = "MANAGED"
 
 
 class DeviceStatus(StrEnum):
@@ -88,6 +95,7 @@ class UserRole(StrEnum):
     VIEWER = "viewer"
     OPERATOR = "operator"
     ADMIN = "admin"
+    OWNER = "owner"
 
     @property
     def rank(self) -> int:
@@ -97,4 +105,4 @@ class UserRole(StrEnum):
         return self.rank >= required.rank
 
 
-_ROLE_RANK = {UserRole.VIEWER: 0, UserRole.OPERATOR: 1, UserRole.ADMIN: 2}
+_ROLE_RANK = {UserRole.VIEWER: 0, UserRole.OPERATOR: 1, UserRole.ADMIN: 2, UserRole.OWNER: 3}

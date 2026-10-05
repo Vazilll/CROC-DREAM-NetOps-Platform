@@ -57,8 +57,17 @@ class JobRunner:
 
             recorder = JobRecorder(session, job)
             recorder.start()
+
+            from netops.services.freeze import get_freeze_state, is_factory_frozen  # noqa: PLC0415
+
+            if is_factory_frozen() and job.type in (JobType.DEPLOY, JobType.DRIFT_REMEDIATE):
+                reason = get_freeze_state().get("reason") or "Экстренная блокировка"
+                recorder.fail(f"Отклонено: Фабрика заморожена оператором (Kill Switch: {reason})")
+                return job.status
+
             try:
                 pipeline = PIPELINES[job.type](session, self._toolchain_factory(), recorder)
+
                 pipeline.run(job)
             except PipelineError as exc:
                 session.rollback()

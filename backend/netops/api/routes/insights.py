@@ -398,3 +398,103 @@ async def copilot_chat(
         provider="Rule-Engine (offline)",
         action=fallback_action,
     )
+
+
+class AiGuardSimulateRequest(BaseModel):
+    hostname: str
+    anomaly_type: Literal["blackhole", "storm", "clear"]
+
+
+class AiGuardResponse(BaseModel):
+    hostname: str
+    healthy: bool
+    metric: str
+    observed_value: float
+    expected_range: tuple[float, float]
+    deviation_pct: float
+    problem: str | None = None
+    message: str = ""
+    provider: str = ""
+    injected_simulation: str | None = None
+
+
+@router.get(
+    "/ai-guard/check/{device_id}",
+    response_model=AiGuardResponse,
+    summary="Runtime error & anomaly detection via TimesFM 3.0",
+)
+@router.get("/insights/ai-guard/check/{device_id}", response_model=AiGuardResponse, include_in_schema=False)
+async def ai_guard_check_device(
+    device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Viewer
+) -> AiGuardResponse:
+    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+    device = service.get(device_id)
+    guard = AiTelemetryGuard(container.settings)
+    verdict = await asyncio.to_thread(guard.verify_execution, device)
+    return AiGuardResponse(
+        hostname=device.hostname,
+        healthy=verdict.healthy,
+        metric=verdict.metric,
+        observed_value=verdict.observed_value,
+        expected_range=verdict.expected_range,
+        deviation_pct=verdict.deviation_pct,
+        problem=verdict.problem,
+        message=verdict.message,
+        provider=verdict.provider,
+        injected_simulation=guard.get_injected_anomaly(device.hostname),
+    )
+
+
+@router.post(
+    "/ai-guard/simulate",
+    summary="Inject simulated operational anomaly (blackhole/storm) for demo",
+)
+@router.post("/insights/ai-guard/simulate", include_in_schema=False)
+async def ai_guard_simulate_anomaly(
+    data: AiGuardSimulateRequest, _: Viewer
+) -> dict[str, str]:
+    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+    AiTelemetryGuard.inject_anomaly(data.hostname, data.anomaly_type)
+    return {
+        "status": "ok",
+        "hostname": data.hostname,
+        "anomaly": data.anomaly_type,
+        "message": f"Simulated {data.anomaly_type} set on {data.hostname}",
+    }
+
+
+@router.get(
+    "/ai-guard/overview",
+    response_model=list[AiGuardResponse],
+    summary="AI Guard health overview across all network devices",
+)
+@router.get("/insights/ai-guard/overview", response_model=list[AiGuardResponse], include_in_schema=False)
+async def ai_guard_overview(
+
+    service: DeviceServiceDep, container: ContainerDep, _: Viewer
+) -> list[AiGuardResponse]:
+    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+    devices = list(service.list_devices(limit=500))
+    guard = AiTelemetryGuard(container.settings)
+    results = []
+    for d in devices:
+        verdict = await asyncio.to_thread(guard.verify_execution, d)
+        results.append(
+            AiGuardResponse(
+                hostname=d.hostname,
+                healthy=verdict.healthy,
+                metric=verdict.metric,
+                observed_value=verdict.observed_value,
+                expected_range=verdict.expected_range,
+                deviation_pct=verdict.deviation_pct,
+                problem=verdict.problem,
+                message=verdict.message,
+                provider=verdict.provider,
+                injected_simulation=guard.get_injected_anomaly(d.hostname),
+            )
+        )
+    return results
+

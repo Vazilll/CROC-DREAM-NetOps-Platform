@@ -38,7 +38,7 @@ def create_app(
         settings=settings,
         session_factory=build_session_factory(engine),
         dispatcher=dispatcher or CeleryJobDispatcher(create_celery_app(settings)),
-        intents=IntentRepository(settings.intent_repo_path),
+        intents=IntentRepository(settings.intent_repo_path, inventory_file=settings.inventory_file),
     )
 
     @asynccontextmanager

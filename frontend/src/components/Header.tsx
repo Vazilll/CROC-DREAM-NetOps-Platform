@@ -1,5 +1,6 @@
-import React from 'react';
-import { Network, Presentation, Search, Sparkles, UserCheck } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertOctagon, Network, Presentation, Search, Sparkles, Shield, Activity, HelpCircle } from 'lucide-react';
+import { api } from '../api';
 import type { UserRole } from '../api';
 import { TABS } from './Sidebar';
 
@@ -12,6 +13,7 @@ interface HeaderProps {
   onOpenSearch: () => void;
   onToggleCopilot: () => void;
   copilotOpen: boolean;
+  onOpenWelcomeModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -23,8 +25,42 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSearch,
   onToggleCopilot,
   copilotOpen,
-}) => (
-  <header className="border-b border-white/[0.06] bg-[#08090c]/90 backdrop-blur-xl sticky top-0 z-50 px-4 md:px-5 h-14 flex items-center gap-4">
+  onOpenWelcomeModal,
+}) => {
+  const [frozen, setFrozen] = useState<boolean>(false);
+  const [freezeLoading, setFreezeLoading] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const fetchFreeze = () => {
+      api.getFreezeStatus().then((st) => {
+        if (mounted) setFrozen(st.frozen);
+      }).catch(() => {});
+    };
+    fetchFreeze();
+    const timer = setInterval(fetchFreeze, 8000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const handleToggleFreeze = async () => {
+    setFreezeLoading(true);
+    try {
+      const next = !frozen;
+      const res = await api.toggleFreeze(next, next ? 'Активировано оператором в Header' : undefined);
+      setFrozen(res.frozen);
+    } catch {
+      // noop
+    } finally {
+      setFreezeLoading(false);
+    }
+  };
+
+  return (
+    <header className="border-b border-white/[0.06] bg-[#08090c]/90 backdrop-blur-xl sticky top-0 z-50 px-4 md:px-5 h-14 flex items-center gap-4">
+
     <div className="flex items-center gap-2.5 lg:w-48 shrink-0">
       <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-cyan-500 to-indigo-600 flex items-center justify-center">
         <Network className="h-4 w-4 text-white" />
@@ -68,6 +104,28 @@ export const Header: React.FC<HeaderProps> = ({
         <option value="slides">Архитектура (слайды)</option>
       </select>
 
+      {frozen ? (
+        <button
+          onClick={handleToggleFreeze}
+          disabled={freezeLoading}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white shadow-[0_0_12px_rgba(225,29,72,0.8)] animate-pulse cursor-pointer transition-all"
+          title="Фабрика экстренно заморожена! Нажмите для снятия блокировки."
+        >
+          <AlertOctagon className="w-3.5 h-3.5" />
+          <span>FREEZE: ACTIVE</span>
+        </button>
+      ) : (
+        <button
+          onClick={handleToggleFreeze}
+          disabled={freezeLoading}
+          className="hidden xl:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-zinc-400 border border-white/[0.08] hover:border-rose-500/50 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer transition-colors"
+          title="Экстренная остановка деплоев и устранений дрейфа (Kill Switch)"
+        >
+          <AlertOctagon className="w-3.5 h-3.5" />
+          <span>Freeze Factory</span>
+        </button>
+      )}
+
       <button
         onClick={onToggleCopilot}
         className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium cursor-pointer transition-colors ${
@@ -77,16 +135,47 @@ export const Header: React.FC<HeaderProps> = ({
         <Sparkles className="w-3.5 h-3.5" /> Copilot
       </button>
 
-      <div className="flex items-center gap-1.5 bg-white/[0.04] rounded-md px-2 py-1">
-        <UserCheck className="w-3 h-3 text-zinc-400" />
+      {onOpenWelcomeModal && (
+        <button
+          onClick={onOpenWelcomeModal}
+          className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium text-zinc-400 hover:text-cyan-300 hover:bg-white/[0.04] border border-white/[0.08] cursor-pointer transition-colors"
+          title="Открыть руководство платформы и выбор роли"
+        >
+          <HelpCircle className="w-3.5 h-3.5" />
+          <span>Гид / Роли</span>
+        </button>
+      )}
+
+      {/* Styled Role Picker Badge */}
+      <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-all ${
+        userRole === 'owner'
+          ? 'bg-purple-500/10 border-purple-500/30 text-purple-300'
+          : userRole === 'admin'
+          ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+          : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+      }`}>
+        {userRole === 'owner' ? (
+          <Shield className="w-3.5 h-3.5 text-purple-400" />
+        ) : userRole === 'admin' ? (
+          <Shield className="w-3.5 h-3.5 text-amber-400" />
+        ) : (
+          <Activity className="w-3.5 h-3.5 text-emerald-400" />
+        )}
         <select
           value={userRole}
-          onChange={(e) => setUserRole(e.target.value as UserRole)}
-          className="bg-transparent text-[11px] font-medium text-zinc-200 focus:outline-none cursor-pointer"
+          onChange={(e) => {
+            const newRole = e.target.value as UserRole;
+            setUserRole(newRole);
+            if (newRole === 'admin' || newRole === 'operator' || newRole === 'owner') {
+              api.setRole(newRole);
+            }
+          }}
+          className="bg-transparent text-[11px] font-semibold text-current focus:outline-none cursor-pointer"
         >
-          <option value="admin" className="bg-[#08090c]">admin</option>
-          <option value="operator" className="bg-[#08090c]">operator</option>
-          <option value="viewer" className="bg-[#08090c]">viewer</option>
+          <option value="owner" className="bg-[#0d0f14] text-purple-400">Владелец (Owner)</option>
+          <option value="admin" className="bg-[#0d0f14] text-amber-400">Администратор</option>
+          <option value="operator" className="bg-[#0d0f14] text-emerald-400">Оператор</option>
+          <option value="viewer" className="bg-[#0d0f14] text-zinc-400">Наблюдатель</option>
         </select>
       </div>
 
@@ -100,4 +189,6 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
     </div>
   </header>
-);
+  );
+};
+

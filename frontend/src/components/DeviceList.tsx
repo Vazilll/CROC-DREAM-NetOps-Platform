@@ -8,20 +8,26 @@ import {
   ArrowUpDown,
   GitCompare,
   ExternalLink,
+  Plus,
+  Zap,
 } from 'lucide-react';
-import type { Device } from '../api';
+import { api } from '../api';
+import type { Device, UserRole } from '../api';
 import {
   PLATFORM_NAMES,
   ROLE_NAMES,
   OperStatusBadge,
   IntentStatusBadge,
+  ManagementModeBadge,
   Sparkline,
   StateTimeline,
 } from './ui';
+import { AddDeviceModal } from './AddDeviceModal';
 
 interface DeviceListProps {
   devices: Device[];
   loading: boolean;
+  userRole?: UserRole;
   onRefresh: () => void;
   onRunDryRun: (deviceIds: number[]) => void;
   onScanDrift: (deviceIds?: number[]) => void;
@@ -31,12 +37,13 @@ interface DeviceListProps {
   onOpenDiff?: (deviceId?: number) => void;
 }
 
-type SortKey = 'hostname' | 'role' | 'platform' | 'management_ip' | 'oper_status' | 'status';
+type SortKey = 'hostname' | 'role' | 'platform' | 'management_ip' | 'management_mode' | 'oper_status' | 'status';
 
 const COLUMNS: { key: SortKey; label: string }[] = [
   { key: 'hostname', label: 'Устройство' },
   { key: 'role', label: 'Роль' },
   { key: 'platform', label: 'Платформа' },
+  { key: 'management_mode', label: 'Режим' },
   { key: 'oper_status', label: 'Oper Status' },
   { key: 'status', label: 'Intent Status' },
 ];
@@ -66,6 +73,7 @@ const ipKey = (ip: string) => ip.split('.').reduce((acc, p) => acc * 256 + Numbe
 export const DeviceList: React.FC<DeviceListProps> = ({
   devices,
   loading,
+  userRole,
   onRefresh,
   onRunDryRun,
   onScanDrift,
@@ -81,6 +89,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   const [operStatus, setOperStatus] = useState('');
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'hostname', dir: 1 });
   const [selected, setSelected] = useState<number[]>([]);
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [promotingId, setPromotingId] = useState<number | null>(null);
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -135,6 +145,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {(userRole === 'admin' || userRole === 'owner') && (
+            <button
+              onClick={() => setAddModalOpen(true)}
+              className={`${btn} bg-gradient-to-r from-cyan-500 to-indigo-600 text-white hover:from-cyan-400 hover:to-indigo-500 font-semibold shadow-sm`}
+            >
+              <Plus className="w-3.5 h-3.5" /> Добавить сервер / устройство
+            </button>
+          )}
           <button
             onClick={onSyncInventory}
             className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
@@ -287,6 +305,35 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     </span>
                   </td>
 
+                  {/* Management Mode Pill & Promote button */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1.5">
+                      <ManagementModeBadge mode={d.management_mode} />
+                      {d.management_mode === 'MONITORING_ONLY' && (userRole === 'admin' || userRole === 'owner') && (
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            setPromotingId(d.id);
+                            try {
+                              await api.promoteDevice(d.id);
+                              onRefresh();
+                            } catch (err: any) {
+                              alert(`Ошибка активации управления: ${err.message}`);
+                            } finally {
+                              setPromotingId(null);
+                            }
+                          }}
+                          disabled={promotingId === d.id}
+                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                          title="Активировать прямое управление (Promote to MANAGED)"
+                        >
+                          <Zap className="w-2.5 h-2.5" />
+                          <span>{promotingId === d.id ? '…' : 'В управление'}</span>
+                        </button>
+                      )}
+                    </div>
+                  </td>
+
                   {/* Oper Status (Physical Link Reachability) */}
                   <td className="px-3 py-2">
                     <OperStatusBadge status={d.oper_status ?? 'UP'} />
@@ -366,10 +413,36 @@ export const DeviceList: React.FC<DeviceListProps> = ({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={10} className="px-3 py-12 text-center text-zinc-500">
-                    {devices.length
-                      ? 'Нет устройств под выбранные фильтры'
-                      : 'Инвентарь пуст — нажмите «Синхронизировать инвентарь»'}
+                  <td colSpan={11} className="px-6 py-16 text-center">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto">
+                        <Plus className="w-6 h-6" />
+                      </div>
+                      <h3 className="text-sm font-semibold text-white">Инвентарь фабрики пуст</h3>
+                      <p className="text-xs text-zinc-400 leading-relaxed">
+                        {devices.length
+                          ? 'Нет устройств под выбранные фильтры'
+                          : 'В системе пока нет активных устройств. Вы можете подключить первый Linux-сервер или сетевой коммутатор через SSH Probe либо синхронизировать Git SoT.'}
+                      </p>
+                      {!devices.length && (
+                        <div className="flex items-center justify-center gap-2 pt-2">
+                          {(userRole === 'admin' || userRole === 'owner') && (
+                            <button
+                              onClick={() => setAddModalOpen(true)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 transition-colors cursor-pointer"
+                            >
+                              <Plus className="w-3.5 h-3.5" /> Добавить сервер / коммутатор
+                            </button>
+                          )}
+                          <button
+                            onClick={onSyncInventory}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05] transition-colors cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать Git SoT
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )}
@@ -377,6 +450,13 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           </table>
         </div>
       </div>
+
+      <AddDeviceModal
+        isOpen={addModalOpen}
+        onClose={() => setAddModalOpen(false)}
+        onSuccess={() => onRefresh()}
+        userRole={userRole || 'operator'}
+      />
     </div>
   );
 };

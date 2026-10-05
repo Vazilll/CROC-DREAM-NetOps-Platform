@@ -14,11 +14,18 @@ import { CopilotPanel } from './components/CopilotPanel';
 import { CommandPalette } from './components/CommandPalette';
 import { SlidesPresentation } from './components/SlidesPresentation';
 import { DryRunModal } from './components/DryRunModal';
+import { EmergencyHub } from './components/EmergencyHub';
+import { WelcomeModal } from './components/WelcomeModal';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [userRole, setUserRole] = useState<UserRole>('admin');
+  const [userRole, setUserRole] = useState<UserRole>(() => {
+    return (localStorage.getItem('netops_user_role') as UserRole) || 'operator';
+  });
+  const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(() => {
+    return !localStorage.getItem('netops_onboarding_done');
+  });
   const [devices, setDevices] = useState<Device[]>([]);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -37,6 +44,7 @@ export function App() {
   // Sync token whenever role changes
   useEffect(() => {
     const tokenMap: Record<UserRole, string> = {
+      owner: 'dev-owner-token',
       admin: 'dev-admin-token',
       operator: 'dev-operator-token',
       viewer: 'dev-viewer-token',
@@ -235,6 +243,7 @@ export function App() {
         onOpenSearch={() => setSearchOpen(true)}
         onToggleCopilot={() => setCopilotOpen((o) => !o)}
         copilotOpen={copilotOpen}
+        onOpenWelcomeModal={() => setWelcomeModalOpen(true)}
       />
 
       {toast && (
@@ -269,6 +278,7 @@ export function App() {
           {activeTab === 'device' && deviceId !== null && (
             <DevicePage
               deviceId={deviceId}
+              userRole={userRole}
               onBack={() => setActiveTab('devices')}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}
@@ -289,6 +299,7 @@ export function App() {
             <DeviceList
               devices={devices}
               loading={loading}
+              userRole={userRole}
               onRefresh={refreshAll}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}
@@ -333,6 +344,13 @@ export function App() {
           {activeTab === 'lab' && (
             <ChaosLabView onRefreshAll={refreshAll} />
           )}
+
+          {activeTab === 'emergency' && (
+            <EmergencyHub
+              currentRole={userRole === 'admin' ? 'admin' : 'operator'}
+              onSwitchRole={(role) => setUserRole(role)}
+            />
+          )}
         </main>
       </div>
 
@@ -364,6 +382,14 @@ export function App() {
         onConfirm={handleExecuteDryRun}
         deviceIds={dryRunTargetIds}
         devices={devices}
+      />
+
+      <WelcomeModal
+        isOpen={welcomeModalOpen}
+        onClose={(role) => {
+          setUserRole(role);
+          setWelcomeModalOpen(false);
+        }}
       />
     </div>
   );
