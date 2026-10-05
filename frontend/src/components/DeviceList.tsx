@@ -10,9 +10,11 @@ import {
   ExternalLink,
   Plus,
   Zap,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../api';
 import type { Device, UserRole } from '../api';
+import { translations, type Locale } from '../i18n';
 import {
   PLATFORM_NAMES,
   ROLE_NAMES,
@@ -28,6 +30,7 @@ interface DeviceListProps {
   devices: Device[];
   loading: boolean;
   userRole?: UserRole;
+  locale?: Locale;
   onRefresh: () => void;
   onRunDryRun: (deviceIds: number[]) => void;
   onScanDrift: (deviceIds?: number[]) => void;
@@ -35,6 +38,7 @@ interface DeviceListProps {
   onLintIntent: () => void;
   onOpenDevice: (deviceId: number) => void;
   onOpenDiff?: (deviceId?: number) => void;
+  onDeleteDevice?: (deviceId: number) => void;
 }
 
 type SortKey = 'hostname' | 'role' | 'platform' | 'management_ip' | 'management_mode' | 'oper_status' | 'status';
@@ -74,6 +78,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   devices,
   loading,
   userRole,
+  locale = 'ru',
   onRefresh,
   onRunDryRun,
   onScanDrift,
@@ -81,7 +86,9 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   onLintIntent,
   onOpenDevice,
   onOpenDiff,
+  onDeleteDevice,
 }) => {
+  const t = translations[locale];
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState('');
   const [role, setRole] = useState('');
@@ -91,6 +98,42 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   const [selected, setSelected] = useState<number[]>([]);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [promotingId, setPromotingId] = useState<number | null>(null);
+
+  const handleDelete = async (id: number) => {
+    try {
+      if (onDeleteDevice) {
+        await onDeleteDevice(id);
+      } else {
+        await api.deleteDevice(id);
+      }
+      await onRefresh();
+    } catch (err: any) {
+      alert(`${t.deleteError}: ${err.message}`);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (!window.confirm(`${t.deleteConfirm} (${selected.length})`)) return;
+    try {
+      const results = await Promise.allSettled(selected.map((id) => api.deleteDevice(id)));
+      const succeeded: number[] = [];
+      const failed: string[] = [];
+      results.forEach((res, idx) => {
+        if (res.status === 'fulfilled') {
+          succeeded.push(selected[idx]);
+        } else {
+          failed.push(res.reason?.message || 'Error');
+        }
+      });
+      setSelected((prev) => prev.filter((id) => !succeeded.includes(id)));
+      await onRefresh();
+      if (failed.length > 0) {
+        alert(`${t.deleteError}: ${failed.length} / ${selected.length} ${locale === 'en' ? 'failed' : 'не удалось удалить'}`);
+      }
+    } catch (err: any) {
+      alert(`${t.deleteError}: ${err.message}`);
+    }
+  };
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -124,7 +167,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
     setSelected((s) => (s.includes(id) ? s.filter((i) => i !== id) : [...s, id]));
   const allSelected = rows.length > 0 && rows.every((d) => selected.includes(d.id));
   const targets = selected.length ? selected : rows.map((d) => d.id);
-  const scope = selected.length ? `выбрано: ${selected.length}` : 'все в списке';
+  const scope = selected.length ? `${locale === 'en' ? 'selected' : 'выбрано'}: ${selected.length}` : (locale === 'en' ? 'all in list' : 'все в списке');
 
   const btn =
     'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors disabled:opacity-40';
@@ -135,29 +178,40 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-lg font-semibold text-white tracking-tight">
-            Инвентарь оборудования{' '}
+            {locale === 'en' ? 'Hardware Inventory' : 'Инвентарь оборудования'}{' '}
             <span className="text-zinc-500 font-normal text-sm ml-1 font-mono">
-              {rows.length} из {devices.length}
+              {rows.length} {locale === 'en' ? 'of' : 'из'} {devices.length}
             </span>
           </h1>
           <p className="text-xs text-zinc-400 mt-0.5">
-            Учет физического состояния фабрики (Oper Status) и соответствия намерениям Git SoT (Intent Status)
+            {locale === 'en'
+              ? 'Physical fabric state (Oper Status) and Git SoT intent compliance (Intent Status)'
+              : 'Учет физического состояния фабрики (Oper Status) и соответствия намерениям Git SoT (Intent Status)'}
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {(userRole === 'admin' || userRole === 'owner') && selected.length > 0 && (
+            <button
+              onClick={handleBulkDelete}
+              className={`${btn} bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-semibold shadow-sm`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>{t.deleteSelectedBtn} ({selected.length})</span>
+            </button>
+          )}
           {(userRole === 'admin' || userRole === 'owner') && (
             <button
               onClick={() => setAddModalOpen(true)}
               className={`${btn} bg-gradient-to-r from-cyan-500 to-indigo-600 text-white hover:from-cyan-400 hover:to-indigo-500 font-semibold shadow-sm`}
             >
-              <Plus className="w-3.5 h-3.5" /> Добавить сервер / устройство
+              <Plus className="w-3.5 h-3.5" /> {t.addDeviceBtn}
             </button>
           )}
           <button
             onClick={onSyncInventory}
             className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать инвентарь
+            <RefreshCw className="w-3.5 h-3.5" /> {t.syncInventoryBtn}
           </button>
           <button
             onClick={onLintIntent}
@@ -257,8 +311,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     </button>
                   </th>
                 ))}
-                <th className="px-3 py-2.5 font-medium">Нагрузка (тренд)</th>
-                <th className="px-3 py-2.5 font-medium">24h Timeline</th>
+                <th className="px-3 py-2.5 font-medium hidden 2xl:table-cell">Нагрузка (тренд)</th>
+                <th className="px-3 py-2.5 font-medium hidden 2xl:table-cell">24h Timeline</th>
                 <th className="px-3 py-2.5 font-medium text-right">Действия</th>
               </tr>
             </thead>
@@ -282,11 +336,11 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   {/* Device Hostname & IP */}
                   <td className="px-3 py-2">
                     <div className="flex flex-col">
-                      <span className="font-semibold text-cyan-300 font-mono tracking-tight group-hover:text-cyan-200">
+                      <span className="font-semibold text-cyan-300 font-mono tracking-tight whitespace-nowrap group-hover:text-cyan-200">
                         {d.hostname}
                       </span>
                       <span className="font-mono text-[11px] text-zinc-500">
-                        {d.management_ip}
+                        {d.management_ip}:{d.management_port}
                       </span>
                     </div>
                   </td>
@@ -345,7 +399,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </td>
 
                   {/* Micro-Sparkline */}
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="sparkline" data-testid="sparkline">
                       <Sparkline
                         className="sparkline"
@@ -361,7 +415,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </td>
 
                   {/* 24h State Timeline */}
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="state-timeline" data-testid="state-timeline">
                       <StateTimeline
                         states={
@@ -377,14 +431,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
 
                   {/* 1-Click Action Buttons */}
                   <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="inline-flex items-center gap-1.5">
+                    <div className="inline-flex items-center gap-1 whitespace-nowrap">
                       <button
                         onClick={() => onOpenDevice(d.id)}
                         className="px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-white/[0.06]"
                         title="Открыть карточку устройства"
                       >
                         <ExternalLink className="w-3 h-3 text-cyan-400" />
-                        <span>Карточка</span>
+                        <span className="hidden 2xl:inline">{locale === 'en' ? 'Details' : 'Карточка'}</span>
                       </button>
 
                       <button
@@ -396,7 +450,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                         title="Сверить конфигурации (Diff)"
                       >
                         <GitCompare className="w-3 h-3 text-amber-400" />
-                        <span>Diff</span>
+                        <span className="hidden 2xl:inline">Diff</span>
                       </button>
 
                       <button
@@ -405,8 +459,23 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                         title="Запустить префлайт Dry-run"
                       >
                         <Play className="w-3 h-3 text-emerald-400" />
-                        <span>Dry-run</span>
+                        <span className="hidden 2xl:inline">Dry-run</span>
                       </button>
+
+                      {(userRole === 'admin' || userRole === 'owner') && (
+                        <button
+                          onClick={async () => {
+                            if (window.confirm(`${t.deleteConfirm} (${d.hostname})`)) {
+                              await handleDelete(d.id);
+                            }
+                          }}
+                          className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                          title={t.deleteDeviceBtn}
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-400" />
+                          <span className="hidden 2xl:inline">{t.deleteDeviceBtn}</span>
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>

@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../api';
+import { translations, type Locale } from '../i18n';
 import { TopologyMap } from './TopologyMap';
 import { PLATFORM_NAMES, ROLE_NAMES } from './ui';
 import { AddDeviceModal } from './AddDeviceModal';
@@ -24,6 +25,7 @@ interface DashboardProps {
   devices: Device[];
   jobs: JobSummary[];
   userRole?: UserRole;
+  locale?: Locale;
   onOpenTab: (tab: string) => void;
   onOpenDevice: (id: number) => void;
   onRunDryRun?: (deviceIds: number[]) => void;
@@ -64,12 +66,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
   devices,
   jobs,
   userRole,
+  locale = 'ru',
   onOpenTab,
   onOpenDevice,
   onRunDryRun,
   onOpenDiff,
   onSyncInventory,
 }) => {
+  const t = translations[locale];
   const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
   const [aiGuardList, setAiGuardList] = useState<AiGuardResponse[]>([]);
   const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
@@ -245,7 +249,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
               <Server className="w-3.5 h-3.5 text-zinc-500" />
-              <span>Оборудование</span>
+              <span>{t.cardDevices}</span>
             </div>
             <div className="text-2xl font-semibold font-mono mt-0.5 text-white tracking-tight">
               {devices.length}
@@ -253,7 +257,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           </div>
           <div className="text-right">
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-400">
-              {healthPercent}% норма
+              {healthPercent}% {t.cardDevicesNormal}
             </span>
           </div>
         </button>
@@ -265,7 +269,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span>В синхроне (SoT)</span>
+              <span>{t.cardInSync}</span>
             </div>
             <div className="text-2xl font-semibold font-mono mt-0.5 text-emerald-400 tracking-tight">
               {inSyncCount}
@@ -285,7 +289,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${driftCount > 0 ? 'bg-amber-400 animate-pulse' : 'bg-zinc-500'}`} />
-              <span>Дрейф конфигураций</span>
+              <span>{t.cardDrift}</span>
             </div>
             <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${driftCount > 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
               {driftCount}
@@ -305,7 +309,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${unreachableCount > 0 ? 'bg-rose-400' : 'bg-zinc-500'}`} />
-              <span>Недоступные узлы</span>
+              <span>{t.cardUnreachable}</span>
             </div>
             <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${unreachableCount > 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
               {unreachableCount}
@@ -326,10 +330,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
           <div>
             <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
               <span className={`w-2 h-2 rounded-full ${aiAnomalies.length > 0 ? 'bg-rose-500 animate-ping' : 'bg-cyan-400'}`} />
-              <span>TimesFM 3.0 Guard</span>
+              <span>{t.cardAiGuard}</span>
             </div>
             <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${aiAnomalies.length > 0 ? 'text-rose-400' : 'text-cyan-400'}`}>
-              {aiAnomalies.length > 0 ? `${aiAnomalies.length} аномалий` : 'ACTIVE'}
+              {aiAnomalies.length > 0 ? `${aiAnomalies.length} ${t.radarAnomCount}` : 'ACTIVE'}
             </div>
           </div>
           <div className="text-right">
@@ -346,14 +350,14 @@ export const Dashboard: React.FC<DashboardProps> = ({
         {/* Left Column (7 cols on XL): CLOS Fabric Topology & Platform distribution */}
         <div className="xl:col-span-7 space-y-3">
           <BentoCard
-            title="Топология CLOS фабрики"
+            title={t.topologyTitle}
             indicator="bg-cyan-400"
             right={
               <button
                 onClick={() => onOpenTab('devices')}
                 className="text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
               >
-                <span>Все устройства</span>
+                <span>{t.allDevices}</span>
                 <ExternalLink className="w-3 h-3" />
               </button>
             }
@@ -361,6 +365,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <TopologyMap
               devices={devices}
               alerts={alerts}
+              locale={locale}
               onSelectDevice={onOpenDevice}
               onRunDryRun={onRunDryRun}
               onOpenDiff={() => (onOpenDiff ? onOpenDiff() : onOpenTab('diff'))}
@@ -369,7 +374,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Compact Platform & Role Inventory Strip */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <BentoCard title="Платформы оборудования" icon={<Cpu className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
+            <BentoCard title={t.platformsTitle} icon={<Cpu className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
               <div className="space-y-1.5">
                 {platformsCount.map(([p, count]) => (
                   <div key={p} className="flex items-center justify-between text-[11px]">
@@ -382,7 +387,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               </div>
             </BentoCard>
 
-            <BentoCard title="Роли в фабрике" icon={<Layers className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
+            <BentoCard title={t.rolesTitle} icon={<Layers className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
               <div className="space-y-1.5">
                 {rolesCount.map(([r, count]) => (
                   <div key={r} className="flex items-center justify-between text-[11px]">
@@ -401,11 +406,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="xl:col-span-5 space-y-3">
           {/* TimesFM Risk Radar with 1-Click Action Buttons */}
           <BentoCard
-            title="Предиктивный радар рисков (TimesFM, 6ч)"
+            title={t.riskRadarTitle}
             indicator={alerts.length > 0 ? 'bg-amber-400' : 'bg-emerald-400'}
             right={
               <span className="font-mono text-[10px] text-zinc-400">
-                {alerts.length > 0 ? `${alerts.length} аномал.` : '0 рисков'}
+                {alerts.length > 0 ? `${alerts.length} ${t.radarAnomCount}` : (locale === 'en' ? '0 risks' : '0 рисков')}
               </span>
             }
           >
@@ -440,7 +445,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       title="Открыть карточку устройства и прогноз"
                     >
                       <ExternalLink className="w-3 h-3 text-cyan-400" />
-                      <span>Открыть</span>
+                      <span>{t.openBtn}</span>
                     </button>
 
                     <button
@@ -452,7 +457,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       title="Сверить конфигурации в DiffViewer"
                     >
                       <GitCompare className="w-3 h-3 text-amber-400" />
-                      <span>Diff</span>
+                      <span>{t.diffBtn}</span>
                     </button>
 
                     <button
@@ -464,10 +469,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       <Play className="w-3 h-3 text-emerald-400" />
                       <span>
                         {dryRunSuccess === a.device_id
-                          ? 'Запущен!'
+                          ? (locale === 'en' ? 'Launched!' : 'Запущен!')
                           : dryRunRunning === a.device_id
                           ? '...'
-                          : 'Dry-run'}
+                          : t.dryRunBtn}
                       </span>
                     </button>
                   </div>
@@ -477,9 +482,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
               {alerts.length === 0 && (
                 <div className="py-6 text-center text-xs text-zinc-400 flex flex-col items-center justify-center gap-1.5">
                   <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  <span className="text-zinc-300 font-medium">Штатный режим</span>
+                  <span className="text-zinc-300 font-medium">
+                    {locale === 'en' ? 'Normal state' : 'Штатный режим'}
+                  </span>
                   <span className="text-zinc-500 text-[11px]">
-                    Пробоев порогов в ближайшие 6 часов не прогнозируется
+                    {locale === 'en' ? 'No metric threshold breaches forecasted within 6h' : 'Пробоев порогов в ближайшие 6 часов не прогнозируется'}
                   </span>
                 </div>
               )}
@@ -488,7 +495,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Recent Automation Jobs */}
           <BentoCard
-            title="Задачи автоматизации"
+            title={t.automationJobsTitle}
             icon={<Clock className="w-3.5 h-3.5 text-zinc-400" />}
             indicator="bg-zinc-400"
             right={
@@ -496,7 +503,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 onClick={() => onOpenTab('jobs')}
                 className="text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
               >
-                <span>Журнал</span>
+                <span>{t.auditLogBtn}</span>
                 <ExternalLink className="w-3 h-3" />
               </button>
             }
@@ -518,7 +525,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-zinc-500 text-[11px] font-mono">
-                        {new Date(j.created_at).toLocaleTimeString('ru-RU', {
+                        {new Date(j.created_at).toLocaleTimeString(locale === 'en' ? 'en-US' : 'ru-RU', {
                           hour: '2-digit',
                           minute: '2-digit',
                         })}
@@ -534,7 +541,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               })}
 
               {jobs.length === 0 && (
-                <div className="py-4 text-center text-xs text-zinc-500">Запусков пока нет</div>
+                <div className="py-4 text-center text-xs text-zinc-500">{t.noRunsYet}</div>
               )}
             </div>
           </BentoCard>

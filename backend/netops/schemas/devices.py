@@ -12,8 +12,11 @@ from netops.schemas.common import PartialUpdate
 from netops.schemas.intent import IntentIssueRead
 
 
+from typing import Any
+from pydantic import field_validator
+
 class DeviceCreate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     hostname: Hostname = Field(examples=["leaf-1.croc.lab"])
     management_ip: IPv4Address = Field(examples=["172.20.20.11"])
@@ -24,6 +27,22 @@ class DeviceCreate(BaseModel):
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] = "MONITORING_ONLY"
     proxy_jump: str | None = None
     hardware_specs: str | None = None
+
+    @field_validator("hostname", mode="before")
+    @classmethod
+    def sanitize_hostname(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip().replace("_", "-")
+        return v
+
+    @field_validator("management_ip", mode="before")
+    @classmethod
+    def sanitize_ip(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            v = v.strip().removeprefix("http://").removeprefix("https://")
+            if ":" in v:
+                v = v.split(":", 1)[0]
+        return v
 
 
 class DeviceUpdate(PartialUpdate):

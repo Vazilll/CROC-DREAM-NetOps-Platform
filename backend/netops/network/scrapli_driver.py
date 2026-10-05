@@ -59,16 +59,16 @@ class _ParamikoConnAdapter:
                 password=password,
                 look_for_keys=False,
                 allow_agent=False,
-                timeout=self.timeout,
-                banner_timeout=60,
-                auth_timeout=30,
+                timeout=min(self.timeout, 10),
+                banner_timeout=6,
+                auth_timeout=10,
             )
         except paramiko.ssh_exception.AuthenticationException:
             # Fallback to keyboard-interactive authentication (e.g. Cisco IOS-XE)
             transport = self.client.get_transport()
             if transport is None:
                 transport = paramiko.Transport((self.target.host, self.target.port))
-                transport.start_client(timeout=self.timeout)
+                transport.start_client(timeout=min(self.timeout, 10))
             transport.auth_interactive(
                 username,
                 lambda title, instructions, prompt_list: [password for _ in prompt_list],
@@ -152,12 +152,12 @@ class _ParamikoConnAdapter:
 class ScrapliNetworkDriver:
     """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
 
-    def __init__(self, max_workers: int = 2, timeout_socket: int = 35) -> None:
+    def __init__(self, max_workers: int = 6, timeout_socket: int = 15) -> None:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
 
     def _get_connection(self, target: DeviceTarget):
-        return _ParamikoConnAdapter(target, timeout=max(self.timeout_socket, 35))
+        return _ParamikoConnAdapter(target, timeout=self.timeout_socket)
 
     def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
         results: dict[str, FetchResult] = {}
@@ -177,12 +177,27 @@ class ScrapliNetworkDriver:
         return results
 
     def _fetch_single(self, target: DeviceTarget) -> str:
+        import time  # noqa: PLC0415
+
         cmd = "display current-configuration" if target.platform == Platform.HUAWEI_VRP else "show running-config"
-        with self._get_connection(target) as conn:
-            response = conn.send_command(cmd)
-            if response.failed:
-                raise RuntimeError(f"Command '{cmd}' failed: {response.result}")
-            return response.result
+        last_exc: Exception | None = None
+        for attempt in range(2):
+            try:
+                with self._get_connection(target) as conn:
+                    response = conn.send_command(cmd)
+                    if response.failed:
+                        raise RuntimeError(f"Command '{cmd}' failed: {response.result}")
+                    if not response.result.strip():
+                        raise RuntimeError("Empty response from device")
+                    return response.result
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                logger.warning("Fetch attempt %d/2 failed for %s: %s", attempt + 1, target.hostname, exc)
+                err_str = str(exc).lower()
+                if any(x in err_str for x in ("no existing session", "protocol banner", "connection refused", "timed out")):
+                    break
+                time.sleep(1.0)
+        raise RuntimeError(str(last_exc))
 
     def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None:
         lines = [

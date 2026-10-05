@@ -277,7 +277,15 @@ export class NetOpsApiClient {
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(err.detail || `HTTP ${res.status}`);
+      let message = res.statusText || `HTTP ${res.status}`;
+      if (typeof err.detail === 'string') {
+        message = err.detail;
+      } else if (Array.isArray(err.detail)) {
+        message = err.detail.map((d: any) => `${d.loc ? d.loc.slice(1).join('.') + ': ' : ''}${d.msg || d}`).join('; ');
+      } else if (err.detail) {
+        message = JSON.stringify(err.detail);
+      }
+      throw new Error(message);
     }
 
     return res.json();

@@ -17,9 +17,11 @@ import {
   ShieldAlert,
   Sliders,
   ChevronRight,
+  Trash2,
 } from 'lucide-react';
 import { api } from '../api';
 import type { DeviceDetail, Forecast, UserRole, DeviceEmergencyAction } from '../api';
+import type { Locale } from '../i18n';
 import { ForecastChart } from './ForecastChart';
 import {
   PLATFORM_NAMES,
@@ -33,10 +35,12 @@ import {
 interface Props {
   deviceId: number;
   userRole?: UserRole;
+  locale?: Locale;
   onBack: () => void;
   onRunDryRun: (ids: number[]) => void;
   onScanDrift: (ids?: number[]) => void;
   onAskCopilot: (question: string) => void;
+  onDeleteDevice?: (id: number) => void;
 }
 
 const TABS = ['Обзор', 'Прогноз и What-If', 'SSH Терминал', 'AI Copilot'] as const;
@@ -63,10 +67,12 @@ const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, 
 export const DevicePage: React.FC<Props> = ({
   deviceId,
   userRole = 'operator',
+  locale = 'ru',
   onBack,
   onRunDryRun,
   onScanDrift,
   onAskCopilot,
+  onDeleteDevice,
 }) => {
   const [device, setDevice] = useState<DeviceDetail | null>(null);
   const [error, setError] = useState('');
@@ -310,6 +316,34 @@ export const DevicePage: React.FC<Props> = ({
           >
             <Sparkles className="w-3.5 h-3.5" /> Спросить Copilot
           </button>
+
+          {canAdmin && (
+            <button
+              onClick={async () => {
+                const confirmMsg =
+                  locale === 'en'
+                    ? `Are you sure you want to delete ${device.hostname}?`
+                    : `Вы действительно хотите удалить устройство ${device.hostname}?`;
+                if (window.confirm(confirmMsg)) {
+                  try {
+                    if (onDeleteDevice) {
+                      await onDeleteDevice(device.id);
+                    } else {
+                      await api.deleteDevice(device.id);
+                      onBack();
+                    }
+                  } catch (err: any) {
+                    alert(`Ошибка удаления: ${err.message}`);
+                  }
+                }
+              }}
+              className={`${btn} bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-semibold shadow-sm`}
+              title={locale === 'en' ? 'Delete device' : 'Удалить устройство'}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <span>{locale === 'en' ? 'Delete' : 'Удалить'}</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -367,10 +401,10 @@ export const DevicePage: React.FC<Props> = ({
                 <span>Вычислительные ядра</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.cpu_cores ? `${specs.cpu_cores} vCPU` : isServer ? '1 vCPU' : 'Control Plane (ASIC)'}
+                {specs?.cpu_cores ? `${specs.cpu_cores} vCPU` : '—'}
               </div>
               <div className="text-[11px] text-zinc-500 mt-0.5">
-                {specs?.os_version || (isServer ? 'Linux Kernel 6.8' : 'NOS Runtime')}
+                {specs?.os_version || (locale === 'en' ? 'No telemetry yet' : 'Телеметрия не получена')}
               </div>
             </div>
 
@@ -380,20 +414,20 @@ export const DevicePage: React.FC<Props> = ({
                 <span>Оперативная память</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.ram_gb ? `${specs.ram_gb} GB RAM` : isServer ? '4 GB RAM' : '8 GB TCAM/DRAM'}
+                {specs?.ram_gb ? `${specs.ram_gb} GB RAM` : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">Буфер пакетов: 32MB Shared</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">{specs?.ram_gb ? 'RAM' : (locale === 'en' ? 'No data' : 'Нет данных')}</div>
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
                 <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Накопитель NVMe</span>
+                <span>Накопитель</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.disk_gb ? `${specs.disk_gb} GB NVMe` : isServer ? '10 GB High-Speed' : 'Flash Storage'}
+                {specs?.disk_gb ? `${specs.disk_gb} GB` : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">Здоровье SMART: 100% OK</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">{specs?.disk_gb ? 'Disk' : (locale === 'en' ? 'No data' : 'Нет данных')}</div>
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
@@ -402,9 +436,9 @@ export const DevicePage: React.FC<Props> = ({
                 <span>Сетевые порты</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.interfaces ? `${specs.interfaces.length} портов` : `${device.intent?.interfaces.length || 4} портов`}
+                {specs?.interfaces ? `${specs.interfaces.length}` : `${device.intent?.interfaces.length ?? 0}`}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">Full-Duplex Wire-speed</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">{locale === 'en' ? 'Per Git intent' : 'По Git-intent'}</div>
             </div>
           </div>
 

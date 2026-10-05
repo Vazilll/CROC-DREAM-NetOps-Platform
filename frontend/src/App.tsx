@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { api } from './api';
 import type { Device, JobSummary, UserRole } from './api';
 import { Header } from './components/Header';
+import type { AppTheme } from './components/Header';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { DeviceList } from './components/DeviceList';
@@ -16,12 +17,21 @@ import { SlidesPresentation } from './components/SlidesPresentation';
 import { DryRunModal } from './components/DryRunModal';
 import { EmergencyHub } from './components/EmergencyHub';
 import { WelcomeModal } from './components/WelcomeModal';
+import { translations } from './i18n';
+import type { Locale } from './i18n';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [locale, setLocale] = useState<Locale>(() => {
+    return (localStorage.getItem('netops_lang') as Locale) || 'ru';
+  });
+  const [theme, setTheme] = useState<AppTheme>(() => {
+    const saved = localStorage.getItem('netops_theme');
+    return saved === 'light' ? 'light' : 'dark';
+  });
   const [userRole, setUserRole] = useState<UserRole>(() => {
-    return (localStorage.getItem('netops_user_role') as UserRole) || 'operator';
+    return (localStorage.getItem('netops_user_role') as UserRole) || 'owner';
   });
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(() => {
     return !localStorage.getItem('netops_onboarding_done');
@@ -40,6 +50,27 @@ export function App() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(
     null
   );
+
+  const handleSetLocale = (newLocale: Locale) => {
+    setLocale(newLocale);
+    localStorage.setItem('netops_lang', newLocale);
+  };
+
+  const handleSetTheme = (newTheme: AppTheme) => {
+    setTheme(newTheme);
+    localStorage.setItem('netops_theme', newTheme);
+  };
+
+  useEffect(() => {
+    document.documentElement.className = `theme-${theme}`;
+    if (theme === 'light') {
+      document.body.classList.add('theme-light');
+      document.body.classList.remove('theme-dark');
+    } else {
+      document.body.classList.add('theme-dark');
+      document.body.classList.remove('theme-light');
+    }
+  }, [theme]);
 
   // Sync token whenever role changes
   useEffect(() => {
@@ -143,14 +174,34 @@ export function App() {
     setLoading(false);
   };
 
+  const hasActiveJob = useMemo(() => {
+    return jobs.some((j) => j.status === 'RUNNING' || j.status === 'PENDING');
+  }, [jobs]);
+
   useEffect(() => {
     refreshAll();
+
+    const onFocusOrVisible = () => {
+      if (document.visibilityState === 'visible') {
+        fetchDevices();
+        fetchJobs();
+      }
+    };
+    window.addEventListener('focus', onFocusOrVisible);
+    document.addEventListener('visibilitychange', onFocusOrVisible);
+
+    const pollMs = hasActiveJob ? 1500 : 5000;
     const interval = setInterval(() => {
-      fetchDevices();
       fetchJobs();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
+      fetchDevices();
+    }, pollMs);
+
+    return () => {
+      window.removeEventListener('focus', onFocusOrVisible);
+      document.removeEventListener('visibilitychange', onFocusOrVisible);
+      clearInterval(interval);
+    };
+  }, [hasActiveJob]);
 
   const handleExecuteDryRun = async (deviceIds: number[]) => {
     try {
@@ -233,16 +284,19 @@ export function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#08090c] text-zinc-100 flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
+    <div className={`min-h-screen theme-${theme} ${theme === 'dark' ? 'bg-[#08090c] text-zinc-100' : 'bg-slate-50 text-slate-900'} flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors`}>
       <Header
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         userRole={userRole}
         setUserRole={setUserRole}
         apiHealthy={apiHealthy}
-        onOpenSearch={() => setSearchOpen(true)}
         onToggleCopilot={() => setCopilotOpen((o) => !o)}
         copilotOpen={copilotOpen}
+        locale={locale}
+        setLocale={handleSetLocale}
+        theme={theme}
+        setTheme={handleSetTheme}
         onOpenWelcomeModal={() => setWelcomeModalOpen(true)}
       />
 
@@ -259,13 +313,18 @@ export function App() {
       )}
 
       <div className="flex flex-1">
-        <Sidebar activeTab={activeTab === 'device' ? 'devices' : activeTab} setActiveTab={setActiveTab} />
+        <Sidebar
+          activeTab={activeTab === 'device' ? 'devices' : activeTab}
+          setActiveTab={setActiveTab}
+          locale={locale}
+        />
         <main className="flex-1 min-w-0 p-4 md:p-6 space-y-6">
           {activeTab === 'dashboard' && (
             <Dashboard
               devices={devices}
               jobs={jobs}
               userRole={userRole}
+              locale={locale}
               onOpenTab={setActiveTab}
               onOpenDevice={openDevice}
               onRunDryRun={openDryRunModal}
@@ -281,10 +340,24 @@ export function App() {
             <DevicePage
               deviceId={deviceId}
               userRole={userRole}
-              onBack={() => setActiveTab('devices')}
+              locale={locale}
+              onBack={() => {
+                setActiveTab('devices');
+                fetchDevices();
+              }}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}
               onAskCopilot={askCopilot}
+              onDeleteDevice={async (id) => {
+                try {
+                  await api.deleteDevice(id);
+                  showToast(locale === 'en' ? 'Device deleted successfully' : 'Устройство успешно удалено', 'success');
+                  await fetchDevices();
+                  setActiveTab('devices');
+                } catch (err: any) {
+                  showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${err.message}`, 'error');
+                }
+              }}
             />
           )}
 
@@ -302,6 +375,7 @@ export function App() {
               devices={devices}
               loading={loading}
               userRole={userRole}
+              locale={locale}
               onRefresh={refreshAll}
               onRunDryRun={openDryRunModal}
               onScanDrift={handleScanDrift}
@@ -309,6 +383,15 @@ export function App() {
               onLintIntent={handleLintIntent}
               onOpenDevice={openDevice}
               onOpenDiff={openDiff}
+              onDeleteDevice={async (id) => {
+                try {
+                  await api.deleteDevice(id);
+                  showToast(locale === 'en' ? 'Device deleted successfully' : 'Устройство успешно удалено', 'success');
+                  await fetchDevices();
+                } catch (err: any) {
+                  showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${err.message}`, 'error');
+                }
+              }}
             />
           )}
 
@@ -388,10 +471,24 @@ export function App() {
 
       <WelcomeModal
         isOpen={welcomeModalOpen}
-        onClose={(role) => {
+        onClose={async (role) => {
           setUserRole(role);
           setWelcomeModalOpen(false);
+          const t = translations[locale];
+          showToast(role === 'owner' ? t.toastOwnerSuccess : t.toastConnectSuccess, 'success');
+          await refreshAll();
+          try {
+            const current = await api.getDevices();
+            if (!current || current.length === 0) {
+              await api.syncInventory();
+              await fetchDevices();
+            }
+          } catch (e) {
+            console.error('Welcome auto-sync error', e);
+          }
         }}
+        locale={locale}
+        setLocale={handleSetLocale}
       />
     </div>
   );

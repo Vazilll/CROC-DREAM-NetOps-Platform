@@ -18,7 +18,8 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-is_live = "--live" in sys.argv
+is_offline = "--offline" in sys.argv or os.environ.get("NETOPS_OFFLINE", "0") == "1"
+is_live = not is_offline
 default_driver = "scrapli" if is_live else "offline"
 default_inventory = "inventory.live.yaml" if is_live else "inventory.yaml"
 
@@ -29,6 +30,7 @@ os.environ.setdefault("NETOPS_INVENTORY_FILE", default_inventory)
 os.environ.setdefault("NETOPS_TEMPLATES_PATH", str(PROJECT_ROOT / "templates"))
 os.environ.setdefault("NETOPS_OFFLINE_LAB_PATH", str(PROJECT_ROOT / "lab" / "running"))
 os.environ.setdefault("NETOPS_NETWORK_DRIVER", default_driver)
+os.environ.setdefault("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "120")
 
 os.environ.setdefault("NETOPS_CORS_ORIGINS", '["*"]')
 os.environ.setdefault(
@@ -90,25 +92,20 @@ def init_local_environment() -> None:
     templates_dir = Path(settings.templates_path)
     renderer = JinjaConfigRenderer(templates_dir)
 
-    seed_inventory = "--seed-inventory" in sys.argv or os.environ.get("NETOPS_SEED_INVENTORY", "0") == "1"
-
-    # Only sync inventory if explicitly requested via --seed-inventory
-    if seed_inventory:
-        try:
-            snapshot = intent_repo.load()
-            with session_factory() as session:
-                device_svc = DeviceService(session)
-                sync_res = device_svc.sync_inventory(snapshot.inventory)
-                logger.info(
-                    "Explicit inventory seed: created=%s, updated=%s, unchanged=%s",
-                    sync_res.created,
-                    sync_res.updated,
-                    sync_res.unchanged,
-                )
-        except Exception:
-            logger.exception("Failed to seed inventory from %s", settings.intent_repo_path)
-    else:
-        logger.info("Default clean start: system starts with empty database. Devices must be added by the user.")
+    # Continuous GitOps: Reconcile inventory on boot from Git repository
+    try:
+        snapshot = intent_repo.load()
+        with session_factory() as session:
+            device_svc = DeviceService(session)
+            sync_res = device_svc.sync_inventory(snapshot.inventory)
+            logger.info(
+                "GitOps inventory reconcile on boot: created=%s, updated=%s, unchanged=%s",
+                sync_res.created,
+                sync_res.updated,
+                sync_res.unchanged,
+            )
+    except Exception:
+        logger.exception("Failed to reconcile inventory from %s", settings.intent_repo_path)
 
     # Ensure initial running .cfg files exist for each device
     try:
@@ -124,6 +121,69 @@ def init_local_environment() -> None:
         logger.exception("Failed to ensure running configs in %s", lab_dir)
 
 
+def _start_beat(settings, session_factory, dispatcher) -> None:
+    """In-process analogue of Celery Beat (see netops/worker/celery_app.py).
+
+    - drift scan: first run shortly after start, then every drift_scan_interval_seconds;
+      every scan refreshes oper/intent status, so a node that comes back is picked up by itself;
+    - stale jobs cleanup every STALE_JOBS_CHECK_INTERVAL_SECONDS.
+    """
+    import threading  # noqa: PLC0415
+    import time  # noqa: PLC0415
+    from datetime import timedelta  # noqa: PLC0415
+
+    from netops.pipeline import fail_stale_jobs  # noqa: PLC0415
+    from netops.services import JobService  # noqa: PLC0415
+
+    first_delay = int(os.environ.get("NETOPS_BEAT_FIRST_DELAY_SECONDS", "15"))
+
+    def _cleanup(timeout: timedelta) -> None:
+        with session_factory() as session:
+            failed = fail_stale_jobs(session, timeout=timeout)
+            if failed:
+                logger.warning("Beat: failed stale jobs: %s", failed)
+
+    intent_repo = IntentRepository(Path(settings.intent_repo_path), inventory_file=settings.inventory_file)
+
+    def _loop() -> None:
+        # Воркеры локального режима живут в этом процессе: всё, что осталось
+        # RUNNING/PENDING от прошлого запуска, уже мертво и блокирует планировщик.
+        try:
+            _cleanup(timedelta(0))
+        except Exception:
+            logger.exception("Beat: startup cleanup failed")
+        time.sleep(first_delay)
+        while True:
+            try:
+                _cleanup(timedelta(seconds=settings.job_timeout_seconds))
+                with session_factory() as session:
+                    try:
+                        snapshot = intent_repo.load()
+                        device_svc = DeviceService(session)
+                        sync_res = device_svc.sync_inventory(snapshot.inventory)
+                        if sync_res.created or sync_res.updated:
+                            logger.info(
+                                "Beat: GitOps auto-synced inventory: created=%s, updated=%s",
+                                sync_res.created,
+                                sync_res.updated,
+                            )
+                    except Exception:
+                        logger.warning("Beat: GitOps inventory auto-sync skipped due to error")
+
+                    job = JobService(session, dispatcher).schedule_drift_scan()
+                    logger.info("Beat: scheduled drift scan %s", job.id if job else "(skipped)")
+            except Exception:
+                logger.exception("Beat tick failed")
+            time.sleep(settings.drift_scan_interval_seconds)
+
+    threading.Thread(target=_loop, name="netops-beat", daemon=True).start()
+    logger.info(
+        "Beat started: drift scan every %ss (first run in %ss)",
+        settings.drift_scan_interval_seconds,
+        first_delay,
+    )
+
+
 def main() -> None:
     init_local_environment()
     settings = get_settings()
@@ -136,6 +196,9 @@ def main() -> None:
 
     dispatcher = ThreadedJobDispatcher(_create_runner)
     app = create_app(settings, engine=engine, dispatcher=dispatcher)
+
+    if "--no-beat" not in sys.argv:
+        _start_beat(settings, session_factory, dispatcher)
 
     logger.info("Starting local NetOps API server on http://127.0.0.1:8000 ...")
     uvicorn.run(app, host="127.0.0.1", port=8000, log_level="info")

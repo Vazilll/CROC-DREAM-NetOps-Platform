@@ -2,6 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { ExternalLink, Play, X, Layers, Network } from 'lucide-react';
 import { api } from '../api';
 import type { Device, ForecastAlert } from '../api';
+import type { Locale } from '../i18n';
 import { PLATFORM_NAMES, ROLE_NAMES, StatusBadge } from './ui';
 
 const W = 900;
@@ -33,6 +34,7 @@ const loadColor = (pct: number) => (pct > 70 ? '#f43f5e' : pct > 50 ? '#d97706' 
 interface Props {
   devices: Device[];
   alerts: ForecastAlert[];
+  locale?: Locale;
   onSelectDevice: (id: number) => void;
   onOpenDiff?: () => void;
   onRunDryRun?: (ids: number[]) => void;
@@ -41,6 +43,7 @@ interface Props {
 export const TopologyMap: React.FC<Props> = ({
   devices,
   alerts,
+  locale = 'ru',
   onSelectDevice,
   onRunDryRun,
 }) => {
@@ -66,9 +69,9 @@ export const TopologyMap: React.FC<Props> = ({
     if (hasBorder) layers.push({ roles: ['border', 'border_firewall'], y: 24, label: 'Border' });
     layers.push({ roles: ['spine'], y: hasBorder ? 110 : (hasServer ? 42 : 55), label: 'Spine' });
     layers.push({ roles: ['leaf'], y: hasBorder ? 190 : (hasServer ? 135 : 215), label: 'Leaf' });
-    if (hasServer) layers.push({ roles: ['server'], y: 236, label: 'Compute / Servers' });
+    if (hasServer) layers.push({ roles: ['server'], y: 236, label: locale === 'en' ? 'Compute / Servers' : 'Вычислительные серверы' });
     return layers;
-  }, [hasBorder, hasServer]);
+  }, [hasBorder, hasServer, locale]);
 
   const { nodes, links } = useMemo(() => {
     const pos = new Map<number, { x: number; y: number }>();
@@ -153,7 +156,7 @@ export const TopologyMap: React.FC<Props> = ({
             }`}
           >
             <Layers className="w-3.5 h-3.5" />
-            <span>CLOS Дата-центр (Стенд)</span>
+            <span>{locale === 'en' ? 'CLOS Datacenter (Lab)' : 'CLOS Дата-центр (Стенд)'}</span>
           </button>
           <button
             onClick={() => setViewMode('enterprise')}
@@ -164,12 +167,12 @@ export const TopologyMap: React.FC<Props> = ({
             }`}
           >
             <Network className="w-3.5 h-3.5" />
-            <span>Иерархия КРОК (Enterprise 3-Tier)</span>
+            <span>{locale === 'en' ? 'CROC Hierarchy (Enterprise 3-Tier)' : 'Иерархия КРОК (Enterprise 3-Tier)'}</span>
           </button>
         </div>
         <div className="text-[11px] text-zinc-500 font-mono hidden sm:block">
           {viewMode === 'clos'
-            ? `${devices.length} узлов: ${[...new Set(devices.map((d) => PLATFORM_NAMES[d.platform] ?? d.platform))].join(' • ') || 'CLOS Fabric'}`
+            ? `${devices.length} ${locale === 'en' ? 'nodes' : 'узлов'}: ${[...new Set(devices.map((d) => PLATFORM_NAMES[d.platform] ?? d.platform))].join(' • ') || 'CLOS Fabric'}`
             : 'WAN • DMZ • Core • Distribution • Access'}
         </div>
       </div>
@@ -384,13 +387,10 @@ export const TopologyMap: React.FC<Props> = ({
 
       {/* Popover on click */}
       {popoverNode && (
+        <div className="fixed inset-0 z-[45] flex items-center justify-center bg-black/40 backdrop-blur-[2px]" onClick={() => setPopoverId(null)}>
         <div
-          className="absolute z-30 w-72 glass-panel rounded-lg shadow-2xl p-3 border border-white/[0.14] text-xs pointer-events-auto animate-fade-in"
-          style={{
-            left: `${Math.min(Math.max((popoverNode.x / W) * 100, 16), 84)}%`,
-            top: `${Math.min((popoverNode.y / H) * 100 + 16, 70)}%`,
-            transform: 'translateX(-50%)',
-          }}
+          onClick={(e) => e.stopPropagation()}
+          className="w-80 max-w-[92vw] max-h-[90vh] overflow-y-auto bg-[#0d0f17] rounded-lg shadow-2xl p-4 border border-white/[0.14] text-xs animate-fade-in"
         >
           <div className="flex items-center justify-between mb-2">
             <span className="font-semibold text-zinc-100">{popoverNode.d.hostname}</span>
@@ -463,6 +463,7 @@ export const TopologyMap: React.FC<Props> = ({
               {dryRunMsg}
             </div>
           )}
+        </div>
         </div>
       )}
     </div>
