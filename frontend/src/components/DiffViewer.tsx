@@ -11,10 +11,14 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import type { JobDiff, DeviceDiff, JobSummary } from '../api';
+import { translations, type Locale } from '../i18n';
+import type { AppTheme } from './Header';
 
 interface DiffViewerProps {
   jobs: JobSummary[];
   selectedJobId: string | null;
+  locale?: Locale;
+  theme?: AppTheme;
   onSelectJob: (jobId: string) => void;
   onDeploy: (jobId: string) => void;
 }
@@ -22,9 +26,12 @@ interface DiffViewerProps {
 export const DiffViewer: React.FC<DiffViewerProps> = ({
   jobs,
   selectedJobId,
+  locale = 'ru',
+  theme = 'dark',
   onSelectJob,
   onDeploy,
 }) => {
+  const t = translations[locale];
   const [diffData, setDiffData] = useState<JobDiff | null>(null);
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState(0);
   const [activeViewMode, setActiveViewMode] = useState<'diff' | 'remediation' | 'rollback'>('diff');
@@ -293,7 +300,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   }`}
                 >
                   <Code2 className="w-3.5 h-3.5" />
-                  <span>Monaco Side-by-Side</span>
+                  <span>{t.modeDiff}</span>
                 </button>
 
                 <button
@@ -305,7 +312,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   }`}
                 >
                   <FileCheck className="w-3.5 h-3.5" />
-                  <span>Remediation Patch (+)</span>
+                  <span>{t.modeRemediation}</span>
                 </button>
 
                 <button
@@ -317,7 +324,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   }`}
                 >
                   <Undo2 className="w-3.5 h-3.5" />
-                  <span>Rollback Patch (-)</span>
+                  <span>{t.modeRollback}</span>
                 </button>
               </div>
 
@@ -333,7 +340,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 activeViewMode === 'diff' ? (
                   <DiffEditor
                     height="100%"
-                    theme="vs-dark"
+                    theme={theme === 'light' ? 'vs' : 'vs-dark'}
                     original={activeDeviceDiff.running_config || '# Running config empty'}
                     modified={activeDeviceDiff.intended_config || '# Intended config empty'}
                     language="shell"
@@ -350,7 +357,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 ) : activeViewMode === 'remediation' ? (
                   <Editor
                     height="100%"
-                    theme="vs-dark"
+                    theme={theme === 'light' ? 'vs' : 'vs-dark'}
                     value={
                       activeDeviceDiff.remediation_patch?.trim() ||
                       '! No remediation commands needed (Already in sync)'
@@ -367,7 +374,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 ) : (
                   <Editor
                     height="100%"
-                    theme="vs-dark"
+                    theme={theme === 'light' ? 'vs' : 'vs-dark'}
                     value={
                       activeDeviceDiff.rollback_patch?.trim() ||
                       '! No rollback commands needed'

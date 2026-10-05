@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Play, X, GitBranch, CheckCircle2, AlertTriangle, Server, Network } from 'lucide-react';
 import type { Device } from '../api';
 import { PLATFORM_NAMES, ROLE_NAMES } from './ui';
+import { translations, type Locale } from '../i18n';
 
 export interface DryRunModalProps {
   open: boolean;
@@ -9,6 +10,7 @@ export interface DryRunModalProps {
   onConfirm: (deviceIds: number[]) => void | Promise<void>;
   deviceIds: number[];
   devices: Device[];
+  locale?: Locale;
   gitBranch?: string;
   gitCommit?: string;
 }
@@ -19,9 +21,11 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
   onConfirm,
   deviceIds,
   devices,
+  locale = 'ru',
   gitBranch = 'git_main',
   gitCommit = 'origin/main:HEAD (f48c2a1)',
 }) => {
+  const t = translations[locale];
   const [submitting, setSubmitting] = useState(false);
 
   // Target devices in scope
@@ -39,16 +43,16 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
     const pct = Math.min(100, Math.round((count / total) * 100));
 
     let level: 'LOW' | 'MEDIUM' | 'HIGH' = 'LOW';
-    let levelLabel = 'Низкий (Локальный)';
+    let levelLabel = t.radiusLow;
     let levelColor = 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20';
 
     if (spines > 0 || pct > 50) {
       level = 'HIGH';
-      levelLabel = 'Высокий (Фабричный транзит)';
+      levelLabel = t.radiusHigh;
       levelColor = 'text-rose-400 bg-rose-500/10 border-rose-500/20';
     } else if (count > 1 || leaves > 1) {
       level = 'MEDIUM';
-      levelLabel = 'Средний (Группа узлов)';
+      levelLabel = t.radiusMedium;
       levelColor = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
     }
 
@@ -110,10 +114,10 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
           <div className="flex items-center gap-2.5">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             <h2 className="text-sm font-semibold text-white tracking-tight">
-              Префлайт-проверка и запуск Dry-Run
+              {t.dryRunTitle}
             </h2>
             <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white/[0.05] text-zinc-400 border border-white/[0.08]">
-              Read-Only симуляция
+              {locale === 'en' ? 'Read-Only Simulation' : 'Read-Only симуляция'}
             </span>
           </div>
           <button
@@ -239,7 +243,7 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
               disabled={submitting}
               className="px-3.5 py-1.5 rounded-md border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05] text-xs font-medium cursor-pointer transition-colors"
             >
-              Отмена
+              {t.cancel}
             </button>
 
             <button
@@ -248,7 +252,7 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
               className="px-4 py-1.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-zinc-950 text-xs font-medium flex items-center gap-1.5 cursor-pointer transition-colors shadow-lg shadow-cyan-500/20 disabled:opacity-40"
             >
               <Play className="w-3.5 h-3.5 fill-current" />
-              <span>{submitting ? 'Запуск симуляции…' : 'Запустить Dry-run'}</span>
+              <span>{submitting ? (locale === 'en' ? 'Starting simulation…' : 'Запуск симуляции…') : t.btnStartDryRun}</span>
             </button>
           </div>
         </div>

@@ -10,6 +10,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { api } from '../api';
+import { translations, type Locale } from '../i18n';
 
 export interface CopilotAction {
   type: 'dry_run' | 'remediate' | 'open_device' | 'scan_drift' | 'open_diff';
@@ -36,6 +37,7 @@ export interface CopilotPanelProps {
   open: boolean;
   onClose: () => void;
   deviceId: number | null;
+  locale?: Locale;
   request: { text: string; n: number } | null;
   activeScreen?: string | null;
   onRunDryRun?: (deviceIds: number[]) => void;
@@ -46,16 +48,11 @@ export interface CopilotPanelProps {
   onOpenTab?: (tab: string) => void;
 }
 
-const SUGGESTIONS = [
-  'Что с дрейфом в фабрике?',
-  'Какие риски прогнозируются по TimesFM?',
-  'Запустить проверку готовности к деплою',
-];
-
 export const CopilotPanel: React.FC<CopilotPanelProps> = ({
   open,
   onClose,
   deviceId,
+  locale = 'ru',
   request,
   activeScreen = 'dashboard',
   onRunDryRun,
@@ -182,6 +179,13 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
   }, [messages, busy]);
 
 
+  const t = translations[locale];
+  const suggestions = [
+    t.copilotSuggestion1,
+    t.copilotSuggestion2,
+    t.copilotSuggestion3,
+  ];
+
   if (!open) return null;
 
   return (
@@ -190,7 +194,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
       <div className="flex items-center justify-between px-4 h-12 border-b border-white/[0.06] bg-[#10121a]/80">
         <div className="flex items-center gap-2">
           <Sparkles className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-semibold text-white tracking-tight">AI Copilot</span>
+          <span className="text-sm font-semibold text-white tracking-tight">{t.copilotTitle}</span>
           <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-400 border border-white/[0.06]">
             {activeScreen || 'dashboard'}
           </span>
@@ -198,7 +202,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
         <button
           onClick={onClose}
           className="text-zinc-400 hover:text-white transition-colors p-1 rounded hover:bg-white/[0.05] cursor-pointer"
-          title="Закрыть (Esc)"
+          title={locale === 'en' ? 'Close (Esc)' : 'Закрыть (Esc)'}
         >
           <X className="w-4 h-4" />
         </button>
@@ -208,16 +212,24 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
       <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs">
         {messages.length === 0 && (
           <div className="space-y-3">
-            <p className="text-zinc-400 leading-relaxed">
-              Контекстный AI-ассистент фабрики CLOS. Анализирует текущий экран (
-              <span className="text-cyan-300 font-mono">{activeScreen}</span>), состояние Git SoT,
-              дрейф и ML-прогнозы TimesFM.
-            </p>
+            {locale === 'en' ? (
+              <p className="text-zinc-400 leading-relaxed">
+                Contextual AI assistant for the CLOS fabric. Analyzes current screen (
+                <span className="text-cyan-300 font-mono">{activeScreen}</span>), Git SoT state,
+                drift, and TimesFM ML forecasts.
+              </p>
+            ) : (
+              <p className="text-zinc-400 leading-relaxed">
+                Контекстный AI-ассистент фабрики CLOS. Анализирует текущий экран (
+                <span className="text-cyan-300 font-mono">{activeScreen}</span>), состояние Git SoT,
+                дрейф и ML-прогнозы TimesFM.
+              </p>
+            )}
             <div className="space-y-1.5">
               <span className="text-[11px] font-medium text-zinc-500 uppercase tracking-wider">
-                Быстрые вопросы
+                {locale === 'en' ? 'Quick Prompts' : 'Быстрые вопросы'}
               </span>
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   onClick={() => void send(s)}
@@ -281,7 +293,9 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
         {busy && (
           <div className="text-zinc-400 text-xs flex items-center gap-2 p-2 bg-white/[0.02] rounded border border-white/[0.04]">
             <Sparkles className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
-            <span className="animate-pulse">Copilot формулирует ответ…</span>
+            <span className="animate-pulse">
+              {locale === 'en' ? 'Copilot is formulating an answer…' : 'Copilot формулирует ответ…'}
+            </span>
           </div>
         )}
         <div ref={bottom} />
@@ -300,15 +314,17 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
           onChange={(e) => setInput(e.target.value)}
           placeholder={
             deviceId
-              ? 'Вопрос про выбранное устройство…'
-              : `Вопрос о сети (${activeScreen})…`
+              ? locale === 'en'
+                ? 'Ask about selected node…'
+                : 'Вопрос про выбранное устройство…'
+              : t.copilotPlaceholder
           }
           className="flex-1 bg-zinc-900 border border-white/[0.08] rounded-md px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-cyan-500/60 transition-colors"
         />
         <button
           disabled={busy || !input.trim()}
           className="px-3.5 rounded-md bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-medium disabled:opacity-40 cursor-pointer transition-colors flex items-center justify-center"
-          title="Отправить запрос"
+          title={locale === 'en' ? 'Send prompt' : 'Отправить запрос'}
         >
           <Send className="w-3.5 h-3.5" />
         </button>

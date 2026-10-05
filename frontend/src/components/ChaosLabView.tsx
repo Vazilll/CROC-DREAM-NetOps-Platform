@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import { Flame, RotateCcw, AlertTriangle, Check, ShieldAlert } from 'lucide-react';
 import { api } from '../api';
+import { translations, type Locale } from '../i18n';
 
 interface ChaosLabViewProps {
+  locale?: Locale;
   onRefreshAll: () => void;
 }
 
-export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
+export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRefreshAll }) => {
+  const t = translations[locale];
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -18,10 +21,10 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
 
     try {
       const data = await api.injectChaos(scenario);
-      setStatusMessage(data.message || 'Сценарий успешно применен!');
+      setStatusMessage(data.message || (locale === 'en' ? 'Scenario injected successfully!' : 'Сценарий успешно применен!'));
       onRefreshAll();
     } catch {
-      setStatusMessage(`Сценарий '${scenario}' зафиксирован.`);
+      setStatusMessage(locale === 'en' ? `Scenario '${scenario}' registered.` : `Сценарий '${scenario}' зафиксирован.`);
       onRefreshAll();
     } finally {
       setLoading(false);
@@ -36,12 +39,14 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ onRefreshAll }) => {
             <Flame className="w-5 h-5 text-amber-400" />
           </div>
           <div>
-            <h2 className="text-sm font-bold font-mono text-white">Chaos Lab: Симулятор Аварийных Сценариев</h2>
-            <div className="text-[11px] font-mono text-zinc-400">Проверка устойчивости сети, мульти-вендорности и отката через TimesFM 3.0</div>
+            <h2 className="text-sm font-bold font-mono text-white">{t.chaosTitle}</h2>
+            <div className="text-[11px] font-mono text-zinc-400">{t.chaosSub}</div>
           </div>
         </div>
         <p className="text-xs text-zinc-300 max-w-3xl leading-relaxed mt-2">
-          Этот модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя наглядно продемонстрировать работу <strong>Drift Engine</strong> на Cisco/Huawei, автооткат <strong>commit trial</strong> и защиту <strong>TimesFM 3.0 AI Guard</strong>.
+          {locale === 'en'
+            ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei, commit trial auto-rollback, and TimesFM 3.0 AI Guard.'
+            : 'Этот модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя наглядно продемонстрировать работу Drift Engine на Cisco/Huawei, автооткат commit trial и защиту TimesFM 3.0 AI Guard.'}
         </p>
       </div>
 

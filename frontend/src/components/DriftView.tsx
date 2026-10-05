@@ -9,16 +9,20 @@ import {
   CheckCircle2,
   Clock,
   Terminal,
+  FileDown,
 } from 'lucide-react';
 import { api } from '../api';
 import type { DriftReportItem } from '../api';
+import { translations, type Locale } from '../i18n';
 
 interface DriftViewProps {
+  locale?: Locale;
   onRemediate: (deviceId: number) => void;
   onScanDrift: () => void;
 }
 
-export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }) => {
+export const DriftView: React.FC<DriftViewProps> = ({ locale = 'ru', onRemediate, onScanDrift }) => {
+  const t = translations[locale];
   const [report, setReport] = useState<DriftReportItem[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -45,15 +49,45 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
   const complianceRate =
     report.length > 0 ? Math.round((inSyncCount / report.length) * 100) : 100;
 
+  const handleExportComplianceAct = () => {
+    const listText = report
+      .map(
+        (r) =>
+          `### ${r.hostname} — ${r.status}\n- **Checked At**: ${new Date(r.checked_at).toISOString()}\n- **Unauthorized lines**: ${r.unauthorized_lines?.length || 0}\n- **Missing lines**: ${r.missing_lines?.length || 0}\n${r.remediation_patch ? `\`\`\`\n${r.remediation_patch}\n\`\`\`\n` : ''}`
+      )
+      .join('\n');
+
+    const act = `# АКТ ПРОВЕРКИ КОМПЛАЕНСА СЕТЕВОЙ ФАБРИКИ (NETOPS AUDIT ACT)
+**Дата аудита**: ${new Date().toLocaleString()}
+**Общий комплаенс**: ${complianceRate}% (${inSyncCount} / ${report.length} в эталоне)
+**Выявлено расхождений**: ${driftCount}
+
+---
+
+## Детализация по оборудованию
+${listText || 'Данные отсутствуют'}
+
+---
+*Документ сформирован автоматически платформой CROC DREAM NetOps Platform*
+`;
+    const blob = new Blob([act], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `NetOps_Compliance_Act_${new Date().toISOString().slice(0, 10)}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex items-center justify-between">
           <div>
-            <span className="text-xs font-mono text-zinc-400">Комплаенс Фабрики</span>
+            <span className="text-xs font-mono text-zinc-400">{t.complianceTitle}</span>
             <div className="mt-2 text-3xl font-bold font-mono text-white tracking-tight">{complianceRate}%</div>
             <p className="mt-1 text-[11px] font-mono text-zinc-500">
-              {inSyncCount} из {report.length} узлов в эталоне
+              {inSyncCount} / {report.length} {t.nodesInStandard}
             </p>
           </div>
           <div
@@ -73,9 +107,9 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
 
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex items-center justify-between">
           <div>
-            <span className="text-xs font-mono text-amber-400">Дрейф Конфигурации</span>
+            <span className="text-xs font-mono text-amber-400">{t.driftDetectedTitle}</span>
             <div className="mt-2 text-3xl font-bold font-mono text-amber-300 tracking-tight">{driftCount}</div>
-            <p className="mt-1 text-[11px] font-mono text-amber-500/80">Внепроцессные правки</p>
+            <p className="mt-1 text-[11px] font-mono text-amber-500/80">{driftCount} {t.requireRemediation}</p>
           </div>
           <div className="p-3 rounded-xl bg-amber-500/10 text-amber-400 border border-amber-500/25">
             <AlertTriangle className="w-6 h-6" />
@@ -84,9 +118,21 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
 
         <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between">
           <div>
-            <span className="text-xs font-mono text-zinc-400">Фоновый Скан (Celery Beat)</span>
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-mono text-zinc-400">GitOps Continuous Audit</span>
+              <button
+                onClick={handleExportComplianceAct}
+                className="px-2 py-0.5 rounded text-[10px] font-mono text-cyan-400 hover:text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 flex items-center gap-1 transition cursor-pointer"
+                title={t.exportComplianceAct}
+              >
+                <FileDown className="w-3 h-3" />
+                <span>{locale === 'en' ? 'Export Act' : 'Акт (MD)'}</span>
+              </button>
+            </div>
             <p className="mt-1 text-xs text-zinc-300 leading-relaxed font-mono text-[11px]">
-              Периодический опрос running-config нод для снуления расхождений.
+              {locale === 'en'
+                ? 'Periodic background running-config polling to zero-out unauthorized changes.'
+                : 'Периодический опрос running-config нод для обнуления расхождений.'}
             </p>
           </div>
           <div className="flex items-center space-x-2 mt-4">
@@ -95,12 +141,12 @@ export const DriftView: React.FC<DriftViewProps> = ({ onRemediate, onScanDrift }
               className="flex-1 px-3 py-2 bg-cyan-500 hover:bg-cyan-400 text-zinc-950 rounded-xl text-xs font-mono font-semibold flex items-center justify-center space-x-1.5 transition shadow-lg shadow-cyan-500/20 cursor-pointer"
             >
               <RotateCw className="w-3.5 h-3.5" />
-              <span>Внеочередной скан</span>
+              <span>{t.scanDriftBtn}</span>
             </button>
             <button
               onClick={fetchReport}
               className="p-2 bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white rounded-xl border border-white/[0.08] transition cursor-pointer"
-              title="Обновить отчет"
+              title={t.refresh}
             >
               <RotateCw className="w-3.5 h-3.5" />
             </button>

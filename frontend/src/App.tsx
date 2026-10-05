@@ -407,6 +407,7 @@ export function App() {
                 setActiveTab('diff');
               }}
               onRefresh={fetchJobs}
+              locale={locale}
             />
           )}
 
@@ -416,6 +417,8 @@ export function App() {
               selectedJobId={selectedJobId}
               onSelectJob={(id) => setSelectedJobId(id)}
               onDeploy={handleDeploy}
+              locale={locale}
+              theme={theme}
             />
           )}
 
@@ -423,11 +426,12 @@ export function App() {
             <DriftView
               onRemediate={handleRemediate}
               onScanDrift={() => handleScanDrift()}
+              locale={locale}
             />
           )}
 
           {activeTab === 'lab' && (
-            <ChaosLabView onRefreshAll={refreshAll} />
+            <ChaosLabView onRefreshAll={refreshAll} locale={locale} />
           )}
 
           {activeTab === 'emergency' && (
@@ -443,6 +447,7 @@ export function App() {
         open={copilotOpen}
         onClose={() => setCopilotOpen(false)}
         deviceId={activeTab === 'device' ? deviceId : null}
+        locale={locale}
         request={copilotRequest}
         activeScreen={activeTab}
         onRunDryRun={openDryRunModal}
@@ -467,6 +472,7 @@ export function App() {
         onConfirm={handleExecuteDryRun}
         deviceIds={dryRunTargetIds}
         devices={devices}
+        locale={locale}
       />
 
       <WelcomeModal

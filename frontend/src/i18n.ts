@@ -115,6 +115,68 @@ export interface Translations {
   // Toast & Notifications
   toastOwnerSuccess: string;
   toastConnectSuccess: string;
+
+  // Jobs View
+  jobsHistoryTitle: string;
+  noJobsYet: string;
+  startedAt: string;
+  author: string;
+  viewDiffBtn: string;
+  applyDeployBtn: string;
+  targetDevicesTitle: string;
+  liveTelemetryTitle: string;
+  emptyLogs: string;
+  selectJobHint: string;
+  exportAuditReport: string;
+
+  // Diff Viewer
+  diffTitle: string;
+  modeDiff: string;
+  modeRemediation: string;
+  modeRollback: string;
+  aiSecurityAudit: string;
+  btnAnalyzeAI: string;
+  riskLow: string;
+  riskMedium: string;
+  riskHigh: string;
+  riskCritical: string;
+  noDiffFound: string;
+
+  // Drift View
+  complianceTitle: string;
+  nodesInStandard: string;
+  driftDetectedTitle: string;
+  requireRemediation: string;
+  scanDriftBtn: string;
+  remediateBtn: string;
+  exportComplianceAct: string;
+
+  // Chaos Lab
+  chaosTitle: string;
+  chaosSub: string;
+  scenario1Title: string;
+  scenario2Title: string;
+  scenario3Title: string;
+  scenarioResetTitle: string;
+  btnInject: string;
+  btnResetLab: string;
+
+  // Dry Run Modal
+  dryRunTitle: string;
+  dryRunDesc: string;
+  blastRadiusTitle: string;
+  radiusLow: string;
+  radiusMedium: string;
+  radiusHigh: string;
+  affectedNodes: string;
+  btnStartDryRun: string;
+
+  // AI Copilot
+  copilotTitle: string;
+  copilotPlaceholder: string;
+  copilotSuggestion1: string;
+  copilotSuggestion2: string;
+  copilotSuggestion3: string;
 }
 
 export const translations: Record<Locale, Translations> = {
@@ -222,6 +284,68 @@ export const translations: Record<Locale, Translations> = {
 
     toastOwnerSuccess: 'Вы вошли как Владелец сетевой фабрики!',
     toastConnectSuccess: 'Успешное подключение к фабрике!',
+
+    // Jobs View
+    jobsHistoryTitle: 'История Пайплайнов',
+    noJobsYet: 'Задачи еще не запускались',
+    startedAt: 'Запуск',
+    author: 'Автор',
+    viewDiffBtn: 'Просмотр Diff →',
+    applyDeployBtn: 'Применить Деплой',
+    targetDevicesTitle: 'Целевые Устройства',
+    liveTelemetryTitle: 'Журнал Выполнения (Live Telemetry)',
+    emptyLogs: 'Логи отсутствуют или отфильтрованы',
+    selectJobHint: 'Выберите задачу для просмотра телеметрии и деталей выполнения',
+    exportAuditReport: 'Экспорт протокола аудита (MD)',
+
+    // Diff Viewer
+    diffTitle: 'Сверка конфигураций (Hierarchical Diff)',
+    modeDiff: 'Сравнение (Diff)',
+    modeRemediation: 'Патч наката (Remediation)',
+    modeRollback: 'Откат (Rollback)',
+    aiSecurityAudit: 'ИИ Аудит Безопасности (TimesFM 3.0)',
+    btnAnalyzeAI: 'Анализировать через ИИ',
+    riskLow: 'Низкий риск',
+    riskMedium: 'Средний риск',
+    riskHigh: 'Высокий риск',
+    riskCritical: 'Критический риск',
+    noDiffFound: 'Расхождений не обнаружено (In Sync)',
+
+    // Drift View
+    complianceTitle: 'Комплаенс Фабрики',
+    nodesInStandard: 'узлов в эталоне',
+    driftDetectedTitle: 'Дрейф Конфигураций',
+    requireRemediation: 'требуют компенсации',
+    scanDriftBtn: 'Запустить полный скан дрейфа',
+    remediateBtn: 'Устранить дрейф',
+    exportComplianceAct: 'Скачать Акт Комплаенса',
+
+    // Chaos Lab
+    chaosTitle: 'Chaos Lab: Симулятор Аварийных Сценариев',
+    chaosSub: 'Проверка устойчивости сети, мульти-вендорности и отката через TimesFM 3.0',
+    scenario1Title: 'Внепроцессный Дрейф ACL (Cisco)',
+    scenario2Title: 'Дрейф на Huawei VRP',
+    scenario3Title: 'Падение межузлового линка (Port Down)',
+    scenarioResetTitle: 'Сброс стенда к чистому Git SoT',
+    btnInject: 'Внедрить',
+    btnResetLab: 'Сбросить к Git SoT',
+
+    // Dry Run Modal
+    dryRunTitle: 'Префлайт Прогон (Dry-Run)',
+    dryRunDesc: 'Моделирование изменений без прямого воздействия на сеть',
+    blastRadiusTitle: 'Оценка радиуса поражения (Blast Radius)',
+    radiusLow: 'Низкий (Локальный)',
+    radiusMedium: 'Средний (Группа узлов)',
+    radiusHigh: 'Высокий (Фабричный транзит)',
+    affectedNodes: 'Затронутые узлы',
+    btnStartDryRun: 'Запустить Dry-Run',
+
+    // AI Copilot
+    copilotTitle: 'Сетевой Ассистент (AI Copilot)',
+    copilotPlaceholder: 'Спросите о состоянии сети, дрейфе или рисках...',
+    copilotSuggestion1: 'Что с дрейфом в фабрике?',
+    copilotSuggestion2: 'Какие риски прогнозируются по TimesFM?',
+    copilotSuggestion3: 'Запустить проверку готовности к деплою',
   },
   en: {
     appName: 'NetOps Platform',
@@ -327,5 +451,67 @@ export const translations: Record<Locale, Translations> = {
 
     toastOwnerSuccess: 'Initialized and connected as Root Owner!',
     toastConnectSuccess: 'Connected to existing network fabric!',
+
+    // Jobs View
+    jobsHistoryTitle: 'Pipeline History',
+    noJobsYet: 'No pipelines executed yet',
+    startedAt: 'Started',
+    author: 'Author',
+    viewDiffBtn: 'View Diff →',
+    applyDeployBtn: 'Apply Deployment',
+    targetDevicesTitle: 'Target Devices',
+    liveTelemetryTitle: 'Execution Log (Live Telemetry)',
+    emptyLogs: 'No logs found or filtered',
+    selectJobHint: 'Select a pipeline to inspect live telemetry and execution details',
+    exportAuditReport: 'Export Audit Log (MD)',
+
+    // Diff Viewer
+    diffTitle: 'Hierarchical Diff Inspection',
+    modeDiff: 'Side-by-Side Diff',
+    modeRemediation: 'Remediation Patch',
+    modeRollback: 'Rollback Patch',
+    aiSecurityAudit: 'AI Security Audit (TimesFM 3.0)',
+    btnAnalyzeAI: 'Analyze with AI',
+    riskLow: 'Low Risk',
+    riskMedium: 'Medium Risk',
+    riskHigh: 'High Risk',
+    riskCritical: 'Critical Risk',
+    noDiffFound: 'No discrepancies detected (In Sync)',
+
+    // Drift View
+    complianceTitle: 'Fabric Compliance',
+    nodesInStandard: 'nodes matching intent',
+    driftDetectedTitle: 'Configuration Drift',
+    requireRemediation: 'require remediation',
+    scanDriftBtn: 'Run Full Drift Scan',
+    remediateBtn: 'Remediate Drift',
+    exportComplianceAct: 'Download Compliance Act',
+
+    // Chaos Lab
+    chaosTitle: 'Chaos Lab: Fault Injection Simulator',
+    chaosSub: 'Resilience, multi-vendor compliance & auto-rollback verification with TimesFM 3.0',
+    scenario1Title: 'Out-of-band ACL Drift (Cisco)',
+    scenario2Title: 'Huawei VRP ACL Drift',
+    scenario3Title: 'Inter-switch Port Down',
+    scenarioResetTitle: 'Reset Fabric to Clean Git SoT',
+    btnInject: 'Inject',
+    btnResetLab: 'Reset to Git SoT',
+
+    // Dry Run Modal
+    dryRunTitle: 'Pre-flight Verification (Dry-Run)',
+    dryRunDesc: 'Simulating configuration changes without impacting live network',
+    blastRadiusTitle: 'Blast Radius Assessment',
+    radiusLow: 'Low (Local scope)',
+    radiusMedium: 'Medium (Multi-node)',
+    radiusHigh: 'High (Core transit)',
+    affectedNodes: 'Affected Nodes',
+    btnStartDryRun: 'Execute Dry-Run',
+
+    // AI Copilot
+    copilotTitle: 'Network Copilot (AI)',
+    copilotPlaceholder: 'Ask about network health, drift, or risk forecast...',
+    copilotSuggestion1: 'What is the current fabric drift status?',
+    copilotSuggestion2: 'What risks are forecasted by TimesFM?',
+    copilotSuggestion3: 'Run pre-flight deployment readiness check',
   },
 };
