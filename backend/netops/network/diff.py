@@ -14,6 +14,8 @@ HIER_CONFIG_PLATFORMS: Mapping[Platform, HierPlatform] = MappingProxyType(
         Platform.CISCO_IOSXE: HierPlatform.CISCO_IOS,
         Platform.ARISTA_EOS: HierPlatform.ARISTA_EOS,
         Platform.HUAWEI_VRP: HierPlatform.HUAWEI_VRP,
+        # Своего драйвера для Eltex в hier_config нет, берём общий.
+        Platform.ELTEX_ESR: HierPlatform.GENERIC,
     }
 )
 

@@ -1,21 +1,5 @@
 ---
-auth_profiles:
-  spine1_auth:
-    username: "admin"
-    password: "F5ga6jfkig1"
-
-  spine2_auth:
-    username: "admin"
-    password: "F5ga6jfkig2"
-
-  leaf1_auth:
-    username: "admin"
-    password: "F5ga6jfkig"
-
-  leaf2_auth:
-    username: "admin"
-    password: "F5ga6jfkig2"
-
+# Логины и пароли профилей (auth_profile) задаются в backend/.env: NETOPS_AUTH_PROFILES.
 devices:
   - id: 1 # REASON: Уникальный порядковый ID устройства согласно схеме 2.1
     hostname: "spine-1.croc.lab"

@@ -36,7 +36,11 @@ os.environ.setdefault(
 )
 os.environ.setdefault(
     "NETOPS_AUTH_PROFILES",
-    '{"lab": {"username": "admin", "password": "admin"}}',
+    '{"lab": {"username": "admin", "password": "admin"}, '
+    '"spine1_auth": {"username": "admin", "password": "admin"}, '
+    '"spine2_auth": {"username": "admin", "password": "admin"}, '
+    '"leaf1_auth": {"username": "admin", "password": "admin"}, '
+    '"leaf2_auth": {"username": "admin", "password": "admin"}}',
 )
 
 import uvicorn
