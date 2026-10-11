@@ -2,92 +2,40 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable, Iterator, Mapping
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
-from types import MappingProxyType
+from typing import Any
 
 import yaml
 
 from netops.enums import Platform
+
+# Правила Ани: что выбрасывать из конфигов перед сравнением и какие секции сравнивать.
+DIFF_FILTERS_PATH = Path(__file__).with_name("diff_filters.yaml")
 
 
 @dataclass(frozen=True, slots=True)
 class NormalizationRules:
     indent_unit: int
     comment_prefixes: tuple[str, ...]
-    terminators: tuple[str, ...] = ()
-    ignore_lines: tuple[re.Pattern[str], ...] = ()
-    ignore_sections: tuple[re.Pattern[str], ...] = ()
+    drop_lines: tuple[re.Pattern[str], ...] = ()
+    drop_blocks: tuple[re.Pattern[str], ...] = ()
+    mask_secrets: tuple[tuple[re.Pattern[str], str], ...] = ()
+    managed_sections: tuple[re.Pattern[str], ...] = ()
+    implicit_lines: frozenset[str] = frozenset()
 
-    def extended(
-        self, *, ignore_lines: Iterable[str] = (), ignore_sections: Iterable[str] = ()
-    ) -> NormalizationRules:
-        return replace(
-            self,
-            ignore_lines=self.ignore_lines + _compile(ignore_lines),
-            ignore_sections=self.ignore_sections + _compile(ignore_sections),
-        )
-
-
-def _compile(patterns: Iterable[str]) -> tuple[re.Pattern[str], ...]:
-    return tuple(re.compile(pattern) for pattern in patterns)
-
-
-DEFAULT_RULES: Mapping[Platform, NormalizationRules] = MappingProxyType(
-    {
-        Platform.CISCO_IOSXE: NormalizationRules(
-            indent_unit=1,
-            comment_prefixes=("!",),
-            terminators=("end",),
-            ignore_lines=_compile(
-                [
-                    r"^Building configuration",
-                    r"^Current configuration\s*:",
-                    r"^version \d",
-                    r"^ntp clock-period\b",
-                ]
-            ),
-            ignore_sections=_compile(
-                [
-                    r"^crypto pki certificate chain\b",
-                    r"^crypto pki trustpoint TP-self-signed-",
-                ]
-            ),
-        ),
-        Platform.ARISTA_EOS: NormalizationRules(
-            indent_unit=3,
-            comment_prefixes=("!",),
-            terminators=("end",),
-        ),
-        Platform.HUAWEI_VRP: NormalizationRules(
-            indent_unit=1,
-            comment_prefixes=("#",),
-            terminators=("return",),
-        ),
-    }
-)
+    def is_managed(self, line: str) -> bool:
+        return not self.managed_sections or any(p.search(line) for p in self.managed_sections)
 
 
 class ConfigNormalizer:
-    def __init__(self, rules: Mapping[Platform, NormalizationRules] = DEFAULT_RULES) -> None:
-        self._rules = dict(rules)
+    def __init__(self, rules: Mapping[Platform, NormalizationRules] | None = None) -> None:
+        self._rules = dict(rules) if rules is not None else dict(_default_rules())
 
     @classmethod
     def from_file(cls, path: Path | None) -> ConfigNormalizer:
-        if path is None:
-            return cls()
-        raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        if not isinstance(raw, dict):
-            raise ValueError(f"{path}: expected a mapping of platform -> rules")
-        rules = dict(DEFAULT_RULES)
-        for platform_name, extra in raw.items():
-            platform = Platform(platform_name)
-            patterns = extra or {}
-            rules[platform] = rules[platform].extended(
-                ignore_lines=patterns.get("ignore_lines", ()),
-                ignore_sections=patterns.get("ignore_sections", ()),
-            )
-        return cls(rules)
+        return cls(load_diff_filters(path) if path is not None else None)
 
     def rules_for(self, platform: Platform) -> NormalizationRules:
         return self._rules[platform]
@@ -100,8 +48,51 @@ class ConfigNormalizer:
         return "\n".join(_reindent(entries, rules.indent_unit)) + "\n"
 
 
+@lru_cache(maxsize=1)
+def _default_rules() -> Mapping[Platform, NormalizationRules]:
+    return load_diff_filters(DIFF_FILTERS_PATH)
+
+
+def load_diff_filters(path: Path) -> dict[Platform, NormalizationRules]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    platforms = raw.get("platforms") if isinstance(raw, dict) else None
+    if not isinstance(platforms, dict):
+        raise ValueError(f"{path}: expected a 'platforms' mapping")
+    implicit = (raw.get("common") or {}).get("implicit_lines_to_drop_from_intended") or {}
+    rules = {
+        Platform(name): _platform_rules(spec or {}, implicit.get(name) or ())
+        for name, spec in platforms.items()
+    }
+    missing = sorted(set(Platform) - rules.keys())
+    if missing:
+        raise ValueError(f"{path}: no rules for platform(s) {', '.join(missing)}")
+    return rules
+
+
+def _platform_rules(spec: Mapping[str, Any], implicit: Iterable[str]) -> NormalizationRules:
+    indent = re.match(r"\d+", str(spec.get("indent", "1")))
+    return NormalizationRules(
+        indent_unit=int(indent.group()) if indent else 1,
+        comment_prefixes=(str(spec.get("comment_prefix", "!")),),
+        drop_lines=_compile(item["re"] for item in spec.get("drop_line_patterns") or ()),
+        drop_blocks=_compile(item["start_re"] for item in spec.get("drop_blocks") or ()),
+        mask_secrets=tuple(
+            (re.compile(item["re"]), str(item["replace"]))
+            for item in spec.get("mask_secrets") or ()
+        ),
+        managed_sections=_compile(spec.get("managed_sections") or ()),
+        implicit_lines=frozenset(implicit),
+    )
+
+
+def _compile(patterns: Iterable[str]) -> tuple[re.Pattern[str], ...]:
+    return tuple(re.compile(pattern) for pattern in patterns)
+
+
+# Регулярки применяются к строке с отступом: ^end$ ловит только конец файла, а не вложенный end.
+# Отброшенный блок или неуправляемая секция уходят вместе со всеми вложенными строками.
+# Неявные строки (no shutdown) убираем с обеих сторон: на устройстве они не видны.
 def _filter_lines(text: str, rules: NormalizationRules) -> Iterator[tuple[int, str]]:
-    # Строка из ignore_sections выбрасывается вместе со всеми вложенными строками.
     skip_deeper_than: int | None = None
     for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").expandtabs(8).split("\n"):
         line = raw_line.rstrip()
@@ -113,14 +104,19 @@ def _filter_lines(text: str, rules: NormalizationRules) -> Iterator[tuple[int, s
             if indent > skip_deeper_than:
                 continue
             skip_deeper_than = None
+        for pattern, replacement in rules.mask_secrets:
+            line = pattern.sub(replacement, line)
+        content = line.lstrip()
         if content.startswith(rules.comment_prefixes):
             continue
-        if indent == 0 and content in rules.terminators:
+        if any(pattern.search(line) for pattern in rules.drop_lines):
             continue
-        if any(pattern.search(content) for pattern in rules.ignore_lines):
-            continue
-        if any(pattern.search(content) for pattern in rules.ignore_sections):
+        if any(pattern.search(line) for pattern in rules.drop_blocks) or (
+            indent == 0 and not rules.is_managed(line)
+        ):
             skip_deeper_than = indent
+            continue
+        if content in rules.implicit_lines:
             continue
         yield indent, content
 

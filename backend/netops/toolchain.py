@@ -69,7 +69,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
     return Toolchain(
         intents=IntentRepository(settings.intent_repo_path),
         renderer=JinjaConfigRenderer(settings.templates_path),
-        normalizer=ConfigNormalizer.from_file(settings.normalization_rules_path),
+        normalizer=ConfigNormalizer.from_file(settings.diff_filters_path),
         diff_engine=HierConfigDiffEngine(),
         collector=collector,
         deployer=deployer,
