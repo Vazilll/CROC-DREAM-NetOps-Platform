@@ -103,6 +103,7 @@ jobs:
         run: |
           cp backend/.env.example backend/.env
           sed -i 's/^NETOPS_DRIFT_SCAN_INTERVAL_SECONDS=.*/NETOPS_DRIFT_SCAN_INTERVAL_SECONDS=60/' backend/.env
+          sed -i 's/^NETOPS_METRICS_INTERVAL_SECONDS=.*/NETOPS_METRICS_INTERVAL_SECONDS=15/' backend/.env
           fixtures="$GITHUB_WORKSPACE/backend/tests/fixtures"
           lab="$RUNNER_TEMP/lab"
           mkdir -p "$lab"
