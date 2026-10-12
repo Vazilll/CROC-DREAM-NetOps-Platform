@@ -50,8 +50,11 @@ docker compose up --build
 При старте API применяет миграции (`alembic upgrade head`) и запускает сервер; воркер и Beat
 стартуют, когда API стал `healthy`. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
 офлайн-стендом можно переопределить переменными `API_PORT`, `POSTGRES_PORT`, `INTENT_REPO`,
-`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд и мониторинг
-добавятся туда же позже.
+`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд добавится туда же
+позже.
+
+Поднимаются семь сервисов: `postgres`, `redis`, `api`, `worker`, `beat`, `prometheus` и
+`telegram-bot`. Prometheus — на <http://localhost:9090>, бот без токена простаивает.
 
 Swagger: <http://localhost:8000/docs>. Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
@@ -77,7 +80,7 @@ Postgres считается готовым только когда приним�
 ## Проверки
 
 ```bash
-uv run pytest --cov=netops   # 308 тестов, SQLite, без Redis и сети
+uv run pytest --cov=netops   # 329 тестов, SQLite, без Redis и сети
 uv run ruff check .
 uv run black --check .
 uv run mypy                  # strict
@@ -156,10 +159,41 @@ python3 backend/scripts/smoke_stack.py
 | GET/PATCH/DELETE | `/api/v1/users/{id}` | admin | роль, блокировка (`is_active`), удаление; себя изменить нельзя |
 | POST | `/api/v1/users/{id}/token` | admin | выпустить новый токен, старый перестаёт работать |
 | GET | `/healthz`, `/readyz` | — | сервис жив / готов: база доступна и миграции применены |
+| GET | `/metrics` | — | срез последнего сбора метрик в формате Prometheus |
 
 Ошибки: `404` — нет сущности, `409` — конфликт состояния (dry-run не успешен, устройство уже
 деплоится и т. п.), `422` — ошибка валидации (для intent — со списком `issues` с файлом и полем),
 `503` — очередь недоступна (задача сразу помечается `FAILED`).
+
+## Метрики и телеграм-бот
+
+Воркер раз в `NETOPS_METRICS_INTERVAL_SECONDS` (по умолчанию 60) складывает замеры в таблицу
+`metric_samples`, а `GET /metrics` отдаёт срез последнего сбора в формате Prometheus. История
+остаётся в базе и чистится по `NETOPS_METRICS_RETENTION_DAYS` (по умолчанию 7 дней).
+
+Из базы: `netops_device_status`, `netops_devices_total`, `netops_drift_devices`,
+`netops_jobs_total`, `netops_job_last_finished_timestamp_seconds`. Со стенда (через тот же
+`HealthProbe`, что и post-check): `netops_device_reachable`, `netops_bgp_session_up`,
+`netops_bgp_prefixes_accepted`, `netops_interface_up`, `netops_ping_loss_percent`. Устройство,
+которое не ответило, помечается недоступным, и сбор идёт дальше.
+
+Prometheus снимает `/metrics` раз в 30 с, конфиг — `monitoring/prometheus.yml`. Grafana поверх
+него — задача Тимофея, место под неё отмечено в `docker-compose.yml`.
+
+**Бот** (`python -m netops.telemetry.bot`, контейнер `telegram-bot`) присылает оповещения о новом
+дрейфе и упавших задачах и отвечает на команды: `/status` — устройства по статусам, `/drift` — где
+найден дрейф, `/jobs` — последние задачи, `/metrics` — время сбора и проблемы. Чтобы включить:
+
+```bash
+# в backend/.env
+NETOPS_TELEGRAM_BOT_TOKEN=<токен от @BotFather>
+NETOPS_TELEGRAM_CHAT_IDS='[123456789]'
+```
+
+Бот отвечает только чатам из этого списка, иначе данные о сети получил бы любой, кто найдёт бота
+(узнать свой id — командой боту `/start` и затем по логу контейнера). После правки `.env`:
+`docker compose up -d telegram-bot`. При старте бот запоминает текущее состояние базы, поэтому
+после перезапуска не присылает весь накопленный дрейф.
 
 ## Как работают задачи
 
@@ -241,8 +275,9 @@ Engine. Платформы: `cisco_iosxe`, `arista_eos`, `huawei_vrp`, `eltex_es
 - Шаблоны Jinja2 (Тимофей): для Huawei и Eltex их нет, dry-run на таких устройствах падает с
   ошибкой «No templates found». CI проверяет, что существующие шаблоны рендерятся для всех
   устройств своей платформы.
-- Метрики для Prometheus и Grafana — отложены; фронтенд в `docker-compose.yml` — когда будет
-  образ React-приложения.
+- Дашборды Grafana (Тимофей) — Prometheus в compose уже есть, остаётся добавить Grafana и
+  дашборды. Алертов в Prometheus нет: оповещения шлёт телеграм-бот.
+- Фронтенд в `docker-compose.yml` — когда будет образ React-приложения.
 - Из раздела 2.7 для администратора пока нет «утверждения опасных изменений» и
   «принудительного наката команд отката» — вынести на обсуждение, что считать опасным изменением.
 - LLM-ассистент (Максим): `POST /api/v1/jobs/{id}/explain`, без ключа работает эвристика.
