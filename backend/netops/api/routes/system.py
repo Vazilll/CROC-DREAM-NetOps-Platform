@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import inspect
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,6 +11,7 @@ from netops.db import Base
 from netops.network.rendering import JinjaConfigRenderer
 from netops.schemas.intent import IntentIssueRead, IntentLintReport
 from netops.settings import ApiPrincipal
+from netops.telemetry import collector, metrics
 
 router = APIRouter()
 
@@ -35,6 +36,22 @@ def _unavailable(reason: str) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content={"status": "unavailable", "database": reason},
+    )
+
+
+# Срез последнего сбора метрик для Prometheus. Без токена, как healthz: эндпоинт только
+# читает, и опрашивает его scraper внутри сети стека.
+@router.get(
+    "/metrics",
+    tags=["system"],
+    summary="Метрики для Prometheus",
+    response_class=PlainTextResponse,
+)
+def prometheus_metrics(session: SessionDep) -> PlainTextResponse:
+    samples, collected_at = collector.latest(session)
+    return PlainTextResponse(
+        content=metrics.render(samples, collected_at),
+        media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 
 

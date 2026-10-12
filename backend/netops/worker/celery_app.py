@@ -9,6 +9,7 @@ from netops.settings import Settings
 RUN_JOB_TASK = "netops.jobs.run"
 SCHEDULED_DRIFT_SCAN_TASK = "netops.drift.scheduled_scan"
 FAIL_STALE_JOBS_TASK = "netops.jobs.fail_stale"
+COLLECT_METRICS_TASK = "netops.metrics.collect"
 
 STALE_JOBS_CHECK_INTERVAL_SECONDS = 300
 
@@ -34,6 +35,10 @@ def create_celery_app(settings: Settings) -> Celery:
             "fail-stale-jobs": {
                 "task": FAIL_STALE_JOBS_TASK,
                 "schedule": float(STALE_JOBS_CHECK_INTERVAL_SECONDS),
+            },
+            "collect-metrics": {
+                "task": COLLECT_METRICS_TASK,
+                "schedule": float(settings.metrics_interval_seconds),
             },
         },
     )
