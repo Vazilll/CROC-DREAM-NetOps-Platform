@@ -100,11 +100,17 @@ services:
       api:
         condition: service_healthy
 
-  # Сюда добавится фронтенд, когда будет образ, и Grafana поверх Prometheus:
-  # frontend:
-  #   build: ./frontend
-  #   ports: ["${FRONTEND_PORT:-5173}:80"]
-  #   depends_on: [api]
+  # nginx отдаёт собранный интерфейс и проксирует /api на бэкенд.
+  frontend:
+    build: ./frontend
+    image: netops-frontend
+    ports: ["${FRONTEND_PORT:-5173}:80"]
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  # Сюда добавится Grafana поверх Prometheus.
 
 volumes:
   postgres-data:

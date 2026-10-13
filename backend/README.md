@@ -55,8 +55,9 @@ docker compose up --build
 `TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд добавится туда же
 позже.
 
-Поднимаются семь сервисов: `postgres`, `redis`, `api`, `worker`, `beat`, `prometheus` и
-`telegram-bot`. Prometheus — на <http://localhost:9090>, бот без токена простаивает.
+Поднимаются восемь сервисов: `postgres`, `redis`, `api`, `worker`, `beat`, `prometheus`,
+`telegram-bot` и `frontend`. Интерфейс — на <http://localhost:5173> (nginx отдаёт сборку и
+проксирует `/api` на бэкенд), Prometheus — на <http://localhost:9090>, бот без токена простаивает.
 
 Swagger: <http://localhost:8000/docs>. Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
@@ -294,7 +295,6 @@ Engine. Платформы: `cisco_iosxe`, `arista_eos`, `huawei_vrp`, `eltex_es
   стенд к FQDN или меняем intent.
 - Дашборды Grafana (Тимофей) — Prometheus в compose уже есть, остаётся добавить Grafana и
   дашборды. Алертов в Prometheus нет: оповещения шлёт телеграм-бот.
-- Фронтенд в `docker-compose.yml` — когда будет образ React-приложения.
 - Из раздела 2.7 для администратора пока нет «утверждения опасных изменений» и
   «принудительного наката команд отката» — вынести на обсуждение, что считать опасным изменением.
 - LLM-ассистент (Максим): `POST /api/v1/jobs/{id}/explain`, без ключа работает эвристика.
