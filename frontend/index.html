@@ -5,6 +5,13 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>CROC DREAM — NetOps Platform</title>
+    <script>
+      (function() {
+        var t = localStorage.getItem('netops_theme') || 'dark';
+        document.documentElement.setAttribute('data-theme', t);
+        document.documentElement.className = 'theme-' + t;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

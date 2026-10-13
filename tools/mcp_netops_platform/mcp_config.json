@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "netops-platform": {
+      "command": "python3",
+      "args": [
+        "/home/tarhes/Проекты/app/CROC-DREAM-NetOps-Platform/tools/mcp_netops_platform/server.py"
+      ],
+      "env": {
+        "NETOPS_API_URL": "http://127.0.0.1:8000/api/v1",
+        "NETOPS_API_TOKEN": "dev-operator-token"
+      }
+    }
+  }
+}
