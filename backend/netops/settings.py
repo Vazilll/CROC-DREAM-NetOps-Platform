@@ -58,10 +58,34 @@ class Settings(BaseSettings):
     # {"lab": {"username": "admin", "password": "admin"}}
     auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
 
-    # LLM Risk Assistant settings (Xiaomi MiMo-V2.6-Flash or any OpenAI-compatible API)
+    # ИИ-ассистент: провайдеры опрашиваются по очереди, первый ответивший выигрывает.
+    # Без ключей работает резервный режим на правилах.
+    # Локальный Ollama или vLLM: пустой адрес — выключен, ключ не нужен
+    ollama_url: str = ""
+    ollama_model: str = "qwen2.5:7b"
+    ollama_timeout_seconds: float = 4.0
+
+    groq_api_key: SecretStr | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_timeout_seconds: float = 2.0
+
+    gemini_api_key: SecretStr | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_timeout_seconds: float = 2.0
+
+    # Адрес Prometheus для исторических метрик: пустой — выключен
+    prometheus_url: str = ""
+
+    # Сервис прогноза метрик (tools/timesfm_server.py): пустой адрес — выключен
+    forecast_url: str = ""
+    forecast_timeout_seconds: float = 3.0
+
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://api.hcnsec.cn/v1"
     llm_model: str = "MiMo-V2.6-Flash"
+    llm_timeout_seconds: float = 2.0
 
     # Browser origins allowed to call the API (the Vite dev server by default).
     # Бот без токена не стартует опрос, остальная платформа работает как обычно.
