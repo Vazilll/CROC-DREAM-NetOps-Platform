@@ -86,7 +86,7 @@
 | Подключение платформы к живому Containerlab-стенду | Не проверено | Scrapli live-драйвер не прогонялся против нод лабы |
 | Containerlab-стенд с Eltex | Не проверен | Русский вендор; добавляем в стенд одной нодой |
 | Frontend в docker-compose | Не подключён | Отдельный dev-сервер Vite (по плану — добавить в compose к сдаче, спринт 3) |
-| Prometheus / Grafana | Запланированы | По плану спринтов: развёртывание в спринте 2 (Тимофей), дашборды под демо в спринте 3 |
+| Prometheus / Grafana | Prometheus поднят | Метрики пишутся в БД и отдаются в `/metrics`, Prometheus снимает их в compose; Grafana и дашборды — спринт 3 (Тимофей) |
 
 ### Интеграционные тесты
 
@@ -170,8 +170,8 @@ npm run dev
 
 ```bash
 docker compose up -d
-# Поднимает: postgres, redis, api, worker, beat
-# Frontend, Prometheus, Grafana в compose пока НЕ включены
+# Поднимает: postgres, redis, api, worker, beat, prometheus, telegram-bot
+# Frontend и Grafana в compose пока НЕ включены
 ```
 
 > Важно: `docker compose config` валиден, но полноценный runtime smoke всех контейнеров пока не подтверждён. Для демонстрации использовать Вариант A.

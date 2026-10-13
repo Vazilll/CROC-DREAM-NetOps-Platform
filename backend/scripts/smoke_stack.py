@@ -37,6 +37,9 @@ class Api:
     def get(self, path: str) -> Any:
         return self._call("GET", path, None, 200)
 
+    def get_text(self, path: str) -> str:
+        return str(self._call("GET", path, None, 200, parse_json=False))
+
     def post(self, path: str, body: object | None = None, *, expect: int = 200) -> Any:
         return self._call("POST", path, body, expect)
 
@@ -50,7 +53,9 @@ class Api:
                 raise SmokeError(f"задача {job_id} не завершилась за {timeout:g} с")
             time.sleep(1)
 
-    def _call(self, method: str, path: str, body: object | None, expect: int) -> Any:
+    def _call(
+        self, method: str, path: str, body: object | None, expect: int, *, parse_json: bool = True
+    ) -> Any:
         data = None if body is None else json.dumps(body).encode()
         request = urllib.request.Request(self._base_url + path, data=data, method=method)
         request.add_header("Authorization", f"Bearer {self._token}")
@@ -64,15 +69,26 @@ class Api:
         if status != expect:
             text = raw.decode(errors="replace")[:300]
             raise SmokeError(f"{method} {path} ответил {status}: {text}")
+        if not parse_json:
+            return raw.decode()
         return json.loads(raw) if raw else None
 
 
 class StackSmoke:
-    def __init__(self, api: Api, *, devices: int, timeout: float, beat_timeout: float) -> None:
+    def __init__(
+        self,
+        api: Api,
+        *,
+        devices: int,
+        timeout: float,
+        beat_timeout: float,
+        prometheus_url: str,
+    ) -> None:
         self._api = api
         self._devices = devices
         self._timeout = timeout
         self._beat_timeout = beat_timeout
+        self._prometheus_url = prometheus_url.rstrip("/")
         self._started = datetime.now(UTC)
         self._device_ids: list[int] = []
 
@@ -83,6 +99,8 @@ class StackSmoke:
             ("импорт инвентаря", self.inventory),
             ("dry-run через Celery", self.dry_run),
             ("скан дрейфа", self.drift_scan),
+            ("метрики платформы", self.metrics),
+            ("Prometheus снимает метрики", self.prometheus),
         ]
         if self._beat_timeout > 0:
             checks.append(("плановый скан от Celery Beat", self.scheduled_scan))
@@ -155,6 +173,41 @@ class StackSmoke:
             time.sleep(3)
         raise SmokeError(f"за {self._beat_timeout:g} с Beat не поставил ни одного скана")
 
+    # Значения считает воркер по расписанию Beat, поэтому ждём первый сбор.
+    def metrics(self) -> str:
+        deadline = time.monotonic() + self._timeout
+        while True:
+            body = self._api.get_text("/metrics")
+            if "netops_devices_total" in body:
+                names = {
+                    line.split("{")[0].split(" ")[0]
+                    for line in body.splitlines()
+                    if not line.startswith("#")
+                }
+                return f"{len(names)} метрик, строк: {len(body.splitlines())}"
+            if time.monotonic() > deadline:
+                raise SmokeError(f"за {self._timeout:g} с воркер не собрал метрики")
+            time.sleep(5)
+
+    def prometheus(self) -> str:
+        deadline = time.monotonic() + self._timeout
+        while True:
+            try:
+                targets = _get_json(f"{self._prometheus_url}/api/v1/targets")["data"][
+                    "activeTargets"
+                ]
+                states = {t["labels"]["job"]: t["health"] for t in targets}
+            except (SmokeError, OSError, KeyError) as exc:
+                states = {}
+                error: object = exc
+            else:
+                error = None
+                if states.get("netops-api") == "up":
+                    return ", ".join(f"{job}: {health}" for job, health in sorted(states.items()))
+            if time.monotonic() > deadline:
+                raise SmokeError(f"цель netops-api не поднялась: {states or error}")
+            time.sleep(5)
+
     def _wait_success(self, job_id: str) -> dict[str, Any]:
         job = self._api.wait_job(job_id, self._timeout)
         if job["status"] != "SUCCESS":
@@ -163,6 +216,14 @@ class StackSmoke:
             )
             raise SmokeError(f"задача {job_id} {job['status']}: {job['error']}. {reasons}")
         return job
+
+
+def _get_json(url: str) -> Any:
+    try:
+        with urllib.request.urlopen(url, timeout=15) as response:
+            return json.loads(response.read())
+    except urllib.error.HTTPError as exc:
+        raise SmokeError(f"GET {url} ответил {exc.code}") from exc
 
 
 def check_containers() -> list[tuple[str, bool, str]]:
@@ -208,6 +269,10 @@ def _parse_args() -> argparse.Namespace:
         help="токен администратора (по умолчанию из backend/.env.example)",
     )
     parser.add_argument("--devices", type=int, default=4, help="сколько устройств в инвентаре")
+    parser.add_argument(
+        "--prometheus",
+        default=f"http://localhost:{os.environ.get('PROMETHEUS_PORT', '9090')}",
+    )
     parser.add_argument("--timeout", type=float, default=120, help="ожидание API и задач, с")
     parser.add_argument(
         "--beat-timeout",
@@ -225,6 +290,7 @@ def main() -> int:
         devices=args.devices,
         timeout=args.timeout,
         beat_timeout=args.beat_timeout,
+        prometheus_url=args.prometheus,
     )
     ok = True
     for title, check in smoke.checks():

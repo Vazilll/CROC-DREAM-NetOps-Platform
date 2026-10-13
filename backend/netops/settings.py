@@ -49,6 +49,8 @@ class Settings(BaseSettings):
     post_check_interval_seconds: float = Field(default=10.0, ge=0)
 
     drift_scan_interval_seconds: int = Field(default=900, ge=60)
+    metrics_interval_seconds: int = Field(default=60, ge=10)
+    metrics_retention_days: int = Field(default=7, ge=1)
     job_timeout_seconds: int = Field(default=3600, ge=60)
 
     # {"<токен>": {"username": "alice", "role": "admin"}}
@@ -62,6 +64,11 @@ class Settings(BaseSettings):
     llm_model: str = "MiMo-V2.6-Flash"
 
     # Browser origins allowed to call the API (the Vite dev server by default).
+    # Бот без токена не стартует опрос, остальная платформа работает как обычно.
+    telegram_bot_token: SecretStr | None = None
+    # Чаты, которым бот отвечает и присылает оповещения: id пользователя или группы.
+    telegram_chat_ids: list[int] = Field(default_factory=list)
+
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
