@@ -207,3 +207,68 @@ def test_metrics_command_shows_numbers_when_everything_is_fine(
     assert "Порты up/up: 1 из 1" in text
     assert "Потери ping: до 0%" in text
     assert "Дрейф: нет" in text
+
+
+def test_repeated_drift_is_reported_once(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    api = FakeTelegram()
+    bot = _bot(session_factory, api)
+    bot.catch_up()
+    device = devices["leaf-1.croc.lab"]
+
+    # Скан идёт каждые 15 минут и каждый раз пишет запись по устройству.
+    for _ in range(3):
+        _drift(session, device, DriftStatus.DRIFT_DETECTED, unauthorized_lines=["interface Lo99"])
+        bot.send_alerts()
+
+    assert [text for _, text in api.sent] == [
+        "⚠️ leaf-1.croc.lab: DRIFT_DETECTED\nлишних строк: 1, не хватает: 0"
+    ]
+
+
+def test_recovery_and_new_status_are_reported(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    api = FakeTelegram()
+    bot = _bot(session_factory, api)
+    bot.catch_up()
+    device = devices["leaf-1.croc.lab"]
+
+    _drift(session, device, DriftStatus.DRIFT_DETECTED, unauthorized_lines=["interface Lo99"])
+    bot.send_alerts()
+    _drift(session, device, DriftStatus.IN_SYNC)
+    bot.send_alerts()
+    _drift(session, device, DriftStatus.UNREACHABLE, error="нет ответа")
+    bot.send_alerts()
+
+    statuses = [text.splitlines()[0] for _, text in api.sent]
+    assert statuses == [
+        "⚠️ leaf-1.croc.lab: DRIFT_DETECTED",
+        "✅ leaf-1.croc.lab: снова совпадает с эталоном",
+        "⚠️ leaf-1.croc.lab: UNREACHABLE",
+    ]
+
+
+def test_same_job_error_is_not_repeated(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    api = FakeTelegram()
+    bot = _bot(session_factory, api)
+    bot.catch_up()
+
+    for _ in range(3):
+        session.add(
+            Job(
+                type=JobType.DRIFT_SCAN,
+                status=JobStatus.FAILED,
+                created_by="scheduler",
+                error="2 of 4 device(s) failed: leaf-1.croc.lab, leaf-2.croc.lab",
+                finished_at=utcnow(),
+            )
+        )
+        session.commit()
+        bot.send_alerts()
+
+    assert len(api.sent) == 1
+    assert "2 of 4 device(s) failed" in api.sent[0][1]

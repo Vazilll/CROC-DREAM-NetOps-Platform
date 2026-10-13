@@ -78,6 +78,10 @@ class BotState:
     last_update_id: int | None = None
     last_drift_id: int = 0
     reported_jobs: set[str] = field(default_factory=set)
+    # Последний сообщённый статус по устройству: оповещаем только при его смене.
+    device_status: dict[str, DriftStatus] = field(default_factory=dict)
+    # Текст последней отправленной ошибки задачи: повторы той же ошибки не дублируем.
+    reported_errors: set[str] = field(default_factory=set)
 
 
 class MetricsBot:
@@ -99,6 +103,11 @@ class MetricsBot:
         with self._session_factory() as session:
             self._state.last_drift_id = _max_drift_id(session)
             self._state.reported_jobs = {str(job.id) for job in _failed_jobs(session)}
+            self._state.device_status = {
+                device.hostname: DriftStatus(device.status.value)
+                for device in session.scalars(select(Device))
+                if device.status.value in DriftStatus.__members__.values()
+            }
 
     def poll_once(self) -> None:
         for update in self._api.updates(self._state.last_update_id):
@@ -148,18 +157,30 @@ class MetricsBot:
             .where(DriftRecord.id > self._state.last_drift_id)
             .order_by(DriftRecord.id)
         ).all()
+        # Скан идёт каждые 15 минут и каждый раз пишет запись по каждому устройству.
+        # Поэтому сообщаем только о смене состояния, иначе бот спамит одним и тем же.
         for record in records:
             self._state.last_drift_id = max(self._state.last_drift_id, record.id)
-            if record.status is DriftStatus.IN_SYNC:
+            hostname = record.device.hostname
+            if self._state.device_status.get(hostname) is record.status:
                 continue
-            alerts.append(
-                f"⚠️ {record.device.hostname}: {record.status.value}\n" f"{_drift_details(record)}"
-            )
+            previous = self._state.device_status.get(hostname)
+            self._state.device_status[hostname] = record.status
+            if record.status is DriftStatus.IN_SYNC:
+                if previous is not None:
+                    alerts.append(f"✅ {hostname}: снова совпадает с эталоном")
+                continue
+            alerts.append(f"⚠️ {hostname}: {record.status.value}\n{_drift_details(record)}")
+        # Плановая задача падает так же регулярно, поэтому один и тот же текст не повторяем.
         for job in _failed_jobs(session):
             if str(job.id) in self._state.reported_jobs:
                 continue
             self._state.reported_jobs.add(str(job.id))
-            alerts.append(f"❌ Задача {job.type.value} упала: {job.error or 'без описания'}")
+            text = f"❌ Задача {job.type.value} упала: {job.error or 'без описания'}"
+            if text in self._state.reported_errors:
+                continue
+            self._state.reported_errors.add(text)
+            alerts.append(text)
         return alerts
 
     def _broadcast(self, text: str) -> None:
