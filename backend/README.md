@@ -215,7 +215,8 @@ python3 backend/scripts/smoke_stack.py
 `is defined` проверяйте значение: `{% if iface.ipv4_address %}`.
 
 В `templates/` лежат шаблоны под IOS-XE, EOS и VRP, сверенные с конфигами стенда
-(`lab/golden_configs/`). `Loopback` генерируется из `bgp.router_id`, если в intent он не
+(`lab/golden_configs/`). Что из набора Тимура взято и где реализовано — в
+[`docs/templates-integration.md`](../docs/templates-integration.md). `Loopback` генерируется из `bgp.router_id`, если в intent он не
 описан: иначе патч предлагает удалить интерфейс с router-id и роняет BGP. Учётки в шаблоны не
 передаются — пароли живут в `.env`, а management-порт, `vrf`, `line vty` и `ssh` в сравнение не
 входят (см. `managed_sections` в фильтрах), поэтому генерировать их не нужно.
