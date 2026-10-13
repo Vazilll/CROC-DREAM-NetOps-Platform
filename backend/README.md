@@ -250,8 +250,15 @@ NETOPS_TELEGRAM_CHAT_IDS='[123456789]'
 склеиваются в этом порядке, отсутствующие секции пропускаются. В контексте: `device`
 (`InventoryDevice`: hostname, platform, role, management_ip…) и `intent` (`DeviceIntent`).
 Адреса — объекты `ipaddress`: `iface.ipv4_address.ip`, `.netmask`, `.with_prefixlen`,
-`prefix.hostmask`. Неизвестная переменная — ошибка (`StrictUndefined`). Рабочие примеры
-под IOS-XE и EOS лежат в `tests/fixtures/templates/`.
+`prefix.hostmask`. Неизвестная переменная — ошибка (`StrictUndefined`), поэтому вместо
+`is defined` проверяйте значение: `{% if iface.ipv4_address %}`.
+
+В `templates/` лежат шаблоны под IOS-XE, EOS и VRP, сверенные с конфигами стенда
+(`lab/golden_configs/`). Что из набора Тимура взято и где реализовано — в
+[`docs/templates-integration.md`](../docs/templates-integration.md). `Loopback` генерируется из `bgp.router_id`, если в intent он не
+описан: иначе патч предлагает удалить интерфейс с router-id и роняет BGP. Учётки в шаблоны не
+передаются — пароли живут в `.env`, а management-порт, `vrf`, `line vty` и `ssh` в сравнение не
+входят (см. `managed_sections` в фильтрах), поэтому генерировать их не нужно.
 
 **Аня (нормализация).** Правила лежат в `netops/network/diff_filters.yaml` — это файл Ани
 как есть, править можно без кода. Для каждой платформы перед сравнением:
@@ -277,9 +284,14 @@ Engine. Платформы: `cisco_iosxe`, `arista_eos`, `huawei_vrp`, `eltex_es
 - Драйвер Scrapli (Максим, `netops/network/scrapli_driver.py`) на живом стенде не проверялся.
   В Docker-образе его пока не запустить: `scrapli` — необязательная зависимость, а системного
   `ssh` в образе нет.
-- Шаблоны Jinja2 (Тимофей): для Huawei и Eltex их нет, dry-run на таких устройствах падает с
-  ошибкой «No templates found». CI проверяет, что существующие шаблоны рендерятся для всех
-  устройств своей платформы.
+- Шаблонов для Eltex нет, dry-run на таком устройстве упадёт с «No templates found». CI
+  проверяет, что шаблоны рендерятся для всех устройств своей платформы.
+- ACL в intent пока пустые (`acls: []`) и на стенде их нет. Когда Аня их опишет, шаблоны
+  `acls.j2` нужно сверить с устройствами: секция `ip access-list` / `acl name` участвует в
+  сравнении, то есть незаполненный шаблон приведёт к удалению ACL с оборудования.
+- `hostname` в intent — FQDN (`spine-1.croc.lab`), а на стенде короткие имена (`spine1`).
+  Сейчас это единственный дрейф на всех четырёх устройствах. Нужно решение команды: приводим
+  стенд к FQDN или меняем intent.
 - Дашборды Grafana (Тимофей) — Prometheus в compose уже есть, остаётся добавить Grafana и
   дашборды. Алертов в Prometheus нет: оповещения шлёт телеграм-бот.
 - Фронтенд в `docker-compose.yml` — когда будет образ React-приложения.
