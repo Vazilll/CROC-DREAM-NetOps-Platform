@@ -9,7 +9,7 @@ from netops.api.deps import JobServiceDep, Operator, SessionDep, Viewer
 from netops.enums import DriftStatus
 from netops.schemas.drift import DriftRemediateRequest, DriftReportItem, DriftScanRequest
 from netops.schemas.jobs import JobAccepted
-from netops.services import latest_drift_records
+from netops.services.drift import classify_drift_lines, latest_drift_records
 
 router = APIRouter(prefix="/drift", tags=["drift"])
 
@@ -45,20 +45,27 @@ def drift_report(
     records = latest_drift_records(
         session, since=_as_utc(since), until=_as_utc(until), status=status_filter
     )
-    return [
-        DriftReportItem(
-            device_id=record.device_id,
-            hostname=record.device.hostname,
-            status=record.status,
-            checked_at=record.checked_at,
-            job_id=record.job_id,
-            unauthorized_lines=record.unauthorized_lines,
-            missing_lines=record.missing_lines,
-            remediation_patch=record.remediation_config,
-            error=record.error,
+    items = []
+    for record in records:
+        all_lines = (record.unauthorized_lines or []) + (record.missing_lines or [])
+        safe, risky, risk_level = classify_drift_lines(all_lines)
+        items.append(
+            DriftReportItem(
+                device_id=record.device_id,
+                hostname=record.device.hostname,
+                status=record.status,
+                checked_at=record.checked_at,
+                job_id=record.job_id,
+                unauthorized_lines=record.unauthorized_lines,
+                missing_lines=record.missing_lines,
+                remediation_patch=record.remediation_config,
+                error=record.error,
+                safe_lines=safe,
+                risky_lines=risky,
+                risk_level=risk_level,
+            )
         )
-        for record in records
-    ]
+    return items
 
 
 def _as_utc(value: datetime | None) -> datetime | None:

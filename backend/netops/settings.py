@@ -5,7 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, SecretStr, model_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from netops.enums import UserRole
@@ -24,7 +24,7 @@ class AuthProfile(BaseModel):
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="NETOPS_",
-        env_file=".env",
+        env_file=(".env", "backend/.env", str(Path(__file__).resolve().parent.parent / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -34,9 +34,9 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     intent_repo_path: Path = Path("intent")
+    inventory_file: str = "inventory.yaml"
     templates_path: Path = Path("templates")
-    # Свой файл фильтров диффа вместо netops/network/diff_filters.yaml
-    diff_filters_path: Path | None = None
+    normalization_rules_path: Path | None = None
 
     # "offline" emulates the lab with running-configs stored as files; the
     # Scrapli/Nornir driver will be registered here once it is ready.
@@ -49,29 +49,83 @@ class Settings(BaseSettings):
     post_check_interval_seconds: float = Field(default=10.0, ge=0)
 
     drift_scan_interval_seconds: int = Field(default=900, ge=60)
-    metrics_interval_seconds: int = Field(default=60, ge=10)
-    metrics_retention_days: int = Field(default=7, ge=1)
     job_timeout_seconds: int = Field(default=3600, ge=60)
 
     # {"<токен>": {"username": "alice", "role": "admin"}}
     api_tokens: dict[str, ApiPrincipal] = Field(default_factory=dict)
     # {"lab": {"username": "admin", "password": "admin"}}
-    auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
+    auth_profiles: dict[str, AuthProfile] = Field(
+        default_factory=lambda: {"lab": AuthProfile(username="admin", password=SecretStr("admin"))}
+    )
 
-    # LLM Risk Assistant settings (Xiaomi MiMo-V2.6-Flash or any OpenAI-compatible API)
+    # LLM Risk Assistant settings (Multi-provider cascade: Ollama -> Groq -> Gemini -> MiMo -> Heuristic)
+    # 0. Local Ollama / vLLM (Empty URL = disabled; no API key required)
+    ollama_url: str = ""
+    ollama_model: str = "qwen2.5:7b"
+    ollama_timeout_seconds: float = 4.0
+
+    # 1. Groq (Ultra-fast Qwen 3.8 27B / GPT-OSS 120B)
+    groq_api_key: SecretStr | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_timeout_seconds: float = 2.0
+
+    # 2. Google Gemini (Cloud Backup with fast 2.0s timeout)
+    gemini_api_key: SecretStr | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
+    gemini_model: str = "gemini-2.5-flash"
+    gemini_timeout_seconds: float = 2.0
+
+    # 3. Team / Default provider (Xiaomi MiMo or custom proxy)
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://api.hcnsec.cn/v1"
     llm_model: str = "MiMo-V2.6-Flash"
+    llm_timeout_seconds: float = 2.0
+
+    # Time-series forecasting: TimesFM runs as a separate process (backend/tools/timesfm_server.py)
+    # so torch stays out of the API dependencies. Empty URL = statistical fallback only.
+    forecast_url: str = "http://127.0.0.1:8100/forecast"
+    forecast_timeout_seconds: float = 5.0
+
+    # NetBox as the inventory source (empty URL = inventory.yaml of the intent repository).
+    netbox_url: str = ""
+    netbox_token: SecretStr | None = None
+
+    # Containerlab remote management (for emergency hard reset)
+    clab_host: str | None = None
+    clab_port: int = 221
+    clab_user: str | None = None
+    clab_password: SecretStr | None = None
+    clab_key_path: str | None = None
+    clab_topology_path: str = "/home/crocdream/clab-quickstart/fabric.clab.yaml"
+
+    # Prometheus telemetry ingestion (empty URL = falls back to the SSH CLI cache; no data is invented)
+    prometheus_url: str = ""
+
+    # Telegram Incident Alerting & Broadcast
+    telegram_bot_token: SecretStr | None = None
+    telegram_chat_id: str | None = None
+
 
     # Browser origins allowed to call the API (the Vite dev server by default).
-    # Бот без токена не стартует опрос, остальная платформа работает как обычно.
-    telegram_bot_token: SecretStr | None = None
-    # Чаты, которым бот отвечает и присылает оповещения: id пользователя или группы.
-    telegram_chat_ids: list[int] = Field(default_factory=list)
-
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
+
+
+    @field_validator("intent_repo_path", "templates_path", "offline_lab_path", mode="after")
+    @classmethod
+    def _resolve_paths(cls, path: Path) -> Path:
+        if path.is_absolute():
+            return path
+        if not path.exists():
+            backend_dir = Path(__file__).resolve().parent.parent
+            root_dir = backend_dir.parent
+            if (root_dir / path).exists():
+                return (root_dir / path).resolve()
+            if (root_dir / path.name).exists():
+                return (root_dir / path.name).resolve()
+        return path
 
     # Повторы post-check не должны занимать больше половины таймера commit confirmed.
     @model_validator(mode="after")

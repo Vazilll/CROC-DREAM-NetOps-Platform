@@ -3,15 +3,16 @@ from __future__ import annotations
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
-from sqlalchemy import inspect
+from sqlalchemy import func, inspect, select, text
 from sqlalchemy.exc import SQLAlchemyError
 
 from netops.api.deps import ContainerDep, Operator, SessionDep, Viewer
 from netops.db import Base
+from netops.models import Device, DriftRecord, Job
 from netops.network.rendering import JinjaConfigRenderer
 from netops.schemas.intent import IntentIssueRead, IntentLintReport
+from netops.services.forecast import record_chaos_event
 from netops.settings import ApiPrincipal
-from netops.telemetry import collector, metrics
 
 router = APIRouter()
 
@@ -32,6 +33,56 @@ def readiness(session: SessionDep) -> JSONResponse:
     return JSONResponse(content={"status": "ok", "database": "ok"})
 
 
+def _render_prometheus_metrics(session: SessionDep) -> PlainTextResponse:
+    lines = [
+        "# HELP netops_up Whether NetOps Platform API is operational",
+        "# TYPE netops_up gauge",
+        "netops_up 1",
+        "",
+        "# HELP netops_devices_total Total network devices by operational sync status",
+        "# TYPE netops_devices_total gauge",
+    ]
+    try:
+        dev_counts = session.execute(
+            select(Device.status, func.count(Device.id)).group_by(Device.status)
+        ).all()
+        status_map = {
+            (row[0].value if hasattr(row[0], "value") else str(row[0])): row[1]
+            for row in dev_counts
+        }
+        for st in ("IN_SYNC", "DRIFT_DETECTED", "UNREACHABLE", "UNKNOWN"):
+            lines.append(f'netops_devices_total{{status="{st.lower()}"}} {status_map.get(st, 0)}')
+
+        lines.append("")
+        lines.append("# HELP netops_jobs_total Total executed orchestration jobs by type and status")
+        lines.append("# TYPE netops_jobs_total counter")
+        job_counts = session.execute(
+            select(Job.type, Job.status, func.count(Job.id)).group_by(Job.type, Job.status)
+        ).all()
+        for row in job_counts:
+            j_type = row[0].value if hasattr(row[0], "value") else str(row[0])
+            j_status = row[1].value if hasattr(row[1], "value") else str(row[1])
+            lines.append(f'netops_jobs_total{{type="{j_type.lower()}",status="{j_status.lower()}"}} {row[2]}')
+
+        lines.append("")
+        lines.append("# HELP netops_drift_records_total Total configuration drift records recorded")
+        lines.append("# TYPE netops_drift_records_total counter")
+        drift_count = session.scalar(select(func.count(DriftRecord.id))) or 0
+        lines.append(f"netops_drift_records_total {drift_count}")
+    except Exception:
+        pass
+
+    lines.append("")
+    return PlainTextResponse(
+        "\n".join(lines) + "\n", media_type="text/plain; version=0.0.4; charset=utf-8"
+    )
+
+
+@router.get("/metrics", response_class=PlainTextResponse, tags=["system"], summary="Prometheus exposition metrics")
+def metrics_root(session: SessionDep) -> PlainTextResponse:
+    return _render_prometheus_metrics(session)
+
+
 def _unavailable(reason: str) -> JSONResponse:
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -39,23 +90,16 @@ def _unavailable(reason: str) -> JSONResponse:
     )
 
 
-# Срез последнего сбора метрик для Prometheus. Без токена, как healthz: эндпоинт только
-# читает, и опрашивает его scraper внутри сети стека.
-@router.get(
-    "/metrics",
-    tags=["system"],
-    summary="Метрики для Prometheus",
-    response_class=PlainTextResponse,
-)
-def prometheus_metrics(session: SessionDep) -> PlainTextResponse:
-    samples, collected_at = collector.latest(session)
-    return PlainTextResponse(
-        content=metrics.render(samples, collected_at),
-        media_type="text/plain; version=0.0.4; charset=utf-8",
-    )
-
-
 api_router = APIRouter()
+
+
+@api_router.get("/metrics", response_class=PlainTextResponse, tags=["system"], summary="Prometheus exposition metrics")
+def metrics_api(session: SessionDep) -> PlainTextResponse:
+    return _render_prometheus_metrics(session)
+
+
+class ChaosRequest(BaseModel):
+    scenario: str
 
 
 @api_router.get(
@@ -63,10 +107,6 @@ api_router = APIRouter()
 )
 def current_user(user: Viewer) -> ApiPrincipal:
     return user
-
-
-class ChaosRequest(BaseModel):
-    scenario: str
 
 
 @api_router.get(
@@ -94,6 +134,14 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dic
                     "20 deny ip any any", "15 permit ip any any\n 20 deny ip any any"
                 )
                 leaf1_cfg.write_text(content, encoding="utf-8")
+        record_chaos_event(
+            scenario="acl_drift",
+            target_hostnames=["leaf-1.croc.lab", "leaf-1"],
+            title="Chaos: Внедрение несанкционированного ACL",
+            description="Внедрен несанкционированный ACL в leaf-1.croc.lab (Дрейф создан!)",
+            severity="warning",
+            lab_dir=lab_dir,
+        )
         return {
             "status": "ok",
             "message": "Внедрен несанкционированный ACL в leaf-1.croc.lab (Дрейф создан!)",
@@ -102,27 +150,142 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dic
         leaf2_cfg = lab_dir / "leaf-2.croc.lab.cfg"
         if leaf2_cfg.exists():
             content = leaf2_cfg.read_text(encoding="utf-8")
-            uplink = (
-                "interface GigabitEthernet3\n description Uplink to spine-2\n mtu 9000\n"
-                " ip address 10.0.2.3 255.255.255.254\n"
+            old_str = (
+                "interface GigabitEthernet3\n description Uplink to spine-2\n"
+                " mtu 9000\n ip address 10.0.2.3 255.255.255.254\n no shutdown"
             )
-            content = content.replace(uplink + " no shutdown", uplink + " shutdown")
+            new_str = (
+                "interface GigabitEthernet3\n description Uplink to spine-2\n"
+                " mtu 9000\n ip address 10.0.2.3 255.255.255.254\n shutdown"
+            )
+            content = content.replace(old_str, new_str)
             leaf2_cfg.write_text(content, encoding="utf-8")
+        record_chaos_event(
+            scenario="port_down",
+            target_hostnames=["leaf-2.croc.lab", "leaf-2"],
+            title="Chaos: Отключение интерфейса GigabitEthernet3",
+            description="Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
+            severity="critical",
+            lab_dir=lab_dir,
+        )
         return {
             "status": "ok",
             "message": "Интерфейс GigabitEthernet3 на leaf-2 переведен в shutdown",
         }
+    if req.scenario == "huawei_drift":
+        leaf3_cfg = lab_dir / "leaf-3.croc.lab.cfg"
+        if leaf3_cfg.exists():
+            content = leaf3_cfg.read_text(encoding="utf-8")
+            if "rule 15 permit ip source 10.99.0.0" not in content:
+                content = content.replace(
+                    "rule 20 deny ip source any destination any",
+                    "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any\n rule 20 deny ip source any destination any",
+                )
+                leaf3_cfg.write_text(content, encoding="utf-8")
+        record_chaos_event(
+            scenario="huawei_drift",
+            target_hostnames=["leaf-3.croc.lab", "leaf-3"],
+            title="Chaos: Внедрение несанкционированного правила в Huawei VRP",
+            description="Внедрен дрейф ACL rule 15 в leaf-3.croc.lab (Huawei)",
+            severity="warning",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Внедрен несанкционированный ACL в leaf-3.croc.lab (Huawei VRP)",
+        }
+    if req.scenario == "ai_blackhole":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-3.croc.lab", "blackhole")
+        record_chaos_event(
+            scenario="ai_blackhole",
+            target_hostnames=["leaf-3.croc.lab", "leaf-3"],
+            title="Chaos: Моделирование 'тихой аварии' (Blackhole / 0 трафика)",
+            description="Имитация падения трафика при статусе портов up/up для проверки TimesFM 3.0",
+            severity="critical",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Смоделирована 'тихая авария' на leaf-3.croc.lab (TimesFM 3.0 обнаружит дроп)",
+        }
+    if req.scenario == "ai_storm":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "storm")
+        record_chaos_event(
+            scenario="ai_storm",
+            target_hostnames=["leaf-1.croc.lab", "leaf-1"],
+            title="Chaos: Моделирование шторма нагрузки / петли маршрутизации",
+            description="Имитация аномального всплеска трафика и CPU для проверки TimesFM 3.0",
+            severity="critical",
+            lab_dir=lab_dir,
+        )
+        return {
+            "status": "ok",
+            "message": "Смоделирован шторм трафика на leaf-1.croc.lab (TimesFM 3.0 обнаружит аномалию)",
+        }
     if req.scenario == "reset_lab":
+        from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+
+        AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-2.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-3.croc.lab", "clear")
+        AiTelemetryGuard.inject_anomaly("leaf-4.croc.lab", "clear")
         renderer = JinjaConfigRenderer(container.settings.templates_path)
         snapshot = container.intents.load()
         for dev in snapshot.inventory.devices:
             intent = snapshot.intent_for(dev.hostname)
-            if intent is None:
-                continue
             cfg = renderer.render(dev, intent)
             (lab_dir / f"{dev.hostname}.cfg").write_text(cfg, encoding="utf-8")
+        record_chaos_event(
+            scenario="reset_lab",
+            target_hostnames=["*"],
+            title="Chaos: Сброс фабрики к Git SoT",
+            description="Устройства успешно сброшены к чистому эталону Git SoT",
+            severity="info",
+            lab_dir=lab_dir,
+        )
         return {
             "status": "ok",
-            "message": "Все 4 устройства успешно сброшены к чистому эталону Git SoT",
+            "message": "Устройства успешно сброшены к чистому эталону Git SoT",
         }
+    record_chaos_event(
+        scenario=req.scenario,
+        target_hostnames=["*"],
+        title=f"Chaos: {req.scenario}",
+        description=f"Неизвестный сценарий: {req.scenario}",
+        severity="info",
+        lab_dir=lab_dir,
+    )
     return {"status": "ok", "message": "Неизвестный сценарий"}
+
+
+class FreezeRequest(BaseModel):
+    frozen: bool
+    reason: str | None = None
+
+
+@api_router.get(
+    "/system/freeze",
+    tags=["system"],
+    summary="Статус экстренной заморозки фабрики (Kill Switch)",
+)
+def get_freeze_status(_: Viewer) -> dict[str, Any]:
+    from netops.services.freeze import get_freeze_state  # noqa: PLC0415
+
+    return get_freeze_state()
+
+
+@api_router.post(
+    "/system/freeze",
+    tags=["system"],
+    summary="Включение / отключение экстренной заморозки фабрики",
+)
+def toggle_freeze(req: FreezeRequest, user: Viewer) -> dict[str, Any]:
+    from netops.services.freeze import set_factory_freeze  # noqa: PLC0415
+
+    return set_factory_freeze(req.frozen, req.reason, user.username)
+
+

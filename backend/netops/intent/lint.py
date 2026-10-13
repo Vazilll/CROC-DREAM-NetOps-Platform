@@ -85,4 +85,26 @@ def lint_fabric(intents: Iterable[DeviceIntent]) -> list[IntentIssue]:
                 )
                 for hostname, location in owners
             )
+
+    # Point-to-Point /31 subnet allocation audit
+    subnets_31: defaultdict[str, list[str]] = defaultdict(list)
+    for intent in intents:
+        for interface in intent.interfaces:
+            if interface.ipv4_address is not None and interface.ipv4_address.network.prefixlen == 31:
+                subnets_31[str(interface.ipv4_address.network)].append(intent.hostname)
+
+    for net, hosts in sorted(subnets_31.items()):
+        if len(hosts) > 2:
+            for h in hosts:
+                issues.append(
+                    IntentIssue(
+                        source=FABRIC_SOURCE,
+                        location="interfaces.ipv4_address",
+                        message=f"Подсеть /31 {net} назначена более чем двум узлам: {', '.join(sorted(hosts))}",
+                        hostname=h,
+                        code="oversubscribed_p2p_subnet",
+                    )
+                )
+
     return issues
+

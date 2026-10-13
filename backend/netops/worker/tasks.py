@@ -11,10 +11,8 @@ from netops.db import build_engine, build_session_factory
 from netops.pipeline import JobRunner, fail_stale_jobs
 from netops.services import JobDispatcher, JobService
 from netops.settings import Settings, get_settings
-from netops.telemetry import collector
 from netops.toolchain import build_toolchain
 from netops.worker.celery_app import (
-    COLLECT_METRICS_TASK,
     FAIL_STALE_JOBS_TASK,
     RUN_JOB_TASK,
     SCHEDULED_DRIFT_SCAN_TASK,
@@ -58,17 +56,6 @@ def scheduled_drift_scan() -> str | None:
     with runtime.session_factory() as session:
         job = JobService(session, runtime.dispatcher).schedule_drift_scan()
         return str(job.id) if job is not None else None
-
-
-@celery_app.task(name=COLLECT_METRICS_TASK)  # type: ignore[untyped-decorator]
-def collect_metrics() -> int:
-    runtime = get_runtime()
-    with runtime.session_factory() as session:
-        samples = collector.collect(session, build_toolchain(runtime.settings))
-        collector.store(
-            session, samples, retention=timedelta(days=runtime.settings.metrics_retention_days)
-        )
-        return len(samples)
 
 
 @celery_app.task(name=FAIL_STALE_JOBS_TASK)  # type: ignore[untyped-decorator]

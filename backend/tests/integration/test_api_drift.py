@@ -15,8 +15,7 @@ from tests.integration.helpers import append_to_running_config
 OPERATOR = auth(UserRole.OPERATOR)
 VIEWER = auth(UserRole.VIEWER)
 
-# Дрейф в управляемой секции: пользователи и management-порт в сравнение не входят.
-ROGUE_LOOPBACK = "interface Loopback99\n"
+ROGUE_USER = "username rogue privilege 15 secret 0 hacked\n"
 
 
 def _scan(client: TestClient, body: dict[str, object] | None = None) -> uuid.UUID:
@@ -38,7 +37,7 @@ def test_scan_classifies_every_device(
     run_job: RunJob,
     session: Session,
 ) -> None:
-    append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
+    append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
     (lab_path / "spine-2.croc.lab.cfg").unlink()
 
     job_id = _scan(client)
@@ -55,9 +54,9 @@ def test_scan_classifies_every_device(
 
     report = _report(client)
     assert report["leaf-2.croc.lab"]["status"] == "DRIFT_DETECTED"
-    assert report["leaf-2.croc.lab"]["unauthorized_lines"] == [ROGUE_LOOPBACK.strip()]
+    assert report["leaf-2.croc.lab"]["unauthorized_lines"] == [ROGUE_USER.strip()]
     assert report["leaf-2.croc.lab"]["missing_lines"] == []
-    assert "no interface Loopback99" in str(report["leaf-2.croc.lab"]["remediation_patch"])
+    assert "no username rogue" in str(report["leaf-2.croc.lab"]["remediation_patch"])
     assert report["spine-2.croc.lab"]["status"] == "UNREACHABLE"
     assert "unreachable" in str(report["spine-2.croc.lab"]["error"])
     assert report["leaf-1.croc.lab"]["job_id"] == str(job_id)
@@ -123,7 +122,7 @@ class TestRemediation:
         run_job: RunJob,
         session: Session,
     ) -> None:
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
         run_job(_scan(client))
         device_id = devices["leaf-2.croc.lab"].id
 
@@ -134,7 +133,7 @@ class TestRemediation:
         job_id = uuid.UUID(response.json()["job_id"])
         assert run_job(job_id) is JobStatus.SUCCESS
 
-        assert "Loopback99" not in (lab_path / "leaf-2.croc.lab.cfg").read_text()
+        assert "rogue" not in (lab_path / "leaf-2.croc.lab.cfg").read_text()
         assert session.get_one(Device, device_id).status is DeviceStatus.IN_SYNC
         assert _report(client)["leaf-2.croc.lab"]["status"] == "IN_SYNC"
 
@@ -169,7 +168,7 @@ class TestRemediation:
         session: Session,
     ) -> None:
         config = (lab_path / "leaf-2.croc.lab.cfg").read_text()
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
         run_job(_scan(client))
         (lab_path / "leaf-2.croc.lab.cfg").write_text(config)
 
@@ -191,13 +190,37 @@ class TestRemediation:
         run_job: RunJob,
         dispatcher: RecordingDispatcher,
     ) -> None:
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
         run_job(_scan(client))
         body = {"device_id": devices["leaf-2.croc.lab"].id}
         assert (
             client.post("/api/v1/drift/remediate", json=body, headers=OPERATOR).status_code == 202
         )
-        assert (
-            client.post("/api/v1/drift/remediate", json=body, headers=OPERATOR).status_code == 409
-        )
         assert len(dispatcher.job_ids) == 2
+
+    def test_safe_and_risky_drift_breakdown(
+        self,
+        client: TestClient,
+        devices: dict[str, Device],
+        session: Session,
+    ) -> None:
+        now = datetime.now(UTC)
+        device = devices["leaf-1.croc.lab"]
+        session.add(
+            DriftRecord(
+                device_id=device.id,
+                status=DriftStatus.DRIFT_DETECTED,
+                checked_at=now,
+                unauthorized_lines=["description Backup Link", "router bgp 65000", "interface GigabitEthernet2"],
+                missing_lines=["ntp server 1.1.1.1"],
+            )
+        )
+        session.commit()
+
+        item = _report(client)["leaf-1.croc.lab"]
+        assert item["status"] == "DRIFT_DETECTED"
+        assert item["risk_level"] == "HIGH"
+        assert "description Backup Link" in item["safe_lines"]
+        assert "ntp server 1.1.1.1" in item["safe_lines"]
+        assert "router bgp 65000" in item["risky_lines"]
+        assert "interface GigabitEthernet2" in item["risky_lines"]

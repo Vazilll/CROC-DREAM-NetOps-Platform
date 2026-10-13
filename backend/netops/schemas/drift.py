@@ -32,3 +32,6 @@ class DriftReportItem(BaseModel):
     missing_lines: list[str]
     remediation_patch: str | None
     error: str | None
+    safe_lines: list[str] = Field(default_factory=list)
+    risky_lines: list[str] = Field(default_factory=list)
+    risk_level: str = "LOW"

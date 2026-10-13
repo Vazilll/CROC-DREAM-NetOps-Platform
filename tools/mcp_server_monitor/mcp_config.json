@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "server-monitor": {
+      "command": "python3",
+      "args": [
+        "/home/tarhes/Проекты/app/CROC-DREAM-NetOps-Platform/tools/mcp_server_monitor/server.py"
+      ],
+      "env": {
+        "ALLOWED_SERVICES": "docker,containerd,ssh,sshd,nginx,redis,postgresql,croc-backend,croc-frontend,cron,systemd-journald"
+      }
+    },
+    "server-monitor-uv": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--with",
+        "psutil>=5.9.0",
+        "/home/tarhes/Проекты/app/CROC-DREAM-NetOps-Platform/tools/mcp_server_monitor/server.py"
+      ]
+    }
+  }
+}

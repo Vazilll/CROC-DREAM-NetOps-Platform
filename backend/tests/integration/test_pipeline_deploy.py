@@ -241,7 +241,7 @@ def test_running_config_changed_since_dry_run(
     session: Session,
     lab_path: Path,
 ) -> None:
-    append_to_running_config(lab_path, "leaf-1.croc.lab", "interface Loopback99\n")
+    append_to_running_config(lab_path, "leaf-1.croc.lab", "ip domain lookup\n")
     lab = FaultyLab(lab_path)
     deploy_id = _deploy(job_service, approved_dry_run)
 
@@ -326,7 +326,7 @@ class TestRemediationFailures:
         run_job: RunJob,
         session: Session,
     ) -> Device:
-        append_to_running_config(lab_path, "leaf-2.croc.lab", "interface Loopback99\n")
+        append_to_running_config(lab_path, "leaf-2.croc.lab", "ip domain lookup\n")
         run_job(job_service.create_drift_scan(None, requested_by="tester").id)
         device = session.get_one(Device, devices["leaf-2.croc.lab"].id)
         assert device.status is DeviceStatus.DRIFT_DETECTED

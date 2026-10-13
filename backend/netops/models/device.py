@@ -26,6 +26,9 @@ class Device(Base):
         server_default=DeviceStatus.UNKNOWN.value,
         index=True,
     )
+    management_mode: Mapped[str] = mapped_column(String(32), default="MONITORING_ONLY", server_default="MONITORING_ONLY")
+    proxy_jump: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    hardware_specs: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     last_checked_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

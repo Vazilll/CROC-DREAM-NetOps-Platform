@@ -26,9 +26,6 @@ def test_templates_render_for_every_device() -> None:
     renderer = JinjaConfigRenderer(TEMPLATES)
     errors: dict[str, str] = {}
     for device in snapshot.inventory.devices:
-        # Платформы без шаблонов (пока Huawei) пропускаем: dry-run на них падает с понятной ошибкой.
-        if not (TEMPLATES / device.platform.value).is_dir():
-            continue
         intent = snapshot.intent_for(device.hostname)
         if intent is None:
             errors[device.hostname] = "нет файла в intent/devices"

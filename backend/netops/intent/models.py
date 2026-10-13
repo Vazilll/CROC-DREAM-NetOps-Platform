@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from enum import StrEnum
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from itertools import combinations
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from pydantic import (
     BaseModel,
@@ -15,11 +15,10 @@ from pydantic import (
     StringConstraints,
     ValidationInfo,
     field_validator,
-    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
-from netops.enums import DeviceRole, DeviceStatus, Platform
+from netops.enums import DeviceRole, Platform
 
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 
@@ -27,8 +26,7 @@ Hostname = Annotated[str, StringConstraints(max_length=253, pattern=rf"^{_LABEL}
 Asn = Annotated[int, Field(ge=1, le=4_294_967_295, description="Номер AS (2 или 4 байта)")]
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[\w.\-]+$")]
 InterfaceName = Annotated[
-    str,
-    StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z][\w./:\-]*(?: [\w./:\-]+)?$"),
+    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z][\w./:\-]*$")
 ]
 Description = Annotated[str, StringConstraints(max_length=240, strip_whitespace=True)]
 
@@ -205,40 +203,24 @@ class DeviceIntent(IntentModel):
         return acls
 
 
-# id и status есть в модели устройства из ТЗ. Статус в файле справочный: в базе его
-# выставляет Drift Engine.
 class InventoryDevice(IntentModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int | str | None = None
     hostname: Hostname
     management_ip: IPv4Address
     management_port: int = Field(default=22, ge=1, le=65535)
     platform: Platform
     role: DeviceRole
     auth_profile: Identifier
-    status: DeviceStatus | None = None
 
 
 class Inventory(IntentModel):
     devices: list[InventoryDevice] = Field(default_factory=list)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _no_credentials(cls, data: Any) -> Any:
-        if isinstance(data, dict) and "auth_profiles" in data:
-            raise PydanticCustomError(
-                "credentials_in_inventory",
-                "Credentials must not be stored in inventory.yaml; "
-                "set them in NETOPS_AUTH_PROFILES and keep only auth_profile names here",
-            )
-        return data
-
     @field_validator("devices")
     @classmethod
     def _unique_devices(cls, devices: list[InventoryDevice]) -> list[InventoryDevice]:
         _ensure_unique((d.hostname.lower() for d in devices), "duplicate_hostname", "Hostname")
-        _ensure_unique((str(d.id) for d in devices if d.id is not None), "duplicate_id", "Id")
         _ensure_unique(
             (f"{d.management_ip}:{d.management_port}" for d in devices),
             "duplicate_management_endpoint",

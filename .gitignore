@@ -32,3 +32,10 @@ frontend/.cache/
 .DS_Store
 .idea/
 .vscode/
+
+# Agent scratch / teamwork
+.agents/
+screenshot_*.png
+test.png
+*.log
+backend/telemetry_cache.json

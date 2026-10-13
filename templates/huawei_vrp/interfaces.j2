@@ -1,27 +1,15 @@
-{# Loopback с router-id: в intent он не описан, а на стенде есть #}
-{% set declared = intent.interfaces | map(attribute="name") | join(" ") | lower %}
-{% if intent.bgp and "loopback" not in declared %}
-interface LoopBack0
- description Router-ID
- ip address {{ intent.bgp.router_id }} 255.255.255.255
-{% endif %}
 {% for iface in intent.interfaces %}
 interface {{ iface.name }}
 {% if iface.description %}
  description {{ iface.description }}
 {% endif %}
-{% if iface.mode == "l3" and not iface.name.lower().startswith("loopback") %}
- undo portswitch
-{% endif %}
-{% if iface.mtu != 1500 %}
- mtu {{ iface.mtu }}
-{% endif %}
-{% if iface.enabled %}
- undo shutdown
-{% else %}
- shutdown
-{% endif %}
 {% if iface.ipv4_address %}
  ip address {{ iface.ipv4_address.ip }} {{ iface.ipv4_address.netmask }}
 {% endif %}
+{% if not iface.enabled %}
+ shutdown
+{% else %}
+ undo shutdown
+{% endif %}
+#
 {% endfor %}

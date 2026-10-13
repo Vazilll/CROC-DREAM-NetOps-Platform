@@ -26,6 +26,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 TEMPLATES = FIXTURES / "templates"
 
 TOKENS = {
+    UserRole.OWNER: "owner-token",
     UserRole.ADMIN: "admin-token",
     UserRole.OPERATOR: "operator-token",
     UserRole.VIEWER: "viewer-token",

@@ -6,16 +6,6 @@ bgp {{ intent.bgp.asn }}
 {% if neighbor.description %}
  peer {{ neighbor.peer_ip }} description {{ neighbor.description }}
 {% endif %}
-{% if neighbor.password %}
- peer {{ neighbor.peer_ip }} password cipher {{ neighbor.password }}
-{% endif %}
 {% endfor %}
- ipv4-family unicast
-  undo synchronization
-{% for prefix in intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique %}
-  network {{ prefix.network_address }} {{ prefix.netmask }}
-{% endfor %}
-{% for neighbor in intent.bgp.neighbors %}
-  peer {{ neighbor.peer_ip }} enable
-{% endfor %}
+#
 {% endif %}

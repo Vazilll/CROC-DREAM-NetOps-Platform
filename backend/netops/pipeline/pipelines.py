@@ -42,11 +42,24 @@ class _BasePipeline:
         self, job: Job, pairs: list[tuple[JobTarget, Device]]
     ) -> list[tuple[JobTarget, DevicePlan]]:
         snapshot = load_intent(self._toolchain, self._recorder)
+        planned: list[tuple[JobTarget, Device]] = []
+        for row, device in pairs:
+            is_server = (
+                str(getattr(device.role, "value", device.role)) == "server"
+                or str(getattr(device.platform, "value", device.platform)) == "linux_server"
+            )
+            if is_server and snapshot.intent_for(device.hostname) is None:
+                self._recorder.warning(
+                    "plan", "Skipped: server without intent (monitoring only)", hostname=device.hostname
+                )
+                row.mark(TargetStatus.SKIPPED, "Server without intent")
+                continue
+            planned.append((row, device))
         plans = ChangePlanner(self._toolchain, self._recorder).plan(
-            [device for _, device in pairs], snapshot
+            [device for _, device in planned], snapshot
         )
         results = []
-        for (row, _), plan in zip(pairs, plans, strict=True):
+        for (row, _), plan in zip(planned, plans, strict=True):
             persist_plan(self._session, job, row, plan)
             results.append((row, plan))
         self._session.commit()

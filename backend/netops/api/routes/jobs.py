@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Query, Request, status
+from fastapi.responses import StreamingResponse
 
 from netops.api.deps import ContainerDep, JobServiceDep, Operator, Viewer
 from netops.enums import JobStatus, JobType
@@ -82,6 +85,61 @@ def get_job_logs(
     limit: Annotated[int, Query(ge=1, le=1000)] = 500,
 ) -> list[JobLog]:
     return list(service.logs(job_id, after_id=after_id, limit=limit))
+
+
+@router.get(
+    "/{job_id}/stream",
+    summary="Live Server-Sent Events (SSE) stream for job progress and terminal logs",
+)
+async def stream_job_logs(
+    job_id: uuid.UUID,
+    service: JobServiceDep,
+    request: Request,
+    _: Viewer,
+) -> StreamingResponse:
+    async def event_generator():
+        last_id = 0
+        while True:
+            if await request.is_disconnected():
+                break
+
+            job = service.get(job_id)
+            new_logs = list(service.logs(job_id, after_id=last_id, limit=200))
+            for log in new_logs:
+                last_id = max(last_id, log.id)
+                data = {
+                    "id": log.id,
+                    "step": log.step,
+                    "hostname": log.hostname,
+                    "level": log.level.value if hasattr(log.level, "value") else str(log.level),
+                    "message": log.message,
+                    "created_at": log.created_at.isoformat() if log.created_at else None,
+                    "progress": job.progress,
+                    "status": job.status.value,
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+
+            if job.status in {JobStatus.SUCCESS, JobStatus.FAILED}:
+                final_data = {
+                    "event": "done",
+                    "status": job.status.value,
+                    "progress": job.progress,
+                    "error": job.error,
+                }
+                yield f"event: done\ndata: {json.dumps(final_data)}\n\n"
+                break
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get(
