@@ -125,9 +125,9 @@ def test_metrics_command_reports_problems(
     _bot(session_factory, api).poll_once()
 
     text = api.texts()
-    assert "Дрейф: 1" in text
-    assert "Недоступны: 1" in text
-    assert "BGP не Established: 1 (leaf-1.croc.lab → 10.0.1.0)" in text
+    assert "Дрейф: 1 устройств" in text
+    assert "не отвечают: leaf-1.croc.lab" in text
+    assert "BGP Established: 0 из 1, проблемы: leaf-1.croc.lab → 10.0.1.0" in text
 
 
 def test_alerts_are_sent_once_for_drift_and_failed_jobs(
@@ -172,3 +172,38 @@ def test_catch_up_skips_what_happened_before_the_start(
     bot.send_alerts()
 
     assert api.sent == []
+
+
+def test_metrics_command_shows_numbers_when_everything_is_fine(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    collector.store(
+        session,
+        [
+            metrics.Sample(metrics.DEVICES_TOTAL, 4, {"status": "IN_SYNC"}),
+            metrics.Sample(metrics.DEVICE_REACHABLE, 1, {"hostname": "leaf-1.croc.lab"}),
+            metrics.Sample(
+                metrics.BGP_SESSION_UP,
+                1,
+                {"hostname": "leaf-1.croc.lab", "peer": "10.0.1.0", "state": "Established"},
+            ),
+            metrics.Sample(
+                metrics.INTERFACE_UP,
+                1,
+                {"hostname": "leaf-1.croc.lab", "interface": "GE1/0/0", "state": "up/up"},
+            ),
+            metrics.Sample(
+                metrics.PING_LOSS, 0, {"hostname": "leaf-1.croc.lab", "peer": "10.0.1.0"}
+            ),
+        ],
+        retention=timedelta(days=1),
+    )
+    api = FakeTelegram([_command("/metrics")])
+    _bot(session_factory, api).poll_once()
+
+    text = api.texts()
+    assert "Устройств: 4, все отвечают" in text
+    assert "BGP Established: 1 из 1" in text
+    assert "Порты up/up: 1 из 1" in text
+    assert "Потери ping: до 0%" in text
+    assert "Дрейф: нет" in text

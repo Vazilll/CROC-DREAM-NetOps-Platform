@@ -242,27 +242,47 @@ def _metrics_text(session: Session) -> str:
 
 
 def _summary(samples: Iterable[Sample]) -> list[str]:
-    drift = 0.0
-    unreachable = 0.0
-    bgp_down: list[str] = []
-    ports_down: list[str] = []
+    devices = drift = 0.0
+    unreachable: list[str] = []
+    bgp: list[tuple[str, float]] = []
+    ports: list[tuple[str, float]] = []
+    losses: list[tuple[str, float]] = []
     for sample in samples:
-        if sample.name == metrics.DRIFT_DEVICES:
+        peer = f"{sample.labels.get('hostname')} → {sample.labels.get('peer')}"
+        if sample.name == metrics.DEVICES_TOTAL:
+            devices += sample.value
+        elif sample.name == metrics.DRIFT_DEVICES:
             drift = sample.value
-        elif sample.name == metrics.DEVICE_REACHABLE and sample.value == 0:
-            unreachable += 1
-        elif sample.name == metrics.BGP_SESSION_UP and sample.value == 0:
-            bgp_down.append(f"{sample.labels['hostname']} → {sample.labels['peer']}")
-        elif sample.name == metrics.INTERFACE_UP and sample.value == 0:
-            ports_down.append(f"{sample.labels['hostname']} {sample.labels['interface']}")
-    lines = [f"Дрейф: {drift:g}", f"Недоступны: {unreachable:g}"]
-    lines.append(
-        f"BGP не Established: {len(bgp_down)}" + (f" ({', '.join(bgp_down)})" if bgp_down else "")
-    )
-    lines.append(
-        f"Порты не up/up: {len(ports_down)}" + (f" ({', '.join(ports_down)})" if ports_down else "")
-    )
+        elif sample.name == metrics.DEVICE_REACHABLE and not sample.value:
+            unreachable.append(str(sample.labels.get("hostname")))
+        elif sample.name == metrics.BGP_SESSION_UP:
+            bgp.append((peer, sample.value))
+        elif sample.name == metrics.INTERFACE_UP:
+            ports.append(
+                (f"{sample.labels.get('hostname')} {sample.labels.get('interface')}", sample.value)
+            )
+        elif sample.name == metrics.PING_LOSS:
+            losses.append((peer, sample.value))
+
+    lines = [
+        f"Устройств: {devices:g}"
+        + (f", не отвечают: {', '.join(unreachable)}" if unreachable else ", все отвечают")
+    ]
+    lines.append(_ratio("BGP Established", bgp))
+    lines.append(_ratio("Порты up/up", ports))
+    if losses:
+        worst, loss = max(losses, key=lambda item: item[1])
+        lines.append(f"Потери ping: до {loss:g}%" + (f" ({worst})" if loss else ""))
+    lines.append(f"Дрейф: {drift:g} устройств" if drift else "Дрейф: нет")
     return lines
+
+
+def _ratio(title: str, items: list[tuple[str, float]]) -> str:
+    if not items:
+        return f"{title}: данных нет"
+    down = [name for name, value in items if not value]
+    line = f"{title}: {len(items) - len(down)} из {len(items)}"
+    return line + (f", проблемы: {', '.join(down)}" if down else "")
 
 
 def build_bot(settings: Settings, token: str) -> MetricsBot:
