@@ -35,7 +35,8 @@ class Settings(BaseSettings):
 
     intent_repo_path: Path = Path("intent")
     templates_path: Path = Path("templates")
-    normalization_rules_path: Path | None = None
+    # Свой файл фильтров диффа вместо netops/network/diff_filters.yaml
+    diff_filters_path: Path | None = None
 
     # "offline" emulates the lab with running-configs stored as files; the
     # Scrapli/Nornir driver will be registered here once it is ready.

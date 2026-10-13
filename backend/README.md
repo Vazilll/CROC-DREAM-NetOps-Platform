@@ -15,7 +15,7 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Конечный автомат `PENDING → RUNNING → SUCCESS / FAILED` с логом каждого шага | `netops/models/job.py`, `netops/pipeline/recorder.py` |
 | Пайплайн: pre-flight lint → dry-run → ручное подтверждение → pre-check → apply (commit confirmed) → post-check → confirm/rollback | `netops/pipeline/` |
 | Drift Engine: Celery Beat каждые 15 минут, классификация `IN_SYNC / DRIFT_DETECTED / UNREACHABLE`, устранение дрейфа | `netops/pipeline/pipelines.py`, `netops/services/jobs.py` |
-| Нормализация конфигов (баннеры, счётчики байт, сертификаты, отступы) | `netops/network/normalization.py` |
+| Нормализация конфигов по правилам Ани: сравниваются только управляемые секции, служебные строки и хэши паролей отбрасываются | `netops/network/normalization.py`, `netops/network/diff_filters.yaml` |
 | Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
 | RBAC: viewer / operator / admin, управление пользователями и токенами | `netops/api/deps.py`, `netops/services/users.py` |
 | Общий docker-compose: бэкенд, PostgreSQL, Redis, миграции, воркер, Beat | `../docker-compose.yml` |
@@ -77,7 +77,7 @@ Postgres считается готовым только когда приним�
 ## Проверки
 
 ```bash
-uv run pytest --cov=netops   # 299 тестов, SQLite, без Redis и сети
+uv run pytest --cov=netops   # 308 тестов, SQLite, без Redis и сети
 uv run ruff check .
 uv run black --check .
 uv run mypy                  # strict
@@ -107,8 +107,9 @@ python3 backend/scripts/smoke_stack.py
 
 - бэкенд: ruff, black, mypy, pytest; покрытие — в сводке запуска;
 - фронтенд: `npm ci` и `npm run build` (сборка и проверка типов);
-- сборка Docker-образа и весь стек в docker compose на данных из `intent/`, `templates/` и
-  `lab/running/` со smoke-тестом; интервал скана — 60 с, чтобы дождаться задачи от Beat;
+- сборка Docker-образа и весь стек в docker compose со smoke-тестом на стенде из фикстур
+  (4 устройства); данные из `intent/` и `templates/` проверяет `test_repo_data`; интервал
+  скана — 60 с, чтобы дождаться задачи от Beat;
 - после мержа в `main` образ публикуется в `ghcr.io/xadecoride/netops-backend`
   (теги `latest` и `sha-<коммит>`).
 
@@ -122,14 +123,14 @@ python3 backend/scripts/smoke_stack.py
 | `REDIS_URL` | брокер Celery |
 | `INTENT_REPO_PATH` | checkout Git-репозитория с intent |
 | `TEMPLATES_PATH` | шаблоны Jinja2 (`<platform>/{base,interfaces,acls,bgp}.j2`) |
-| `NORMALIZATION_RULES_PATH` | необязательный YAML с дополнительными правилами нормализации |
+| `DIFF_FILTERS_PATH` | свой файл фильтров диффа в формате `netops/network/diff_filters.yaml`; по умолчанию берётся он |
 | `NETWORK_DRIVER` | пока только `offline` (см. ниже) |
 | `COMMIT_CONFIRM_TIMEOUT_SECONDS` | таймер `commit confirmed`, по умолчанию 180 |
 | `POST_CHECK_ATTEMPTS`, `POST_CHECK_INTERVAL_SECONDS` | повторы post-check, пока сходится BGP: по умолчанию 6 × 10 с (не больше половины таймера) |
 | `MAX_PING_LOSS_PERCENT` | допустимые потери ping, по умолчанию 20 |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | период фонового скана, по умолчанию 900 (15 минут) |
 | `API_TOKENS` | начальные токены `{"<token>": {"username": ..., "role": "viewer\|operator\|admin"}}`: нужны хотя бы для первого администратора, остальных пользователей он заводит через API |
-| `AUTH_PROFILES` | JSON `{"lab": {"username": ..., "password": ...}}`: SSH-учётки для `Device.auth_profile` |
+| `AUTH_PROFILES` | JSON `{"lab": {"username": ..., "password": ...}}`: SSH-учётки для `auth_profile` из инвентаря. Пароли — только здесь: `inventory.yaml` с `auth_profiles` не проходит валидацию |
 | `CORS_ORIGINS` | адреса фронтенда, которым разрешены запросы из браузера; по умолчанию Vite `http://localhost:5173` |
 
 ## API
@@ -213,28 +214,33 @@ python3 backend/scripts/smoke_stack.py
 `prefix.hostmask`. Неизвестная переменная — ошибка (`StrictUndefined`). Рабочие примеры
 под IOS-XE и EOS лежат в `tests/fixtures/templates/`.
 
-**Аня (нормализация).** Встроенные правила — в `DEFAULT_RULES`
-(`netops/network/normalization.py`). Дополнительные правила можно подключить YAML-файлом без
-правок кода:
+**Аня (нормализация).** Правила лежат в `netops/network/diff_filters.yaml` — это файл Ани
+как есть, править можно без кода. Для каждой платформы перед сравнением:
 
-```yaml
-cisco_iosxe:
-  ignore_lines: ['^service timestamps']   # регулярки по строке
-  ignore_sections: ['^line vty']          # строка + все вложенные
-```
+- маскируются хэши паролей (`mask_secrets`);
+- выбрасываются служебные строки (`drop_line_patterns`) и блоки с вложенными строками (`drop_blocks`);
+- остаются только управляемые секции (`managed_sections`) — и в скане дрейфа, и в dry-run.
+  Management-порт, пользователи, aaa и прочее вне этих секций не дают ложного дрейфа, и патч
+  наката их не трогает;
+- убираются неявные строки (`no shutdown`, `undo shutdown`): на устройстве их не видно.
+
+Регулярки применяются к строке с отступом, поэтому `^end$` ловит только конец конфига.
 
 **Даня (формат intent).** Репозиторий intent: `inventory.yaml` (список устройств) и
 `devices/<hostname>.yaml` (`interfaces`, `bgp`, `acls` по разделу 2.1 ТЗ). Схема — Pydantic-модели
 в `netops/intent/models.py`, пример — `tests/fixtures/intent-repo/` (CLOS: 2 spine Arista + 2 leaf Cisco).
-Неизвестные поля запрещены, чтобы опечатки не проходили молча.
+Неизвестные поля запрещены, чтобы опечатки не проходили молча. В инвентаре допустимы `id`
+(уникальный) и `status` из модели устройства ТЗ; статус справочный, в базе его выставляет Drift
+Engine. Платформы: `cisco_iosxe`, `arista_eos`, `huawei_vrp`, `eltex_esr`.
 
 ## Что ещё не сделано
 
 - Драйвер Scrapli (Максим, `netops/network/scrapli_driver.py`) на живом стенде не проверялся.
   В Docker-образе его пока не запустить: `scrapli` — необязательная зависимость, а системного
   `ssh` в образе нет.
-- Реальные шаблоны Jinja2 (Тимофей) — в `templates/` пока копии тестовых. CI проверяет, что
-  шаблоны рендерятся для всех устройств.
+- Шаблоны Jinja2 (Тимофей): для Huawei и Eltex их нет, dry-run на таких устройствах падает с
+  ошибкой «No templates found». CI проверяет, что существующие шаблоны рендерятся для всех
+  устройств своей платформы.
 - Метрики для Prometheus и Grafana — отложены; фронтенд в `docker-compose.yml` — когда будет
   образ React-приложения.
 - Из раздела 2.7 для администратора пока нет «утверждения опасных изменений» и

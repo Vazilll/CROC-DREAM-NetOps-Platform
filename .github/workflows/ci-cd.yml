@@ -95,12 +95,26 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
-      # Стек на данных из репозитория (intent/, templates/, lab/running/), как у команды локально.
-      # Скан по расписанию раз в минуту, чтобы smoke-тест дождался задачи от Beat.
-      - name: Настройки стенда
+      # Стенд на файлах из фикстур тестов: данные в intent/ и templates/ меняются по ходу работы
+      # (у Huawei пока нет шаблонов), их проверяет test_repo_data. В running-config только hostname,
+      # поэтому dry-run находит изменения на каждом устройстве. Скан по расписанию раз в минуту,
+      # чтобы smoke-тест дождался задачи от Beat.
+      - name: Тестовый стенд
         run: |
           cp backend/.env.example backend/.env
           sed -i 's/^NETOPS_DRIFT_SCAN_INTERVAL_SECONDS=.*/NETOPS_DRIFT_SCAN_INTERVAL_SECONDS=60/' backend/.env
+          fixtures="$GITHUB_WORKSPACE/backend/tests/fixtures"
+          lab="$RUNNER_TEMP/lab"
+          mkdir -p "$lab"
+          for intent in "$fixtures"/intent-repo/devices/*.yaml; do
+            host=$(basename "$intent" .yaml)
+            echo "hostname $host" > "$lab/$host.cfg"
+          done
+          {
+            echo "INTENT_REPO=$fixtures/intent-repo"
+            echo "TEMPLATES=$fixtures/templates"
+            echo "OFFLINE_LAB=$lab"
+          } >> "$GITHUB_ENV"
 
       - name: Запуск стека
         run: docker compose up -d --no-build --wait --wait-timeout 180

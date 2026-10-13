@@ -7,6 +7,7 @@ class Platform(StrEnum):
     CISCO_IOSXE = "cisco_iosxe"
     ARISTA_EOS = "arista_eos"
     HUAWEI_VRP = "huawei_vrp"
+    ELTEX_ESR = "eltex_esr"
 
 
 class DeviceRole(StrEnum):
