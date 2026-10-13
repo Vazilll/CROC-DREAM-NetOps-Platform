@@ -4,6 +4,8 @@
 FastAPI, PostgreSQL + Alembic, фоновые задачи Celery/Redis, конечный автомат задач, пайплайн
 dry-run → deploy с откатом и движок дрейфа по расписанию Celery Beat.
 
+Структура пакета и логика работы — в [`docs/backend-architecture.md`](../docs/backend-architecture.md).
+
 ## Что готово
 
 | Требование ТЗ | Где в коде |
