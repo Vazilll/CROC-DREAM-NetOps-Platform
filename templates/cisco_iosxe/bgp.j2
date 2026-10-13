@@ -1,6 +1,7 @@
 {% if intent.bgp %}
 router bgp {{ intent.bgp.asn }}
  bgp router-id {{ intent.bgp.router_id }}
+ bgp log-neighbor-changes
 {% for neighbor in intent.bgp.neighbors %}
  neighbor {{ neighbor.peer_ip }} remote-as {{ neighbor.remote_asn }}
 {% if neighbor.description %}
@@ -10,11 +11,12 @@ router bgp {{ intent.bgp.asn }}
  neighbor {{ neighbor.peer_ip }} password {{ neighbor.password }}
 {% endif %}
 {% endfor %}
- address-family ipv4 unicast
+ address-family ipv4
 {% for prefix in intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique %}
   network {{ prefix.network_address }} mask {{ prefix.netmask }}
 {% endfor %}
 {% for neighbor in intent.bgp.neighbors %}
   neighbor {{ neighbor.peer_ip }} activate
 {% endfor %}
+ exit-address-family
 {% endif %}

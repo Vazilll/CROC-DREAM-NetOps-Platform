@@ -1,3 +1,9 @@
+{% set declared = intent.interfaces | map(attribute="name") | join(" ") | lower %}
+{% if intent.bgp and "loopback" not in declared %}
+interface Loopback0
+   description Router-ID
+   ip address {{ intent.bgp.router_id }}/32
+{% endif %}
 {% for iface in intent.interfaces %}
 interface {{ iface.name }}
 {% if iface.description %}
