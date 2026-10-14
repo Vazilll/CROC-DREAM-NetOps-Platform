@@ -334,7 +334,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [telegramSavedMsg, setTelegramSavedMsg] = useState('');
 
   // Step 4: AI Cluster Cascade
-  const [ollamaUrl, setOllamaUrl] = useState('');
   const [llmCascade, setLlmCascade] = useState<LlmCascadeConfig[]>([]);
   const [llmConfigRaw, setLlmConfigRaw] = useState('');
   const [showLlmPasteBox, setShowLlmPasteBox] = useState(true);
@@ -391,7 +390,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       if (st.server?.clab_host) setServerHost(st.server.clab_host);
       if (st.server?.clab_port) setServerPort(st.server.clab_port);
       if (st.server?.clab_user) setServerUser(st.server.clab_user);
-      if (st.ai?.ollama_url) setOllamaUrl(st.ai.ollama_url);
       if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
         setLlmCascade(st.ai.cascade);
       }
@@ -668,59 +666,20 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
           timeout_seconds: Number(x.timeout_seconds || 2.0),
         }));
     } catch {
-      const kv: Record<string, string> = {};
-      for (const line of trimmed.split(/\r?\n/)) {
-        const clean = line.trim();
-        if (!clean || clean.startsWith('#') || !clean.includes('=')) continue;
-        const eqIdx = clean.indexOf('=');
-        const k = clean.slice(0, eqIdx).trim().toUpperCase();
-        const v = clean.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
-        kv[k] = v;
-      }
-      const out: LlmCascadeConfig[] = [];
-      if (kv.NETOPS_GROQ_API_KEY || kv.GROQ_API_KEY) {
-        out.push({
-          name: 'Groq',
-          base_url: kv.NETOPS_GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
-          model: kv.NETOPS_GROQ_MODEL || '',
-          api_key: kv.NETOPS_GROQ_API_KEY || kv.GROQ_API_KEY,
-          timeout_seconds: Number(kv.NETOPS_GROQ_TIMEOUT_SECONDS || 2.0),
-        });
-      }
-      if (kv.NETOPS_GEMINI_API_KEY || kv.GEMINI_API_KEY) {
-        out.push({
-          name: 'Google-Gemini',
-          base_url:
-            kv.NETOPS_GEMINI_BASE_URL ||
-            'https://generativelanguage.googleapis.com/v1beta/openai',
-          model: kv.NETOPS_GEMINI_MODEL || 'gemini-2.5-flash',
-          api_key: kv.NETOPS_GEMINI_API_KEY || kv.GEMINI_API_KEY,
-          timeout_seconds: Number(kv.NETOPS_GEMINI_TIMEOUT_SECONDS || 2.0),
-        });
-      }
-      if (kv.NETOPS_OLLAMA_URL || kv.OLLAMA_URL) {
-        out.push({
-          name: 'Local-Ollama',
-          base_url: kv.NETOPS_OLLAMA_URL || kv.OLLAMA_URL,
-          model: kv.NETOPS_OLLAMA_MODEL || 'qwen2.5:7b',
-          api_key: 'ollama',
-          timeout_seconds: Number(kv.NETOPS_OLLAMA_TIMEOUT_SECONDS || 4.0),
-        });
-      }
-      return out;
+      return [];
     }
   };
 
   const handleApplyLlmConfig = () => {
     const parsed = parseLlmConfigText(llmConfigRaw);
     if (parsed.length === 0) {
-      setAiSavedMsg('Не удалось распознать конфиг (вставьте JSON или ENV)');
+      setAiSavedMsg('Не удалось распознать JSON-конфиг');
       return;
     }
     setLlmCascade((prev) => [...prev, ...parsed]);
     setLlmConfigRaw('');
     setShowLlmPasteBox(false);
-    setAiSavedMsg(`Добавлено в каскад нейросетей: ${parsed.map((p) => p.name).join(', ')}`);
+    setAiSavedMsg(`Добавлено в каскад: ${parsed.length}`);
   };
 
   // Step 4 Action: Save AI Cluster Cascade
@@ -735,7 +694,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         setLlmConfigRaw('');
       }
       await api.configureBootstrapLayers({
-        ollama_url: ollamaUrl.trim() || undefined,
         llm_cascade: finalCascade,
         auto_commit_on_diff: true,
         websocket_enabled: true,
