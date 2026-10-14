@@ -244,7 +244,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       }
     };
     poll();
-    const timer = setInterval(poll, 3000);
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      poll();
+    }, 8000);
     return () => {
       active = false;
       clearInterval(timer);

@@ -100,6 +100,10 @@ backend/
     │   └── recorder.py              # Запись прогресса и шагов выполнения в БД
     ├── services/                    # Прикладные доменные сервисы
     │   ├── devices.py, jobs.py, drift.py, users.py
+    │   ├── discovery.py             # SSH-зондирование (/devices/probe), Brownfield-парсинг и привязка к Git SoT
+    │   ├── git_sot.py               # Метаданные Git с 10-секундным TTL-кэшем, git pull и синхронизация
+    │   ├── bootstrap.py             # 4-шаговый визард «Матрёшка», перенос прав Owner и параллельный TCP-дискавери сервера
+    │   ├── chaos.py                 # Сценарии Chaos Engineering (инъекция дрейфа, падение портов, сброс к эталону)
     │   ├── forecast.py              # Расчёт прогнозов временных рядов TimesFM 3.0 (квантили p10/p50/p90 и ETA отказа)
     │   ├── ai_guard.py              # Эвристический и ИИ-анализ безопасности патча перед деплоем (Pre-Flight Guard)
     │   ├── llm.py                   # Интеграция с LLM (OpenRouter / Gemini / локальная эвристика) для объяснения diff и Copilot

@@ -321,6 +321,7 @@ export function App() {
 
     const pollMs = hasActiveJob ? 1500 : 5000;
     const interval = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
       fetchJobs();
       fetchDevices();
     }, pollMs);
