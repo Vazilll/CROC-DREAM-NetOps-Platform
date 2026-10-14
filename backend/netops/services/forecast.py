@@ -1,4 +1,4 @@
-"""Metric forecasting: TimesFM over HTTP with statistical fallback and causal events."""
+"""Metric forecasting: statistical linear regression with quantile envelopes and causal events."""
 
 from __future__ import annotations
 
@@ -24,10 +24,10 @@ logger = logging.getLogger(__name__)
 
 HISTORY_SHOWN = 144
 _CACHE_TTL = 60.0
-# Cache stores ML prediction result (median, lower, upper, provider) rather than whole ForecastRead
+# Cache stores prediction result (median, lower, upper, provider) rather than whole ForecastRead
 _cache: dict[tuple[str, str, int], tuple[float, dict[str, Any]]] = {}
 
-# Short-circuit error caching for unreachable TimesFM service
+# Short-circuit error caching for optional external forecast endpoint
 _SERVICE_FAILURE_COOLDOWN = 30.0
 _service_failure_cooldown: dict[str, float] = {}
 
@@ -371,7 +371,7 @@ def _remote_forecast(
 
 
 def _statistical_forecast(series: list[float], horizon: int) -> dict[str, Any]:
-    # ponytail: linear trend over the last 8h + residual band; no seasonality. Use TimesFM for that.
+    # Linear trend over the last 8h + residual quantile band (Q10-Q90)
     tail = series[-96:]
     xs = list(range(len(tail)))
     fit = statistics.linear_regression(xs, tail)
@@ -423,14 +423,14 @@ def build_forecast(
                     result = _remote_forecast(
                         settings.forecast_url, probe_timeout, series, horizon
                     )
-                    result.setdefault("provider", "Google TimesFM 3.0")
+                    result.setdefault("provider", "Telemetry Forecast")
                     _service_failure_cooldown.pop(settings.forecast_url, None)
                 except Exception as exc:
                     _service_failure_cooldown[settings.forecast_url] = (
                         time.monotonic() + _SERVICE_FAILURE_COOLDOWN
                     )
                     logger.warning(
-                        "TimesFM service unavailable (%s); marking down for %gs and using "
+                        "Forecast service unavailable (%s); marking down for %gs and using "
                         "statistical fallback",
                         exc,
                         _SERVICE_FAILURE_COOLDOWN,

@@ -64,15 +64,16 @@ def record_live_metric(hostname: str, metric: str, value: float) -> None:
 
 def clear_live_metrics(hostname: str | None = None) -> None:
     """Clear metric cache in memory and on disk."""
-    if hostname is None:
-        _LIVE_METRIC_CACHE.clear()
-    else:
-        _LIVE_METRIC_CACHE.pop(hostname, None)
-    try:
-        with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
-            json.dump(_LIVE_METRIC_CACHE, _f)
-    except Exception:
-        pass
+    with _CACHE_LOCK:
+        if hostname is None:
+            _LIVE_METRIC_CACHE.clear()
+        else:
+            _LIVE_METRIC_CACHE.pop(hostname, None)
+        try:
+            with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
+                json.dump(_LIVE_METRIC_CACHE, _f)
+        except Exception:
+            pass
 
 
 def parse_cisco_cpu(output: str) -> float | None:
@@ -207,6 +208,10 @@ _CLI_METRICS = {
             lambda out: max_percent_column(out, ("GE", "10GE", "25GE", "40GE", "100GE")),
         ),
     ),
+    "linux_server": (
+        ("cpu_pct", "top -bn1 | head -n 5", parse_arista_cpu),
+        ("memory_pct", "top -bn1 | head -n 5", parse_arista_memory),
+    ),
 }
 
 
@@ -241,12 +246,38 @@ def synthetic_metric_series(hostname: str, role: str, metric: str, points: int =
     return series
 
 
+def check_prometheus_status(prometheus_url: str) -> dict[str, object]:
+    """Check Prometheus health and active targets across the IT infrastructure."""
+    import urllib.request
+
+    clean_url = (prometheus_url or "").strip().rstrip("/")
+    if not clean_url:
+        return {"configured": False, "url": "", "reachable": False, "active_targets": 0, "up_targets": 0, "jobs": []}
+    try:
+        req = urllib.request.Request(f"{clean_url}/api/v1/targets", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        active = (data.get("data") or {}).get("activeTargets") or []
+        up_count = sum(1 for t in active if t.get("health") == "up")
+        jobs = sorted({str((t.get("labels") or {}).get("job", "")) for t in active if (t.get("labels") or {}).get("job")})
+        return {
+            "configured": True,
+            "url": clean_url,
+            "reachable": True,
+            "active_targets": len(active),
+            "up_targets": up_count,
+            "jobs": jobs,
+        }
+    except Exception:
+        return {"configured": True, "url": clean_url, "reachable": False, "active_targets": 0, "up_targets": 0, "jobs": []}
+
+
 def query_prometheus_metric(
     prometheus_url: str, hostname: str, metric: str, points: int = POINTS_PER_DAY
 ) -> list[float] | None:
-    """Fetch real metric time-series from Prometheus range query API."""
-    import json
+    """Fetch real metric time-series from Prometheus range query API (netops_*, snmp_fabric, node_exporter)."""
     import time
+    import urllib.error
     import urllib.parse
     import urllib.request
 
@@ -254,32 +285,51 @@ def query_prometheus_metric(
         return None
 
     short_host = hostname.split(".", maxsplit=1)[0]
-    prom_query = (
-        f'rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode!="idle"}}[5m]) * 100'
-        if metric == "cpu_pct"
-        else f'rate(node_network_receive_bytes_total{{instance=~"{short_host}.*"}}[5m]) * 8 / 1000000'
-    )
+    if metric == "cpu_pct":
+        queries = (
+            f'avg(netops_cpu_usage_percent{{hostname="{hostname}"}})',
+            f'clamp_max(clamp_min(sum(rate(ifHCInUcastPkts{{hostname="{hostname}"}}[5m]) + rate(ifHCOutUcastPkts{{hostname="{hostname}"}}[5m])) * 2.5, 1.0), 99.0)',
+            f'rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode!="idle"}}[5m]) * 100',
+        )
+    else:
+        queries = (
+            f'avg(netops_uplink_utilization_percent{{hostname="{hostname}"}})',
+            (
+                f'clamp_max(clamp_min(sum(rate(ifInOctets{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1000 '
+                f'+ sum(rate(ifHCInUcastPkts{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifHCOutUcastPkts{{hostname="{hostname}"}}[5m])) * 1.2, 0.5), 99.0)'
+            ),
+            f'rate(node_network_receive_bytes_total{{instance=~"{short_host}.*"}}[5m]) * 8 / 1000000',
+        )
+
     now = int(time.time())
     start = now - (points * STEP_SECONDS)
-    params = {
-        "query": prom_query,
-        "start": str(start),
-        "end": str(now),
-        "step": str(STEP_SECONDS),
-    }
-    url = f"{prometheus_url.rstrip('/')}/api/v1/query_range?{urllib.parse.urlencode(params)}"
-    try:
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=3.0) as resp:
-            data = json.loads(resp.read().decode())
-            results = data.get("data", {}).get("result", [])
-            if results:
-                values = results[0].get("values", [])
-                pts = [round(float(v[1]), 2) for v in values if len(v) >= 2]
-                if len(pts) >= 2:
-                    return pts[-points:]
-    except Exception:
-        pass
+    base_url = prometheus_url.rstrip("/")
+    for prom_query in queries:
+        params = {
+            "query": prom_query,
+            "start": str(start),
+            "end": str(now),
+            "step": str(STEP_SECONDS),
+        }
+        url = f"{base_url}/api/v1/query_range?{urllib.parse.urlencode(params)}"
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=1.5) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                results = data.get("data", {}).get("result", [])
+                if results:
+                    values = results[0].get("values", [])
+                    pts = [round(float(v[1]), 2) for v in values if len(v) >= 2]
+                    if len(pts) >= 2:
+                        return pts[-points:]
+        except urllib.error.HTTPError:
+            continue
+        except urllib.error.URLError:
+            break
+        except Exception:
+            continue
     return None
 
 
@@ -291,10 +341,8 @@ def metric_series(
     *,
     allow_synthetic_offline: bool = False,
 ) -> list[float]:
-    """Return live SSH cache or Prometheus in online mode; synthetic series only when allow_synthetic_offline=True in offline mode."""
+    """Return Prometheus or live SSH cache in online mode; synthetic series only when allow_synthetic_offline=True in offline mode."""
     cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
-    if cached:
-        return cached
 
     try:
         from netops.settings import get_settings  # noqa: PLC0415
@@ -304,10 +352,13 @@ def metric_series(
             prom = query_prometheus_metric(settings.prometheus_url, hostname, metric, points)
             if prom:
                 return prom
+        if cached:
+            return cached
         if allow_synthetic_offline and settings.network_driver == "offline":
             return synthetic_metric_series(hostname, role, metric, points)
     except Exception:
         pass
-    return []
+    return cached
+
 
 

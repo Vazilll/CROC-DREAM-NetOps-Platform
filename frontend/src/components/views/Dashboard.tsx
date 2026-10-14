@@ -15,7 +15,7 @@ import {
   Presentation,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../../api';
+import type { Device, ForecastAlert, JobSummary, UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
 import { TopologyMap } from '../charts/TopologyMap';
 import { BentoCard, Sparkline } from '../layout/ui';
@@ -55,7 +55,6 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 }) => {
   const t = translations[locale];
   const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
-  const [aiGuardList, setAiGuardList] = useState<AiGuardResponse[]>([]);
   const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
   const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -64,11 +63,8 @@ const DashboardComponent: React.FC<DashboardProps> = ({
   useEffect(() => {
     if (devices.length > 0) {
       api.getForecastAlerts().then(setAlerts).catch(() => setAlerts([]));
-      api.getAiGuardOverview().then(setAiGuardList).catch(() => setAiGuardList([]));
     }
   }, [devices.length]);
-
-  const aiAnomalies = useMemo(() => aiGuardList.filter((g) => !g.healthy), [aiGuardList]);
 
   const { inSyncCount, driftCount, unreachableCount, healthPercent } = useMemo(() => {
     let inSync = 0;
@@ -240,7 +236,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
   return (
     <div className="space-y-3 max-w-[1920px] mx-auto select-none">
       {/* 1. Health KPI Strip (Geist / Linear High-Density Metrics) */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
         <button
           onClick={() => onOpenTab('devices')}
           className="text-left rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between"
@@ -315,31 +311,6 @@ const DashboardComponent: React.FC<DashboardProps> = ({
             </div>
           </div>
           <AlertTriangle className={`w-4 h-4 ${unreachableCount > 0 ? 'text-rose-400' : 'text-[var(--text-muted)]'}`} />
-        </button>
-
-        <button
-          onClick={() => onOpenTab('diff')}
-          className={`col-span-2 sm:col-span-1 lg:col-span-1 text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between ${
-            aiAnomalies.length > 0
-              ? 'border-rose-500/40 bg-rose-500/[0.05] hover:border-rose-500/60'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]'
-          }`}
-          title="Защитный барьер телеметрии TimesFM 3.0"
-        >
-          <div>
-            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
-              <span className={`w-1.5 h-1.5 rounded-full ${aiAnomalies.length > 0 ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}`} />
-              <span>{t.cardAiGuard}</span>
-            </div>
-            <div className={`text-2xl font-semibold font-mono tabular-nums mt-0.5 tracking-tight ${aiAnomalies.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-[var(--text-primary)]'}`}>
-              {aiAnomalies.length > 0 ? `${aiAnomalies.length} ${t.radarAnomCount}` : 'ACTIVE'}
-            </div>
-          </div>
-          <div className="text-right">
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${aiAnomalies.length > 0 ? 'bg-rose-500/15 text-rose-400 border-rose-500/25' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)]'}`}>
-              {aiAnomalies.length > 0 ? 'Rollback' : 'Shield OK'}
-            </span>
-          </div>
         </button>
       </div>
 
@@ -515,7 +486,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Right Column (5 cols on XL): TimesFM 6h Risk Radar & Recent Jobs */}
+        {/* Right Column (5 cols on XL): 6h Risk Radar & Recent Jobs */}
         <div className="xl:col-span-5 space-y-3">
           <BentoCard
             title={t.riskRadarTitle}

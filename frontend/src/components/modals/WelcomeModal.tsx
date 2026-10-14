@@ -14,7 +14,6 @@ import {
   Cpu,
   ExternalLink,
   Smartphone,
-  Terminal,
   Sun,
   Moon,
 } from 'lucide-react';
@@ -24,6 +23,7 @@ import {
   type UserRole,
   type ServerDiscoveryResponse,
   type DiscoveredSwitchItem,
+  type LlmCascadeConfig,
 } from '../../api';
 import type { AppTheme } from '../layout/Header';
 import { translations, type Locale } from '../../i18n';
@@ -46,7 +46,7 @@ interface PreloadMetrics {
   ready: boolean;
 }
 
-type WizardStep = 1 | 2 | 3 | 4;
+type WizardStep = 1 | 2 | 3 | 4 | 5;
 
 interface WizardCopy {
   clusterSetupTitle: string;
@@ -135,8 +135,9 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     steps: {
       1: '1. Владелец',
       2: '2. GitHub',
-      3: '3. Telegram и ИИ',
-      4: '4. Сервер',
+      3: '3. Telegram',
+      4: '4. ИИ',
+      5: '5. Сервер',
     },
     step1: {
       clusterNameLabel: 'Имя кластера',
@@ -180,14 +181,14 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     },
     step3: {
       tgBotTitle: 'Telegram-бот',
-      tgLinkedStatus: 'Привязан',
-      tgUnlinkedHint: 'Нажмите кнопку и запустите бота (/start)',
-      connectTgBtn: 'Подключить TG',
-      botTokenLabel: 'Токен бота (опционально)',
-      botTokenPlaceholder: 'По умолчанию @Croc_Dream_bot',
+      tgLinkedStatus: 'Владелец автоподгружен:',
+      tgUnlinkedHint: 'Введите токен и зайдите в бота (/start) — вы автоматически подгрузитесь как Владелец',
+      connectTgBtn: 'Подключить токен',
+      botTokenLabel: 'Токен бота (@BotFather HTTP API)',
+      botTokenPlaceholder: '8993240454:AAHnq-...',
       aiKeyLabel: 'Ключ ИИ (Groq / OpenAI)',
       aiAlreadyConfigured: 'Уже подключён',
-      msgTelegramSaved: 'Контур Telegram и ИИ сохранён в общем томе Docker!',
+      msgTelegramSaved: 'Токен бота подключён! Зайдите в бота (/start) для автоподгрузки Владельца.',
       errTelegramSave: 'Ошибка сохранения настроек Telegram',
     },
     step4: {
@@ -200,7 +201,7 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
       userLabel: 'Логин',
       passwordPlaceholder: 'Пароль SSH (или пусто для SSH-ключа)',
       discoveringBtn: 'Поиск...',
-      discoverBtn: 'Найти узлы',
+      discoverBtn: 'Подключить',
       discoveredNodesCount: 'Найдено узлов:',
       errServerUnreachable: 'Не удалось связаться с сервером',
       openConsoleBtn: 'Открыть пульт',
@@ -216,8 +217,9 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     steps: {
       1: '1. Owner',
       2: '2. GitHub',
-      3: '3. Telegram & AI',
-      4: '4. Server',
+      3: '3. Telegram',
+      4: '4. AI',
+      5: '5. Server',
     },
     step1: {
       clusterNameLabel: 'Cluster Name',
@@ -261,14 +263,14 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     },
     step3: {
       tgBotTitle: 'Telegram Bot',
-      tgLinkedStatus: 'Linked',
-      tgUnlinkedHint: 'Click connect and start the bot (/start)',
-      connectTgBtn: 'Connect TG',
-      botTokenLabel: 'Bot Token (optional)',
-      botTokenPlaceholder: 'Default @Croc_Dream_bot',
+      tgLinkedStatus: 'Owner auto-loaded:',
+      tgUnlinkedHint: 'Enter bot token and open the bot (/start) — you will be auto-loaded as Owner',
+      connectTgBtn: 'Connect Token',
+      botTokenLabel: 'Bot Token (@BotFather HTTP API)',
+      botTokenPlaceholder: '8993240454:AAHnq-...',
       aiKeyLabel: 'AI API Key (Groq / OpenAI)',
       aiAlreadyConfigured: 'Already configured',
-      msgTelegramSaved: 'Telegram & AI settings persisted to shared Docker volume!',
+      msgTelegramSaved: 'Bot token saved! Open the bot (/start) to auto-load as Owner.',
       errTelegramSave: 'Failed to save Telegram settings',
     },
     step4: {
@@ -281,7 +283,7 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
       userLabel: 'User',
       passwordPlaceholder: 'SSH password (or leave empty for SSH key)',
       discoveringBtn: 'Probing...',
-      discoverBtn: 'Discover Nodes',
+      discoverBtn: 'Connect',
       discoveredNodesCount: 'Discovered nodes:',
       errServerUnreachable: 'Failed to reach remote server',
       openConsoleBtn: 'Launch Console',
@@ -297,14 +299,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   theme,
   setTheme,
 }) => {
-  const [phase, setPhase] = useState<'welcome' | 'wizard'>('welcome');
+  const [phase, setPhase] = useState<'welcome' | 'wizard'>('wizard');
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
 
-  // Step 1: Owner Identity, Network Contour & WebSocket Mode
+  // Step 1: Owner Identity & Network Contour (WebSocket & Auto-commit always ON)
   const [clusterName, setClusterName] = useState('CROC-FABRIC-PROD-01');
   const [exposureMode, setExposureMode] = useState<'local_only' | 'public_tunnel'>('local_only');
-  const [websocketEnabled, setWebsocketEnabled] = useState(false);
   const [ownerToken, setOwnerToken] = useState('');
   const [, setBoundClientId] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
@@ -314,41 +315,37 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [recoveryStatusMsg, setRecoveryStatusMsg] = useState('');
   const [claimingOwner, setClaimingOwner] = useState(false);
 
-  // Step 2: GitHub SoT
-  const [githubRepoUrl, setGithubRepoUrl] = useState(
-    'https://github.com/Vazilll/CROC-DREAM-NetOps-Platform'
-  );
-  const [githubBranch, setGithubBranch] = useState('main');
-  const [githubCommit, setGithubCommit] = useState('HEAD');
-  const [githubPat, setGithubPat] = useState('');
-  const [webhookSecret, setWebhookSecret] = useState('');
-  const [webhookUrl, setWebhookUrl] = useState(
-    typeof window !== 'undefined'
-      ? `${window.location.origin}/api/v1/git/webhook`
-      : 'http://127.0.0.1:5173/api/v1/git/webhook'
-  );
-  const [copiedWebhook, setCopiedWebhook] = useState(false);
+  // Step 2: GitHub SoT (SSH Repo + Target Branch; auto-commit and sync always ON)
+  const [githubRepoUrl, setGithubRepoUrl] = useState('');
+  const [githubBranch, setGithubBranch] = useState('');
   const [savingGithub, setSavingGithub] = useState(false);
   const [githubSavedMsg, setGithubSavedMsg] = useState('');
 
-  // Step 3: Telegram Bot & AI Copilot
+  // Step 3: Telegram Bot (Token -> Auto-load Owner when entering bot)
   const [telegramBotToken, setTelegramBotToken] = useState('');
-  const [telegramBotUsername, setTelegramBotUsername] = useState('@Croc_Dream_bot');
-  const [telegramDeepLink, setTelegramDeepLink] = useState(
-    'https://t.me/Croc_Dream_bot?start=claim_owner'
-  );
+  const [telegramChatId, setTelegramChatId] = useState('');
+  const [telegramBotUsername, setTelegramBotUsername] = useState('');
+  const [telegramBotConfigured, setTelegramBotConfigured] = useState(false);
   const [telegramRecoverLink, setTelegramRecoverLink] = useState(
     'https://t.me/Croc_Dream_bot?start=recover_owner'
   );
   const [telegramLinked, setTelegramLinked] = useState(false);
   const [telegramLinkedUser, setTelegramLinkedUser] = useState('');
-  const [groqApiKey, setGroqApiKey] = useState('');
-  const [aiConfigured, setAiConfigured] = useState(false);
   const [savingTelegram, setSavingTelegram] = useState(false);
   const [telegramSavedMsg, setTelegramSavedMsg] = useState('');
 
-  // Step 4: Autonomous Server Discovery ("Распаковка стенда")
-  const [serverMode, setServerMode] = useState<'ssh' | 'offline'>('ssh');
+  // Step 4: AI Cluster Cascade
+  const [groqApiKey] = useState('');
+  const [geminiApiKey] = useState('');
+  const [ollamaUrl, setOllamaUrl] = useState('');
+  const [llmCascade, setLlmCascade] = useState<LlmCascadeConfig[]>([]);
+  const [llmConfigRaw, setLlmConfigRaw] = useState('');
+  const [showLlmPasteBox, setShowLlmPasteBox] = useState(true);
+  const [, setAiConfigured] = useState(false);
+  const [savingAi, setSavingAi] = useState(false);
+  const [aiSavedMsg, setAiSavedMsg] = useState('');
+
+  // Step 5: Server (Host & Password only on initial setup)
   const [serverHost, setServerHost] = useState('5.228.243.54');
   const [serverPort, setServerPort] = useState(221);
   const [serverUser, setServerUser] = useState('crocdream');
@@ -357,8 +354,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [discoveryResult, setDiscoveryResult] = useState<ServerDiscoveryResponse | null>(null);
 
   const [preload, setPreload] = useState<PreloadMetrics>({
-    devicesCount: 4,
-    inSyncCount: 4,
+    devicesCount: 0,
+    inSyncCount: 0,
     jobsCount: 0,
     alertsCount: 0,
     step: 1,
@@ -368,7 +365,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   if (isOpen !== prevIsOpen) {
     setPrevIsOpen(isOpen);
     if (isOpen) {
-      setPhase('welcome');
+      setPhase('wizard');
     }
   }
 
@@ -382,22 +379,28 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
         setExposureMode(st.exposure.mode);
       }
-      if (typeof st.exposure?.websocket_enabled === 'boolean') {
-        setWebsocketEnabled(st.exposure.websocket_enabled);
+      if (st.github?.repo_connected) {
+        if (st.github.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
+        if (st.github.branch) setGithubBranch(st.github.branch);
       }
-      if (st.github?.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
-      if (st.github?.branch) setGithubBranch(st.github.branch);
-      if (st.github?.commit_short) setGithubCommit(st.github.commit_short);
-      if (st.telegram?.bot_username) setTelegramBotUsername(st.telegram.bot_username);
-      if (st.telegram?.deep_link_claim) setTelegramDeepLink(st.telegram.deep_link_claim);
+      if (st.telegram?.bot_token_set) {
+        setTelegramBotConfigured(true);
+        if (st.telegram.bot_username) setTelegramBotUsername(st.telegram.bot_username);
+      }
       if (st.telegram?.deep_link_recover) setTelegramRecoverLink(st.telegram.deep_link_recover);
-      if (st.owner?.telegram_linked) setTelegramLinked(true);
-      if (st.owner?.telegram_username) setTelegramLinkedUser(st.owner.telegram_username);
+      setTelegramLinked(Boolean(st.owner?.telegram_linked));
+      setTelegramLinkedUser(st.owner?.telegram_username || '');
+      setTelegramChatId(st.owner?.telegram_chat_id || '');
       if (st.owner?.bound_client_id) setBoundClientId(st.owner.bound_client_id);
+      if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
       if (st.server?.clab_host) setServerHost(st.server.clab_host);
       if (st.server?.clab_port) setServerPort(st.server.clab_port);
       if (st.server?.clab_user) setServerUser(st.server.clab_user);
       if (st.ai?.groq_configured || st.ai?.gemini_configured) setAiConfigured(true);
+      if (st.ai?.ollama_url) setOllamaUrl(st.ai.ollama_url);
+      if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
+        setLlmCascade(st.ai.cascade);
+      }
 
       if (st.initialized && !st.caller_is_bound_owner) {
         setRecoverMode(true);
@@ -437,22 +440,27 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
           setExposureMode(st.exposure.mode);
         }
-        if (typeof st.exposure?.websocket_enabled === 'boolean') {
-          setWebsocketEnabled(st.exposure.websocket_enabled);
+        if (st.github?.repo_connected) {
+          if (st.github.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
+          if (st.github.branch) setGithubBranch(st.github.branch);
         }
-        if (st.github?.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
-        if (st.github?.branch) setGithubBranch(st.github.branch);
-        if (st.github?.commit_short) setGithubCommit(st.github.commit_short);
-        if (st.telegram?.bot_username) setTelegramBotUsername(st.telegram.bot_username);
-        if (st.telegram?.deep_link_claim) setTelegramDeepLink(st.telegram.deep_link_claim);
+        if (st.telegram?.bot_token_set) {
+          setTelegramBotConfigured(true);
+          if (st.telegram.bot_username) setTelegramBotUsername(st.telegram.bot_username);
+        }
         if (st.telegram?.deep_link_recover) setTelegramRecoverLink(st.telegram.deep_link_recover);
-        if (st.owner?.telegram_linked) setTelegramLinked(true);
-        if (st.owner?.telegram_username) setTelegramLinkedUser(st.owner.telegram_username);
+        setTelegramLinked(Boolean(st.owner?.telegram_linked));
+        setTelegramLinkedUser(st.owner?.telegram_username || '');
+        setTelegramChatId(st.owner?.telegram_chat_id || '');
         if (st.owner?.bound_client_id) setBoundClientId(st.owner.bound_client_id);
+        if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
         if (st.server?.clab_host) setServerHost(st.server.clab_host);
         if (st.server?.clab_port) setServerPort(st.server.clab_port);
         if (st.server?.clab_user) setServerUser(st.server.clab_user);
         if (st.ai?.groq_configured || st.ai?.gemini_configured) setAiConfigured(true);
+        if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
+          setLlmCascade(st.ai.cascade);
+        }
         if (st.initialized && !st.caller_is_bound_owner) {
           setRecoverMode(true);
         }
@@ -480,6 +488,36 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     };
   }, [isOpen]);
 
+  // Poll bootstrap status while on Step 3 (Telegram) so entering the bot auto-loads Owner live
+  useEffect(() => {
+    if (!isOpen || wizardStep !== 3) return;
+    const timer = setInterval(() => {
+      void refreshBootstrapStatus();
+    }, 2000);
+    return () => clearInterval(timer);
+  }, [isOpen, wizardStep]);
+
+  // Auto-submit Telegram bot token when user pastes/types a valid BotFather token
+  useEffect(() => {
+    const cleanTok = telegramBotToken.trim();
+    if (!isOpen || wizardStep !== 3 || !/^\d+:[A-Za-z0-9_-]{20,}$/.test(cleanTok)) return;
+    const tId = setTimeout(async () => {
+      try {
+        const res = await api.configureBootstrapLayers({
+          telegram_bot_token: cleanTok,
+          auto_commit_on_diff: true,
+          websocket_enabled: true,
+        });
+        setTelegramBotConfigured(true);
+        if (res.bot_username) setTelegramBotUsername(res.bot_username);
+        await refreshBootstrapStatus();
+      } catch {
+        // ignore background save errors
+      }
+    }, 450);
+    return () => clearTimeout(tId);
+  }, [telegramBotToken, isOpen, wizardStep]);
+
   if (!isOpen) return null;
 
   // Step 1 Action: Claim Owner or Recover Owner
@@ -494,7 +532,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       await api.configureBootstrapLayers({
         cluster_name: clusterName.trim() || 'CROC-FABRIC-PROD-01',
         exposure_mode: exposureMode,
-        websocket_enabled: websocketEnabled,
+        websocket_enabled: true,
+        auto_commit_on_diff: true,
       });
       if (exposureMode === 'local_only') {
         localStorage.setItem('netops_share_base_url', 'http://127.0.0.1:5173');
@@ -544,9 +583,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         setBoundClientId(res.bound_client_id);
       }
       localStorage.setItem('netops_user_role', 'owner');
+      localStorage.setItem('netops_cluster_name', clusterName.trim() || 'CROC-FABRIC-PROD-01');
+      localStorage.setItem('netops_onboarding_done', 'true');
       setRecoverMode(false);
       setRecoveryStatusMsg(w.step1.msgRecoveredSuccess);
-      setWizardStep(2);
+      onClose('owner');
     } catch (err: unknown) {
       setRecoveryStatusMsg(getErrorMessage(err, w.step1.errInvalidRecovery));
     } finally {
@@ -554,28 +595,30 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     }
   };
 
-  // Step 2 Action: Save GitHub SoT & Webhook
-  const handleSaveGithub = async () => {
+  // Step 2 Action: Connect SSH Git SoT (auto-commit and sync always enabled)
+  const handleConnectGithubSsh = async (advanceOnSuccess = false) => {
+    const targetUrl = githubRepoUrl.trim() || 'git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git';
+    if (!githubRepoUrl.trim()) {
+      setGithubRepoUrl(targetUrl);
+    }
     setSavingGithub(true);
     setGithubSavedMsg('');
     try {
       const res = await api.configureBootstrapLayers({
         cluster_name: clusterName.trim(),
         exposure_mode: exposureMode,
-        websocket_enabled: websocketEnabled,
-        github_repo_url: githubRepoUrl.trim(),
-        github_pat: githubPat.trim() || undefined,
-        github_webhook_secret: webhookSecret.trim() || undefined,
-        webhook_public_url: webhookUrl.trim(),
+        websocket_enabled: true,
+        github_repo_url: targetUrl,
+        github_branch: githubBranch.trim() || 'main',
+        auto_commit_on_diff: true,
       });
-      if (res.git?.branch) setGithubBranch(res.git.branch);
-      if (res.git?.commit_short) setGithubCommit(res.git.commit_short);
-      setGithubSavedMsg(
-        res.webhook_status === 'created_on_github'
-          ? w.step2.msgWebhookCreated
-          : w.step2.msgRepoSaved
-      );
-      setTimeout(() => setWizardStep(3), 500);
+      const detectedBranch = res.git?.branch || githubBranch.trim() || 'main';
+      const detectedCommit = res.git?.commit_short || 'HEAD';
+      setGithubBranch(detectedBranch);
+      setGithubSavedMsg(`SSH подключён: ${targetUrl} → ветка ${detectedBranch}@${detectedCommit}`);
+      if (advanceOnSuccess) {
+        setTimeout(() => setWizardStep(3), 400);
+      }
     } catch (err: unknown) {
       setGithubSavedMsg(getErrorMessage(err, w.step2.errGithubSave));
     } finally {
@@ -583,20 +626,25 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     }
   };
 
-  // Step 3 Action: Save Telegram & AI
-  const handleSaveTelegramAndAi = async () => {
+  // Step 3 Action: Save Telegram Bot Token & Auto-load Owner
+  const handleSaveTelegram = async (advanceOnSuccess = false) => {
     setSavingTelegram(true);
     setTelegramSavedMsg('');
     try {
-      const res = await api.configureBootstrapLayers({
-        telegram_bot_token: telegramBotToken.trim() || undefined,
-        groq_api_key: groqApiKey.trim() || undefined,
-      });
-      if (res.bot_username) setTelegramBotUsername(res.bot_username);
-      if (res.deep_link_claim) setTelegramDeepLink(res.deep_link_claim);
+      if (telegramBotToken.trim()) {
+        const res = await api.configureBootstrapLayers({
+          telegram_bot_token: telegramBotToken.trim(),
+          auto_commit_on_diff: true,
+          websocket_enabled: true,
+        });
+        setTelegramBotConfigured(true);
+        if (res.bot_username) setTelegramBotUsername(res.bot_username);
+        setTelegramSavedMsg(w.step3.msgTelegramSaved);
+      }
       await refreshBootstrapStatus();
-      setTelegramSavedMsg(w.step3.msgTelegramSaved);
-      setTimeout(() => setWizardStep(4), 500);
+      if (advanceOnSuccess) {
+        setWizardStep(4);
+      }
     } catch (err: unknown) {
       setTelegramSavedMsg(getErrorMessage(err, w.step3.errTelegramSave));
     } finally {
@@ -604,16 +652,118 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     }
   };
 
-  // Step 4 Action: Autonomous Server Discovery & Finish
+  const parseLlmConfigText = (rawText: string): LlmCascadeConfig[] => {
+    const trimmed = rawText.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      const arr = Array.isArray(parsed) ? parsed : [parsed];
+      return arr
+        .filter((x) => x && typeof x === 'object' && (x.base_url || x.model || x.api_key))
+        .map((x, idx) => ({
+          name: String(x.name || x.provider || `LLM-${idx + 1}`),
+          base_url: String(x.base_url || 'https://api.groq.com/openai/v1'),
+          model: String(x.model || 'qwen/qwen3.8-27b'),
+          api_key: String(x.api_key || x.token || ''),
+          timeout_seconds: Number(x.timeout_seconds || 2.0),
+        }));
+    } catch {
+      const kv: Record<string, string> = {};
+      for (const line of trimmed.split(/\r?\n/)) {
+        const clean = line.trim();
+        if (!clean || clean.startsWith('#') || !clean.includes('=')) continue;
+        const eqIdx = clean.indexOf('=');
+        const k = clean.slice(0, eqIdx).trim().toUpperCase();
+        const v = clean.slice(eqIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+        kv[k] = v;
+      }
+      const out: LlmCascadeConfig[] = [];
+      if (kv.NETOPS_GROQ_API_KEY || kv.GROQ_API_KEY) {
+        out.push({
+          name: 'Groq',
+          base_url: kv.NETOPS_GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
+          model: kv.NETOPS_GROQ_MODEL || 'qwen/qwen3.8-27b',
+          api_key: kv.NETOPS_GROQ_API_KEY || kv.GROQ_API_KEY,
+          timeout_seconds: Number(kv.NETOPS_GROQ_TIMEOUT_SECONDS || 2.0),
+        });
+      }
+      if (kv.NETOPS_GEMINI_API_KEY || kv.GEMINI_API_KEY) {
+        out.push({
+          name: 'Google-Gemini',
+          base_url:
+            kv.NETOPS_GEMINI_BASE_URL ||
+            'https://generativelanguage.googleapis.com/v1beta/openai',
+          model: kv.NETOPS_GEMINI_MODEL || 'gemini-2.5-flash',
+          api_key: kv.NETOPS_GEMINI_API_KEY || kv.GEMINI_API_KEY,
+          timeout_seconds: Number(kv.NETOPS_GEMINI_TIMEOUT_SECONDS || 2.0),
+        });
+      }
+      if (kv.NETOPS_OLLAMA_URL || kv.OLLAMA_URL) {
+        out.push({
+          name: 'Local-Ollama',
+          base_url: kv.NETOPS_OLLAMA_URL || kv.OLLAMA_URL,
+          model: kv.NETOPS_OLLAMA_MODEL || 'qwen2.5:7b',
+          api_key: 'ollama',
+          timeout_seconds: Number(kv.NETOPS_OLLAMA_TIMEOUT_SECONDS || 4.0),
+        });
+      }
+      return out;
+    }
+  };
+
+  const handleApplyLlmConfig = () => {
+    const parsed = parseLlmConfigText(llmConfigRaw);
+    if (parsed.length === 0) {
+      setAiSavedMsg('Не удалось распознать конфиг (вставьте JSON или ENV)');
+      return;
+    }
+    setLlmCascade((prev) => [...prev, ...parsed]);
+    setLlmConfigRaw('');
+    setShowLlmPasteBox(false);
+    setAiSavedMsg(`Добавлено в каскад нейросетей: ${parsed.map((p) => p.name).join(', ')}`);
+  };
+
+  // Step 4 Action: Save AI Cluster Cascade
+  const handleSaveAiCluster = async () => {
+    setSavingAi(true);
+    setAiSavedMsg('');
+    try {
+      const extraFromPaste = parseLlmConfigText(llmConfigRaw);
+      const finalCascade = [...llmCascade, ...extraFromPaste];
+      if (extraFromPaste.length > 0) {
+        setLlmCascade(finalCascade);
+        setLlmConfigRaw('');
+      }
+      await api.configureBootstrapLayers({
+        groq_api_key: groqApiKey.trim() || undefined,
+        gemini_api_key: geminiApiKey.trim() || undefined,
+        ollama_url: ollamaUrl.trim() || undefined,
+        llm_cascade: finalCascade,
+        auto_commit_on_diff: true,
+        websocket_enabled: true,
+      });
+      await refreshBootstrapStatus();
+      setWizardStep(5);
+    } catch (err: unknown) {
+      setAiSavedMsg(getErrorMessage(err, 'Ошибка сохранения кластера ИИ'));
+    } finally {
+      setSavingAi(false);
+    }
+  };
+
+  // Step 5 Action: Server Connection (Host & Password only)
   const handleDiscoverServer = async () => {
     setDiscoveringServer(true);
     try {
       const res = await api.discoverAndAttachServer({
-        mode: serverMode,
+        mode: 'ssh',
         host: serverHost.trim(),
         port: Number(serverPort) || 221,
-        username: serverUser.trim(),
+        username: serverUser.trim() || 'crocdream',
         password: serverPassword || undefined,
+        switch_password_cisco: 'admin',
+        switch_password_arista: 'admin',
+        switch_password_huawei: 'admin',
       });
       setDiscoveryResult(res);
     } catch (err: unknown) {
@@ -631,6 +781,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       await api.configureBootstrapLayers({
         cluster_name: clusterName.trim() || 'CROC-FABRIC-PROD-01',
         bootstrap_completed: true,
+        auto_commit_on_diff: true,
+        websocket_enabled: true,
       });
     } catch {
       // ignore
@@ -649,13 +801,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       ? [
           'Connecting to PostgreSQL 16 & Redis 7 SoT Core',
           `Indexing CLOS Fabric Inventory (${preload.devicesCount} nodes)`,
-          'Warming up TimesFM 3.0 Telemetry & HierConfig AST',
+          'Warming up Telemetry & HierConfig AST',
           'Initializing Matryoshka Owner Bootstrap Engine',
         ]
       : [
           'Подключение ядра PostgreSQL 16 и брокера Redis 7',
           `Индексация топологии CLOS (${preload.devicesCount} узлов в базе)`,
-          'Прогрев телеметрии TimesFM 3.0 и HierConfig AST',
+          'Прогрев телеметрии и HierConfig AST',
           'Запуск автономного мастера настройки Владельца («Матрёшка»)',
         ];
 
@@ -663,7 +815,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     { id: 1, title: w.steps[1], icon: <Key className="w-3.5 h-3.5 shrink-0" /> },
     { id: 2, title: w.steps[2], icon: <GitBranch className="w-3.5 h-3.5 shrink-0" /> },
     { id: 3, title: w.steps[3], icon: <Send className="w-3.5 h-3.5 shrink-0" /> },
-    { id: 4, title: w.steps[4], icon: <Server className="w-3.5 h-3.5 shrink-0" /> },
+    { id: 4, title: w.steps[4], icon: <Cpu className="w-3.5 h-3.5 shrink-0" /> },
+    { id: 5, title: w.steps[5], icon: <Server className="w-3.5 h-3.5 shrink-0" /> },
   ];
 
   const inputClass =
@@ -767,7 +920,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         </div>
       )}
 
-      {/* PHASE 2: COMPACT 4-STEP WIZARD (Gravity UI / GCP Tokenized Dialog) */}
+      {/* PHASE 2: COMPACT 5-STEP WIZARD */}
       {phase === 'wizard' && (
         <div className="relative z-10 w-full max-w-xl rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl text-[var(--text-primary)] animate-win-fade flex flex-col overflow-hidden">
           {/* Header with Integrated Theme & Language Switchers */}
@@ -823,7 +976,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-1.5">
+            <div className="grid grid-cols-5 gap-1.5">
               {stepsMeta.map((s) => {
                 const active = wizardStep === s.id;
                 const completed = wizardStep > s.id;
@@ -832,7 +985,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     key={s.id}
                     type="button"
                     onClick={() => setWizardStep(s.id)}
-                    className={`px-2.5 py-2 rounded-lg border text-xs font-medium transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    className={`px-2 py-2 rounded-lg border text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1 ${
                       active
                         ? 'border-[var(--text-primary)] bg-[var(--bg-card)] text-[var(--text-primary)] shadow-xs'
                         : completed
@@ -878,7 +1031,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           type="button"
                           onClick={() => {
                             setExposureMode('local_only');
-                            setWebhookUrl('http://127.0.0.1:5173/api/v1/git/webhook');
                           }}
                           className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
                             exposureMode === 'local_only'
@@ -896,7 +1048,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           type="button"
                           onClick={() => {
                             setExposureMode('public_tunnel');
-                            setWebhookUrl(`http://${serverHost}:5173/api/v1/git/webhook`);
                           }}
                           className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
                             exposureMode === 'public_tunnel'
@@ -910,29 +1061,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           </div>
                         </button>
                       </div>
-                    </div>
-
-                    {/* WebSocket Toggle */}
-                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] px-3 py-2.5 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-xs font-semibold text-[var(--text-primary)]">
-                          {w.step1.wsTitle}
-                        </div>
-                        <div className="text-[10px] font-mono text-[var(--text-muted)]">
-                          {websocketEnabled ? w.step1.wsEnabledDesc : w.step1.wsDisabledDesc}
-                        </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setWebsocketEnabled((v) => !v)}
-                        className={`px-3 py-1.5 rounded text-xs font-mono font-semibold cursor-pointer transition-colors ${
-                          websocketEnabled
-                            ? 'bg-emerald-500 text-zinc-950'
-                            : 'bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]'
-                        }`}
-                      >
-                        {websocketEnabled ? w.step1.wsOn : w.step1.wsOff}
-                      </button>
                     </div>
 
                     {ownerToken && (
@@ -1064,101 +1192,56 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             )}
 
-            {/* ==================== STEP 2: GITHUB ==================== */}
+            {/* ==================== STEP 2: GITHUB (SSH + TARGET BRANCH ONLY) ==================== */}
             {wizardStep === 2 && (
               <div className="space-y-3.5 animate-fade-in">
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div className="col-span-2">
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {w.step2.repoLabel}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-mono text-[var(--text-secondary)]">
+                      SSH-репозиторий GitHub (единый контур SoT)
                     </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGithubRepoUrl('git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git');
+                        if (!githubBranch) setGithubBranch('main');
+                      }}
+                      className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                    >
+                      Вставить git@github.com:Vazilll/...
+                    </button>
+                  </div>
+                  <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={githubRepoUrl}
                       onChange={(e) => setGithubRepoUrl(e.target.value)}
+                      placeholder="git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git"
                       className={inputClass}
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {w.step2.branchLabel}
-                    </label>
-                    <div className="bg-[var(--bg-main)] border border-emerald-500/30 rounded-md px-2.5 py-1.5 text-xs font-mono text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
-                      <span>{githubBranch}</span>
-                      <span className="text-[var(--text-muted)]">@{githubCommit}</span>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleConnectGithubSsh(false)}
+                      disabled={savingGithub}
+                      className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer transition-colors"
+                    >
+                      {savingGithub ? '...' : 'Подключить SSH'}
+                    </button>
                   </div>
                 </div>
 
-                {exposureMode === 'public_tunnel' ? (
-                  <>
-                    <div>
-                      <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                        {w.step2.webhookUrlLabel}
-                      </label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="text"
-                          value={webhookUrl}
-                          onChange={(e) => setWebhookUrl(e.target.value)}
-                          className={inputClass}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(webhookUrl);
-                            setCopiedWebhook(true);
-                            setTimeout(() => setCopiedWebhook(false), 2000);
-                          }}
-                          className={`${secondaryBtnClass} shrink-0`}
-                        >
-                          {copiedWebhook ? w.copiedBtn : w.copyBtn}
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <div>
-                        <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                          {w.step2.githubTokenLabel}
-                        </label>
-                        <input
-                          type="password"
-                          value={githubPat}
-                          onChange={(e) => setGithubPat(e.target.value)}
-                          placeholder="ghp_..."
-                          className={inputClass}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                          {w.step2.webhookSecretLabel}
-                        </label>
-                        <input
-                          type="password"
-                          value={webhookSecret}
-                          onChange={(e) => setWebhookSecret(e.target.value)}
-                          placeholder="HMAC-SHA256"
-                          className={inputClass}
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 px-3 py-2 text-xs text-[var(--text-primary)] flex items-center justify-between gap-2">
-                    <span>{w.step2.localModeNotice}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setExposureMode('public_tunnel');
-                        setWebhookUrl(`http://${serverHost}:5173/api/v1/git/webhook`);
-                      }}
-                      className="text-[11px] font-mono text-sky-600 dark:text-sky-400 hover:underline cursor-pointer shrink-0"
-                    >
-                      {w.step2.enableWebhookBtn}
-                    </button>
-                  </div>
-                )}
+                <div>
+                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                    Целевая ветка (определяется при подключении)
+                  </label>
+                  <input
+                    type="text"
+                    value={githubBranch}
+                    onChange={(e) => setGithubBranch(e.target.value)}
+                    placeholder="Нажмите «Подключить SSH» (напр. main)"
+                    className={inputClass}
+                  />
+                </div>
 
                 {githubSavedMsg && (
                   <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
@@ -1176,7 +1259,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={handleSaveGithub}
+                    onClick={() => void handleConnectGithubSsh(true)}
                     disabled={savingGithub}
                     className={primaryBtnClass}
                   >
@@ -1187,36 +1270,14 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             )}
 
-            {/* ==================== STEP 3: TELEGRAM & AI ==================== */}
+            {/* ==================== STEP 3: TELEGRAM (TOKEN -> AUTO-LOAD OWNER) ==================== */}
             {wizardStep === 3 && (
               <div className="space-y-3.5 animate-fade-in">
-                <div className="rounded-md border border-emerald-500/25 bg-emerald-500/10 p-3 flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-semibold text-[var(--text-primary)]">
-                      {w.step3.tgBotTitle} {telegramBotUsername}
-                    </div>
-                    <div className="text-[11px] text-[var(--text-secondary)]">
-                      {telegramLinked
-                        ? `${w.step3.tgLinkedStatus} ${telegramLinkedUser ? `@${telegramLinkedUser}` : ''}`
-                        : w.step3.tgUnlinkedHint}
-                    </div>
-                  </div>
-                  <a
-                    href={telegramDeepLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-3.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
-                  >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>{w.step3.connectTgBtn}</span>
-                  </a>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {w.step3.botTokenLabel}
-                    </label>
+                <div>
+                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                    {w.step3.botTokenLabel}
+                  </label>
+                  <div className="flex items-center gap-2">
                     <input
                       type="password"
                       value={telegramBotToken}
@@ -1224,20 +1285,43 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       placeholder={w.step3.botTokenPlaceholder}
                       className={inputClass}
                     />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {w.step3.aiKeyLabel}
-                    </label>
-                    <input
-                      type="password"
-                      value={groqApiKey}
-                      onChange={(e) => setGroqApiKey(e.target.value)}
-                      placeholder={aiConfigured ? w.step3.aiAlreadyConfigured : 'gsk_...'}
-                      className={inputClass}
-                    />
+                    <button
+                      type="button"
+                      onClick={() => void handleSaveTelegram(false)}
+                      disabled={savingTelegram || !telegramBotToken.trim()}
+                      className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer transition-colors"
+                    >
+                      {savingTelegram ? '...' : w.step3.connectTgBtn}
+                    </button>
                   </div>
                 </div>
+
+                {telegramLinked ? (
+                  <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 text-xs font-mono text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" />
+                      <span>
+                        {w.step3.tgLinkedStatus}{' '}
+                        <strong>
+                          {telegramLinkedUser ? `@${telegramLinkedUser}` : 'owner'}
+                        </strong>
+                        {telegramChatId ? ` (ID: ${telegramChatId})` : ''}
+                      </span>
+                    </div>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-mono font-bold">
+                      OWNER
+                    </span>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 text-xs font-mono text-[var(--text-secondary)] flex items-center justify-between gap-2">
+                    <span>
+                      {telegramBotConfigured && telegramBotUsername
+                        ? `Бот ${telegramBotUsername} подключён. Зайдите в бота (/start) — вы автоподгрузитесь как Владелец.`
+                        : w.step3.tgUnlinkedHint}
+                    </span>
+                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
+                  </div>
+                )}
 
                 {telegramSavedMsg && (
                   <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
@@ -1255,7 +1339,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   </button>
                   <button
                     type="button"
-                    onClick={handleSaveTelegramAndAi}
+                    onClick={() => void handleSaveTelegram(true)}
                     disabled={savingTelegram}
                     className={primaryBtnClass}
                   >
@@ -1266,113 +1350,229 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             )}
 
-            {/* ==================== STEP 4: SERVER ==================== */}
+            {/* ==================== STEP 4: AI CLUSTER ==================== */}
             {wizardStep === 4 && (
-              <div className="space-y-3.5 animate-fade-in">
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setServerMode('ssh')}
-                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      serverMode === 'ssh'
-                        ? 'border-emerald-500/60 bg-emerald-500/10 text-[var(--text-primary)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--bg-main)] text-[var(--text-secondary)] hover:border-[var(--border-hover)]'
-                    }`}
-                  >
-                    <div className="text-xs font-semibold flex items-center gap-1.5">
-                      <Terminal className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>{w.step4.sshLiveTitle}</span>
-                    </div>
-                    <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                      {w.step4.sshLiveSub}
-                    </div>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setServerMode('offline')}
-                    className={`p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
-                      serverMode === 'offline'
-                        ? 'border-sky-500/60 bg-sky-500/10 text-[var(--text-primary)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--bg-main)] text-[var(--text-secondary)] hover:border-[var(--border-hover)]'
-                    }`}
-                  >
-                    <div className="text-xs font-semibold flex items-center gap-1.5">
-                      <Cpu className="w-3.5 h-3.5 text-sky-500" />
-                      <span>{w.step4.offlineDemoTitle}</span>
-                    </div>
-                    <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                      {w.step4.offlineDemoSub}
-                    </div>
-                  </button>
-                </div>
-
-                {serverMode === 'ssh' && (
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className="col-span-2">
-                      <label className="block text-[10px] font-mono text-[var(--text-secondary)] mb-1">
-                        {w.step4.hostLabel}
-                      </label>
-                      <input
-                        type="text"
-                        value={serverHost}
-                        onChange={(e) => setServerHost(e.target.value)}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-mono text-[var(--text-secondary)] mb-1">
-                        {w.step4.portLabel}
-                      </label>
-                      <input
-                        type="number"
-                        value={serverPort}
-                        onChange={(e) => setServerPort(Number(e.target.value))}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-mono text-[var(--text-secondary)] mb-1">
-                        {w.step4.userLabel}
-                      </label>
-                      <input
-                        type="text"
-                        value={serverUser}
-                        onChange={(e) => setServerUser(e.target.value)}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="col-span-4 flex gap-2">
-                      <input
-                        type="password"
-                        value={serverPassword}
-                        onChange={(e) => setServerPassword(e.target.value)}
-                        placeholder={w.step4.passwordPlaceholder}
-                        className={inputClass}
-                      />
+              <div className="space-y-3 animate-fade-in">
+                <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)]/60 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-mono font-semibold text-[var(--text-primary)]">
+                      Каскад конфигов нейросетей ({llmCascade.length} активн.)
+                    </span>
+                    <div className="flex items-center gap-1.5">
                       <button
                         type="button"
-                        onClick={handleDiscoverServer}
-                        disabled={discoveringServer}
-                        className="px-3.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                        onClick={() => setShowLlmPasteBox((v) => !v)}
+                        className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
                       >
-                        <RefreshCw
-                          className={`w-3.5 h-3.5 ${discoveringServer ? 'animate-spin' : ''}`}
-                        />
-                        <span>
-                          {discoveringServer ? w.step4.discoveringBtn : w.step4.discoverBtn}
-                        </span>
+                        {showLlmPasteBox ? 'Скрыть импорт' : '+ Вставить конфиг'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLlmCascade((prev) => [
+                            ...prev,
+                            {
+                              name: `LLM-${prev.length + 1}`,
+                              base_url: 'https://api.groq.com/openai/v1',
+                              model: 'qwen/qwen3.8-27b',
+                              api_key: '',
+                              timeout_seconds: 2.0,
+                            },
+                          ])
+                        }
+                        className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 cursor-pointer"
+                      >
+                        + Поля вручную
                       </button>
                     </div>
                   </div>
+
+                  {showLlmPasteBox && (
+                    <div className="space-y-1.5">
+                      <textarea
+                        rows={4}
+                        value={llmConfigRaw}
+                        onChange={(e) => setLlmConfigRaw(e.target.value)}
+                        placeholder={
+                          '{\n  "name": "Groq",\n  "base_url": "https://api.groq.com/openai/v1",\n  "model": "qwen/qwen3.8-27b",\n  "api_key": "gsk_...",\n  "timeout_seconds": 2.0\n}'
+                        }
+                        className={`${inputClass} leading-relaxed resize-y`}
+                      />
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                          Поддерживается JSON-конфиг (объект/массив) или блок .env (NETOPS_GROQ_...)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={handleApplyLlmConfig}
+                          className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-[11px] font-mono font-semibold cursor-pointer shrink-0"
+                        >
+                          Добавить в каскад
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {llmCascade.length > 0 && (
+                    <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                      {llmCascade.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] p-2 space-y-1.5"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                              Приоритет #{idx + 1} · {item.name} ({item.model})
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setLlmCascade((prev) => prev.filter((_, i) => i !== idx))
+                              }
+                              className="text-[10px] font-mono text-rose-500 hover:underline cursor-pointer"
+                            >
+                              Удалить ×
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                            <input
+                              type="text"
+                              value={item.name}
+                              onChange={(e) =>
+                                setLlmCascade((prev) =>
+                                  prev.map((p, i) =>
+                                    i === idx ? { ...p, name: e.target.value } : p
+                                  )
+                                )
+                              }
+                              placeholder="Имя (Groq)"
+                              className={inputClass}
+                            />
+                            <input
+                              type="text"
+                              value={item.model}
+                              onChange={(e) =>
+                                setLlmCascade((prev) =>
+                                  prev.map((p, i) =>
+                                    i === idx ? { ...p, model: e.target.value } : p
+                                  )
+                                )
+                              }
+                              placeholder="Модель"
+                              className={inputClass}
+                            />
+                            <input
+                              type="text"
+                              value={item.base_url}
+                              onChange={(e) =>
+                                setLlmCascade((prev) =>
+                                  prev.map((p, i) =>
+                                    i === idx ? { ...p, base_url: e.target.value } : p
+                                  )
+                                )
+                              }
+                              placeholder="Base URL"
+                              className={inputClass}
+                            />
+                            <input
+                              type="password"
+                              value={item.api_key || ''}
+                              onChange={(e) =>
+                                setLlmCascade((prev) =>
+                                  prev.map((p, i) =>
+                                    i === idx ? { ...p, api_key: e.target.value } : p
+                                  )
+                                )
+                              }
+                              placeholder="API Key (gsk_...)"
+                              className={inputClass}
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {aiSavedMsg && (
+                  <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
+                    {aiSavedMsg}
+                  </div>
                 )}
+
+                <div className="flex items-center justify-between pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setWizardStep(3)}
+                    className={secondaryBtnClass}
+                  >
+                    {w.backBtn}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveAiCluster}
+                    disabled={savingAi}
+                    className={primaryBtnClass}
+                  >
+                    <span>{savingAi ? '...' : w.nextBtn}</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ==================== STEP 5: SERVER (HOST & PASSWORD ONLY) ==================== */}
+            {wizardStep === 5 && (
+              <div className="space-y-3.5 animate-fade-in">
+                <div>
+                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                    {w.step4.hostLabel}
+                  </label>
+                  <input
+                    type="text"
+                    value={serverHost}
+                    onChange={(e) => setServerHost(e.target.value)}
+                    placeholder="5.228.243.54"
+                    className={inputClass}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                    Пароль
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="password"
+                      value={serverPassword}
+                      onChange={(e) => setServerPassword(e.target.value)}
+                      placeholder={w.step4.passwordPlaceholder}
+                      className={inputClass}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleDiscoverServer}
+                      disabled={discoveringServer}
+                      className="px-3.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0 transition-colors"
+                    >
+                      <RefreshCw
+                        className={`w-3.5 h-3.5 ${discoveringServer ? 'animate-spin' : ''}`}
+                      />
+                      <span>
+                        {discoveringServer ? w.step4.discoveringBtn : w.step4.discoverBtn}
+                      </span>
+                    </button>
+                  </div>
+                </div>
 
                 {discoveryResult?.discovered_switches && (
                   <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 space-y-2">
-                    <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5" />
-                      <span>
-                        {w.step4.discoveredNodesCount} {discoveryResult.synced_total}
+                    <div className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>
+                          {w.step4.discoveredNodesCount} {discoveryResult.synced_total}
+                        </span>
                       </span>
                     </div>
                     <div className="grid grid-cols-2 gap-1.5">
@@ -1381,7 +1581,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           key={sw.hostname}
                           className="rounded border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
                         >
-                          <span className="text-[var(--text-primary)] truncate">{sw.hostname}</span>
+                          <span className="text-[var(--text-primary)] font-semibold truncate">
+                            {sw.hostname}
+                          </span>
                           <span
                             className={
                               sw.reachable
@@ -1389,7 +1591,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                 : 'text-amber-600 dark:text-amber-400'
                             }
                           >
-                            {sw.reachable ? 'OK' : 'SYNC'}
+                            {sw.reachable ? 'SSH OK' : 'SYNC'}
                           </span>
                         </div>
                       ))}
@@ -1406,7 +1608,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 <div className="flex items-center justify-between pt-1">
                   <button
                     type="button"
-                    onClick={() => setWizardStep(3)}
+                    onClick={() => setWizardStep(4)}
                     className={secondaryBtnClass}
                   >
                     {w.backBtn}

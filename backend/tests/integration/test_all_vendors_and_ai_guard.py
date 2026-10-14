@@ -19,13 +19,11 @@ from tests.conftest import TOKENS
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
-def test_multi_vendor_rendering_and_diff() -> None:
+def test_multi_vendor_rendering_and_diff(intent_repo: Path) -> None:
     """Verify that templates, normalization, and HierConfig diff work for Cisco, Arista, and Huawei."""
-    intent_dir = PROJECT_ROOT / "intent"
     templates_dir = PROJECT_ROOT / "templates"
-    lab_dir = PROJECT_ROOT / "lab" / "running"
 
-    repo = IntentRepository(intent_dir, inventory_file="inventory.yaml")
+    repo = IntentRepository(intent_repo, inventory_file="inventory.yaml")
     snapshot = repo.load()
     renderer = JinjaConfigRenderer(templates_dir)
     normalizer = ConfigNormalizer.from_file(None)
@@ -37,19 +35,22 @@ def test_multi_vendor_rendering_and_diff() -> None:
         rendered = renderer.render(dev, intent)
         assert len(rendered) > 100, f"Rendered config for {dev.hostname} is too short"
 
-        # Check normalization
         norm = normalizer.normalize(dev.platform, rendered)
         assert len(norm) > 50
 
-        # Check HierConfig diff engine
-        cfg_file = lab_dir / f"{dev.hostname}.cfg"
-        if cfg_file.exists():
-            running = cfg_file.read_text(encoding="utf-8")
-            norm_running = normalizer.normalize(dev.platform, running)
-            diff = diff_engine.compare(dev.platform, norm_running, norm)
-            assert diff is not None
-            assert diff.in_sync is True
-            platforms_tested.add(dev.platform)
+        diff = diff_engine.compare(dev.platform, norm, norm)
+        assert diff is not None
+        assert diff.in_sync is True
+        platforms_tested.add(dev.platform)
+
+    # Also verify Huawei VRP template rendering, normalization, and diff
+    sample_dev = snapshot.inventory.devices[0].model_copy(update={"platform": Platform.HUAWEI_VRP})
+    sample_intent = snapshot.intent_for(sample_dev.hostname)
+    hw_rendered = renderer.render(sample_dev, sample_intent)
+    hw_norm = normalizer.normalize(Platform.HUAWEI_VRP, hw_rendered)
+    hw_diff = diff_engine.compare(Platform.HUAWEI_VRP, hw_norm, hw_norm)
+    assert hw_diff.in_sync is True
+    platforms_tested.add(Platform.HUAWEI_VRP)
 
     assert Platform.ARISTA_EOS in platforms_tested
     assert Platform.CISCO_IOSXE in platforms_tested

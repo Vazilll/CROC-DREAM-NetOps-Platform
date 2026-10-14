@@ -166,6 +166,7 @@ def get_job_diff(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> JobDif
                 rollback_patch=target.rollback_config,
             )
             for target in job.targets
+            if target.device_id is not None
         ],
     )
 

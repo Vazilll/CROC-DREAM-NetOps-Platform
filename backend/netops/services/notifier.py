@@ -21,7 +21,7 @@ logger = logging.getLogger("netops.notifier")
 
 KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {
     7325469808: {
-        "username": "tarhes-browser",
+        "username": "owner",
         "tg_username": "Vazusss",
         "first_name": "Максим",
         "role": "owner",
@@ -36,9 +36,18 @@ KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {
 
 
 def _runtime_dir(settings: Settings | None = None) -> Path:
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    default_lab = (Path(__file__).resolve().parents[3] / "lab" / "running").resolve()
     if settings is not None:
+        resolved = settings.offline_lab_path.resolve()
+        if "PYTEST_CURRENT_TEST" in os.environ and resolved == default_lab:
+            return Path(tempfile.gettempdir()) / "netops_pytest_runtime"
         return settings.offline_lab_path
-    return Path(__file__).resolve().parents[3] / "lab" / "running"
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return Path(tempfile.gettempdir()) / "netops_pytest_runtime"
+    return default_lab
 
 
 def _subscribers_files(settings: Settings) -> list[Path]:
@@ -79,8 +88,6 @@ def _tg_bindings_file(settings: Settings | None = None) -> Path:
 
 def load_telegram_bindings(settings: Settings | None = None) -> dict[str, dict[str, Any]]:
     merged: dict[str, dict[str, Any]] = {}
-    for cid, prof in KNOWN_TELEGRAM_PROFILES.items():
-        merged[str(cid)] = {"chat_id": cid, **prof}
     path = _tg_bindings_file(settings)
     if path.is_file():
         try:
@@ -122,10 +129,6 @@ def load_access_registry(settings: Settings | None = None) -> dict[str, Any]:
         "telegram_bindings": {},
         "systems": [
             {"id": "*", "label": "Вся фабрика CLOS (все узлы)"},
-            {"id": "spine-1.croc.lab", "label": "spine-1.croc.lab (Cisco IOS-XE)"},
-            {"id": "spine-2.croc.lab", "label": "spine-2.croc.lab (Arista EOS)"},
-            {"id": "leaf-1.croc.lab", "label": "leaf-1.croc.lab (Huawei VRP)"},
-            {"id": "leaf-2.croc.lab", "label": "leaf-2.croc.lab (Huawei VRP)"},
             {"id": "online-ssh", "label": "Контур ONLINE SSH (Containerlab 5.228.243.54)"},
             {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
         ],
@@ -188,7 +191,7 @@ def record_security_event(
 def sync_access_registry(session: Any, settings: Settings | None = None) -> dict[str, Any]:
     from datetime import datetime, timezone  # noqa: PLC0415
     from sqlalchemy import select  # noqa: PLC0415
-    from netops.models import User  # noqa: PLC0415
+    from netops.models import Device, User  # noqa: PLC0415
 
     reg = load_access_registry(settings)
     tokens = load_user_tokens(settings)
@@ -241,6 +244,19 @@ def sync_access_registry(session: Any, settings: Settings | None = None) -> dict
                 "created_at": u.created_at.isoformat() if u.created_at else None,
             }
         )
+    devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
+    reg["systems"] = [
+        {"id": "*", "label": "Вся фабрика CLOS (все узлы)"},
+        *[
+            {
+                "id": d.hostname,
+                "label": f"{d.hostname} ({d.platform.value if hasattr(d.platform, 'value') else d.platform})",
+            }
+            for d in devices
+        ],
+        {"id": "online-ssh", "label": "Контур ONLINE SSH (Containerlab 5.228.243.54)"},
+        {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
+    ]
     reg["participants"] = participants
     reg["telegram_bindings"] = tg_bindings
     if settings is not None:
@@ -314,17 +330,41 @@ def resolve_telegram_targets(settings: Settings, *, discover: bool = True) -> li
     return targets
 
 
+def resolve_owner_telegram_targets(settings: Settings) -> list[int | str]:
+    if settings.telegram_chat_id:
+        cid = str(settings.telegram_chat_id).strip()
+        if cid:
+            return [int(cid) if cid.lstrip("-").isdigit() else cid]
+    for cid_str, info in load_telegram_bindings(settings).items():
+        if isinstance(info, dict) and (
+            info.get("username") == "owner" or info.get("role") == "owner"
+        ):
+            return [int(cid_str) if cid_str.lstrip("-").isdigit() else cid_str]
+    return resolve_telegram_targets(settings)
+
+
 def send_telegram_message(
     settings: Settings,
     text: str,
     parse_mode: str = "HTML",
     reply_markup: dict[str, Any] | None = None,
+    *,
+    owner_only: bool = True,
+    chat_ids: list[int | str] | None = None,
 ) -> bool:
-    """Send text message to all configured Telegram chats."""
+    """Send text message to configured Telegram chat(s) (defaults to bound Owner)."""
     if not settings.telegram_bot_token:
         logger.debug("Telegram notifications unconfigured (missing token)")
         return False
-    targets = resolve_telegram_targets(settings)
+    targets = (
+        list(chat_ids)
+        if chat_ids
+        else (
+            resolve_owner_telegram_targets(settings)
+            if owner_only
+            else resolve_telegram_targets(settings)
+        )
+    )
     if not targets:
         logger.debug("Telegram notifications unconfigured (no chat_id discovered yet)")
         return False

@@ -1,15 +1,11 @@
-import React, { useMemo, useState, useEffect, Suspense } from 'react';
-import { ExternalLink, Play, X, Layers, Network, Box, Cpu } from 'lucide-react';
+import React, { useMemo, useState, useEffect } from 'react';
+import { ExternalLink, Play, X, Network, Cpu } from 'lucide-react';
 import { api } from '../../api';
 import type { Device, ForecastAlert } from '../../api';
 import type { Locale } from '../../i18n';
 import { StatusBadge } from '../layout/ui';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 import { DeviceDetailModal } from '../modals/DeviceDetailModal';
-
-const LazyTopology3D = React.lazy(() =>
-  import('./Topology3D').then((m) => ({ default: m.Topology3D }))
-);
 
 const W = 900;
 const H = 320;
@@ -61,7 +57,6 @@ const TopologyMapComponent: React.FC<Props> = ({
   onSelectDevice,
   onRunDryRun,
 }) => {
-  const [viewMode, setViewMode] = useState<'clos' | 'enterprise' | '3d'>('clos');
   const [hover, setHover] = useState<number | null>(null);
   const [popoverId, setPopoverId] = useState<number | null>(null);
   const [inspectDeviceId, setInspectDeviceId] = useState<number | null>(null);
@@ -159,72 +154,7 @@ const TopologyMapComponent: React.FC<Props> = ({
 
   return (
     <div className="relative">
-      {/* Topology Mode Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-subtle)]">
-        <div className="flex flex-wrap items-center gap-1">
-          <button
-            onClick={() => setViewMode('clos')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border ${
-              viewMode === 'clos'
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-hover)]'
-                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>{locale === 'en' ? 'CLOS Datacenter (Lab)' : 'CLOS Дата-центр (Стенд)'}</span>
-          </button>
-          <button
-            onClick={() => setViewMode('enterprise')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border ${
-              viewMode === 'enterprise'
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-hover)]'
-                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Network className="w-3.5 h-3.5" />
-            <span>{locale === 'en' ? 'CROC Hierarchy (Enterprise 3-Tier)' : 'Иерархия КРОК (Enterprise 3-Tier)'}</span>
-          </button>
-          <button
-            onClick={() => setViewMode('3d')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors cursor-pointer border ${
-              viewMode === '3d'
-                ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-hover)]'
-                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            <span>{locale === 'en' ? '3D WebGL Fabric' : '3D WebGL Фабрика'}</span>
-          </button>
-        </div>
-        <div className="text-[11px] text-[var(--text-muted)] font-mono tabular-nums hidden sm:block">
-          {viewMode === 'clos' || viewMode === '3d'
-            ? `${devices.length} ${locale === 'en' ? 'nodes' : 'узлов'}: ${[...new Set(devices.map((d) => PLATFORM_NAMES[d.platform] ?? d.platform))].join(' • ') || 'CLOS Fabric'}`
-            : 'WAN • DMZ • Core • Distribution • Access'}
-        </div>
-      </div>
-
-      {viewMode === '3d' ? (
-        <div className="p-2 sm:p-3">
-          <Suspense
-            fallback={
-              <div className="h-[360px] sm:h-[420px] flex items-center justify-center rounded-xl border border-white/[0.06] bg-[#060913] text-xs font-mono text-zinc-400">
-                Загрузка 3D WebGL сцены...
-              </div>
-            }
-          >
-            <LazyTopology3D
-              devices={devices}
-              onSelectDevice={(id) => onSelectDevice(id)}
-              onRunDryRun={(ids) => {
-                if (onRunDryRun) onRunDryRun(ids);
-                else if (ids[0]) handleDryRun(ids[0]);
-              }}
-              onInspectIntent={(id) => setInspectDeviceId(id)}
-            />
-          </Suspense>
-        </div>
-      ) : viewMode === 'clos' ? (
-        <div className="w-full overflow-x-auto">
+      <div className="w-full overflow-x-auto">
           <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[700px] h-auto select-none">
             {activeLayers.map((l) => (
               <text key={l.label} x={10} y={l.y + NODE_H / 2 + 3} fontSize="9" fill="#52525b" className="uppercase font-mono tracking-wider">
@@ -337,12 +267,6 @@ const TopologyMapComponent: React.FC<Props> = ({
                     </g>
                   )}
 
-                  {/* AI Guard Status Dot */}
-                  <g transform={`translate(${NODE_W - 14}, 27)`}>
-                    <circle cx="4" cy="4" r="3" fill="#06b6d4" opacity="0.25" />
-                    <circle cx="4" cy="4" r="1.5" fill="#06b6d4" />
-                  </g>
-
                   {alert && (
                     <g transform={`translate(${NODE_W - 18}, -4)`}>
                       <circle cx="7" cy="7" r="6" fill="#f59e0b" style={{ stroke: 'var(--bg-card)' }} strokeWidth="1.5" />
@@ -355,93 +279,7 @@ const TopologyMapComponent: React.FC<Props> = ({
               );
             })}
           </svg>
-        </div>
-      ) : (
-        /* Dynamic Hierarchical Diagram View from Real Inventory */
-        <div className="w-full overflow-x-auto p-4">
-          <div className="min-w-[700px] space-y-4">
-            {[
-              {
-                title: '1. Уровень ядра и магистрали (Spine / Core Tier)',
-                color: 'text-cyan-600 dark:text-cyan-400',
-                items: devices.filter((d) => d.role === 'spine'),
-              },
-              {
-                title: '2. Уровень граничной маршрутизации (Border / Edge Tier)',
-                color: 'text-emerald-600 dark:text-emerald-400',
-                items: devices.filter((d) => ['border', 'border_firewall'].includes(d.role)),
-              },
-              {
-                title: '3. Уровень распределения и агрегации (Leaf / Distribution Tier)',
-                color: 'text-amber-600 dark:text-amber-400',
-                items: devices.filter((d) => d.role === 'leaf'),
-              },
-              {
-                title: '4. Уровень конечных хостов и серверов (Access / Compute Tier)',
-                color: 'text-violet-600 dark:text-violet-400',
-                items: devices.filter((d) => d.role === 'server' || d.platform === 'linux_server'),
-              },
-            ]
-              .filter((tier) => tier.items.length > 0)
-              .map((tier) => (
-                <div key={tier.title} className="space-y-2">
-                  <div className={`text-[10px] font-mono uppercase tracking-wider ${tier.color} text-center font-bold`}>
-                    {tier.title} ({tier.items.length})
-                  </div>
-                  <div className="flex flex-wrap justify-center gap-4">
-                    {tier.items.map((node: Device) => {
-                      const isDown = node.oper_status === 'DOWN';
-                      const isDrifted = node.status === 'DRIFT_DETECTED';
-                      const isFailed = node.status === 'UNREACHABLE' || isDown;
-                      const borderClass = isFailed
-                        ? 'border-red-500/40 bg-red-500/[0.04]'
-                        : isDrifted
-                          ? 'border-amber-500/40 bg-amber-500/[0.04]'
-                          : 'border-emerald-500/30 bg-slate-100 dark:bg-white/[0.03]';
-                      return (
-                        <div
-                          key={node.id}
-                          onClick={() => setPopoverId(node.id)}
-                          className={`w-60 p-3 rounded-lg border ${borderClass} text-center shadow-xs cursor-pointer hover:border-cyan-500/50 transition-all`}
-                        >
-                          <div className="text-xs font-semibold text-slate-900 dark:text-zinc-100 truncate">
-                            {node.hostname}
-                          </div>
-                          <div className="text-[10px] text-slate-500 dark:text-zinc-400 font-mono mt-0.5">
-                            {node.management_ip}:{node.management_port} • {node.platform}
-                          </div>
-                          <div className="mt-1.5 flex items-center justify-center gap-2 text-[10px] font-mono">
-                            <span
-                              className={
-                                isDown
-                                  ? 'text-red-400 font-bold'
-                                  : 'text-emerald-400 font-semibold'
-                              }
-                            >
-                              LINK: {node.oper_status ?? 'UP'}
-                            </span>
-                            <span className="text-zinc-600">•</span>
-                            <span
-                              className={
-                                isDrifted
-                                  ? 'text-amber-400 font-semibold'
-                                  : node.status === 'UNREACHABLE'
-                                    ? 'text-red-400 font-semibold'
-                                    : 'text-cyan-400'
-                              }
-                            >
-                              {node.status}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      )}
+      </div>
 
       {/* Popover on click */}
       {popoverNode && (
@@ -478,13 +316,6 @@ const TopologyMapComponent: React.FC<Props> = ({
             <div className="flex justify-between items-center pt-1">
               <span>Статус:</span>
               <StatusBadge status={popoverNode.d.status} />
-            </div>
-            <div className="flex justify-between items-center pt-1">
-              <span>AI Guard:</span>
-              <span className="text-cyan-400 font-mono text-[10px] flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse"></span>
-                TimesFM Active
-              </span>
             </div>
             <div className="flex justify-between items-center">
               <span>Транзакция:</span>

@@ -42,7 +42,7 @@ def make_base_forecast(events=None):
         "median": median,
         "lower": lower,
         "upper": upper,
-        "provider": "TimesFM-3.0",
+        "provider": "Statistical-Trend",
         "breach_in_minutes": 180,
         "events": events or [],
     }

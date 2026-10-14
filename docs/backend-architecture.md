@@ -40,7 +40,7 @@ backend/netops/
 │   ├── chaos.py      сценарии Chaos Lab (SSH и файловый стенд)
 │   ├── drift.py      отчёт по дрейфу
 │   ├── users.py      пользователи, роли, TTL-токены и скоупы
-│   ├── forecast.py   прогнозирование временных рядов TimesFM 3.0 (p10/p50/p90, ETA SLA)
+│   ├── forecast.py   прогнозирование временных рядов Statistical Forecast (p10/p50/p90, ETA SLA)
 │   ├── ai_guard.py   Pre-Flight проверка безопасности изменений перед деплоем
 │   ├── freeze.py     глобальная аварийная заморозка изменений (Factory Freeze)
 │   ├── telemetry.py  парсинг живых CLI-метрик CPU/RAM/Uplink по SSH и кэш

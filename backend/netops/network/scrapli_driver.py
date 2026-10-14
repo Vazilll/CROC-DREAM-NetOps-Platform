@@ -116,6 +116,7 @@ class _ParamikoConnAdapter:
 
         import paramiko  # noqa: PLC0415
 
+        logging.getLogger("paramiko").setLevel(logging.CRITICAL)
         self.client = paramiko.SSHClient()
         if os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes"):
             self.client.load_system_host_keys()
@@ -125,6 +126,7 @@ class _ParamikoConnAdapter:
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         password = getattr(self.target.credentials, "password", "")
         username = self.target.credentials.username
+        clab_host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
 
         try:
             sock = None
@@ -132,10 +134,20 @@ class _ParamikoConnAdapter:
                 sock = self._open_jump_channel(
                     paramiko, self.proxy_jump, self.target.host, self.target.port
                 )
+            elif (
+                self.target.host == clab_host
+                and self.target.platform == Platform.HUAWEI_VRP
+                and "PYTEST_CURRENT_TEST" not in os.environ
+            ):
+                try:
+                    sock = self._open_jump_channel(
+                        paramiko, "auto", self.target.host, self.target.port
+                    )
+                except Exception:
+                    sock = None
             try:
                 self._connect_with_sock(paramiko, username, password, sock=sock)
             except paramiko.ssh_exception.SSHException as exc:
-                clab_host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
                 if (
                     sock is None
                     and self.target.host == clab_host
@@ -273,7 +285,12 @@ class ScrapliNetworkDriver:
     def _fetch_single(self, target: DeviceTarget) -> str:
         import time  # noqa: PLC0415
 
-        cmd = "display current-configuration" if target.platform == Platform.HUAWEI_VRP else "show running-config"
+        if target.platform == Platform.HUAWEI_VRP:
+            cmd = "display current-configuration"
+        elif target.platform == Platform.LINUX_SERVER:
+            cmd = "ip addr show"
+        else:
+            cmd = "show running-config"
         last_exc: Exception | None = None
         for attempt in range(2):
             try:
@@ -319,6 +336,8 @@ class ScrapliNetworkDriver:
             elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_configs(lines)
                 conn.send_command("commit")
+            else:
+                conn.send_configs(lines)
 
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:
@@ -331,6 +350,8 @@ class ScrapliNetworkDriver:
                 conn.send_command("write memory")
             elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_command("save\ny")
+            else:
+                conn.send_command("write memory")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
         with self._get_connection(target) as conn:
@@ -409,8 +430,7 @@ class ScrapliNetworkDriver:
                         if parts[0].startswith(("Gigabit", "Loop")):
                             interfaces[parts[0]] = InterfaceState(status=parts[4], protocol=parts[5])
                     elif (
-                        target.platform == Platform.ARISTA_EOS
-                        and len(parts) >= 4
+                        len(parts) >= 4
                         and parts[0].startswith(("Ethernet", "Loop", "Management"))
                     ):
                         status = "up" if "up" in parts[2].lower() else "down"

@@ -120,12 +120,12 @@ def main() -> int:
     # 4. Live Lab Connectivity Probe (5.228.243.54)
     print(f"\n{BOLD}4. Multi-Vendor Lab Network Probe (5.228.243.54):{RESET}")
     nodes = [
-        ("spine-1.croc.lab", 2211, "Arista cEOS"),
+        ("spine-1.croc.lab", 2211, "Cisco C8000v"),
         ("spine-2.croc.lab", 2212, "Arista cEOS"),
-        ("leaf-1.croc.lab", 2221, "Cisco C8000v"),
-        ("leaf-2.croc.lab", 2222, "Cisco C8000v"),
-        ("leaf-3.croc.lab", 2231, "Huawei CE12800"),
-        ("leaf-4.croc.lab", 2232, "Huawei CE12800"),
+        ("leaf-1.croc.lab", 2221, "Huawei CE12800"),
+        ("leaf-2.croc.lab", 2222, "Huawei CE12800"),
+        ("host-a.croc.lab", 2231, "Alpine Linux"),
+        ("host-b.croc.lab", 2232, "Alpine Linux"),
     ]
 
     print(f"   {'Node':<18} | {'Port':<5} | {'Vendor Platform':<16} | {'Status':<10} | {'Latency':<9} | {'SSH Banner'}")

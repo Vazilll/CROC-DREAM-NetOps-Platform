@@ -54,8 +54,8 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
           </div>
           <p className="text-xs text-[var(--text-secondary)] max-w-3xl leading-relaxed pt-1">
             {locale === 'en'
-              ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei, commit trial auto-rollback, and TimesFM 3.0 AI Guard.'
-              : 'Модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя проверить работу Drift Engine на Cisco/Huawei, автооткат commit trial и защиту TimesFM 3.0 AI Guard.'}
+              ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei and commit trial auto-rollback.'
+              : 'Модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя проверить работу Drift Engine на Cisco/Huawei и автооткат commit trial.'}
           </p>
         </div>
       </div>
@@ -81,7 +81,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
               Внепроцессный Дрейф ACL (Cisco)
             </h3>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Имитация ручного входа по SSH на <code className={codePill}>leaf-1.croc.lab</code> и добавление строки{' '}
+              Имитация ручного входа по SSH на подключенный узел фабрики и добавление строки{' '}
               <code className={codePill}>15 permit ip any any</code> в список <code className={codePill}>MGMT-IN</code> в обход репозитория Git.
             </p>
           </div>
@@ -104,11 +104,10 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
               <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Дрейф на Huawei VRP / Leaf-2
+              Дрейф на Huawei VRP
             </h3>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Внедрение несанкционированного правила <code className={codePill}>rule 15 permit ip</code> на резервном узле (
-              <code className={codePill}>leaf-2.croc.lab</code> / Huawei VRP). Проверяет работу HierConfig и транзакций{' '}
+              Внедрение несанкционированного правила <code className={codePill}>rule 15 permit ip</code> на подключенном узле Huawei VRP. Проверяет работу HierConfig и транзакций{' '}
               <code className={codePill}>commit trial</code>.
             </p>
           </div>
@@ -134,8 +133,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
               Авария Линка (Port Down)
             </h3>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Падение межузлового линка <code className={codePill}>GigabitEthernet3</code> на{' '}
-              <code className={codePill}>leaf-2.croc.lab</code>. Платформа фиксирует сбой post-check и автоматически блокирует деплой.
+              Падение межузлового линка <code className={codePill}>GigabitEthernet3</code> на подключенном узле фабрики. Платформа фиксирует сбой post-check и автоматически блокирует деплой.
             </p>
           </div>
           <button
@@ -147,12 +145,12 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
           </button>
         </div>
 
-        {/* Scenario 4: TimesFM AI Guard Silent Blackhole */}
+        {/* Scenario 4: Silent Blackhole */}
         <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                TIMESFM 3.0 · Q10 GUARD
+                TELEMETRY · Q10 GUARD
               </span>
               <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             </div>
@@ -161,7 +159,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
             </h3>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
               Порты остаются в статусе <code className={codePill}>up/up</code>, но трафик падает в ноль.{' '}
-              <strong>TimesFM 3.0</strong> выявляет пробой квантиля Q₁₀ во время окна{' '}
+              Мониторинг телеметрии выявляет пробой квантиля Q₁₀ во время окна{' '}
               <code className={codePill}>commit confirmed</code> и инициирует автооткат.
             </p>
           </div>
@@ -174,12 +172,12 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
           </button>
         </div>
 
-        {/* Scenario 5: TimesFM AI Guard Load Surge */}
+        {/* Scenario 5: Load Surge */}
         <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                TIMESFM 3.0 · Q90 GUARD
+                TELEMETRY · Q90 GUARD
               </span>
               <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             </div>
@@ -187,7 +185,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
               Шторм трафика / Микропетля
             </h3>
             <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Имитация аномального взлета нагрузки выше Q₉₀. TimesFM 3.0 блокирует закрепление коммита до устранения аномалии.
+              Имитация аномального взлета нагрузки выше Q₉₀. Система блокирует закрепление коммита до устранения аномалии.
             </p>
           </div>
           <button

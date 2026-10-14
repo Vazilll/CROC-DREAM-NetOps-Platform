@@ -28,7 +28,7 @@ from netops.services.bootstrap import (
 )
 from netops.services.chaos import execute_chaos_scenario
 from netops.services.freeze import get_freeze_state, set_factory_freeze
-from netops.services.git_sot import git_pull_repo, git_repo_metadata
+from netops.services.git_sot import git_commit_and_push_diff, git_pull_repo, git_repo_metadata
 from netops.services.notifier import (
     format_executive_summary,
     load_telegram_bindings,
@@ -209,6 +209,8 @@ class BootstrapConfigureRequest(BaseModel):
     exposure_mode: str | None = None
     websocket_enabled: bool | None = None
     github_repo_url: str | None = None
+    github_branch: str | None = None
+    auto_commit_on_diff: bool | None = None
     github_pat: str | None = None
     github_webhook_secret: str | None = None
     webhook_public_url: str | None = None
@@ -217,7 +219,13 @@ class BootstrapConfigureRequest(BaseModel):
     groq_api_key: str | None = None
     gemini_api_key: str | None = None
     ollama_url: str | None = None
+    prometheus_url: str | None = None
+    llm_cascade: list[dict[str, Any]] | None = None
     bootstrap_completed: bool | None = None
+
+
+class GitCommitDiffRequest(BaseModel):
+    job_id: str
 
 
 class ServerDiscoverRequest(BaseModel):
@@ -226,9 +234,9 @@ class ServerDiscoverRequest(BaseModel):
     port: int = 221
     username: str = "crocdream"
     password: str | None = None
-    switch_password_huawei: str = "admin@123"
-    switch_password_arista: str = "F5ga6jfkig2"
-    switch_password_cisco: str = "F5ga6jfkig1"
+    switch_password_huawei: str = "admin"
+    switch_password_arista: str = "admin"
+    switch_password_cisco: str = "admin"
 
 
 @api_router.get(
@@ -346,6 +354,42 @@ def sync_git_sot(
 
 
 @api_router.post(
+    "/git/commit-diff",
+    tags=["intent"],
+    summary="Сформировать снапшот Diff задачи, сделать git commit и отправить по SSH (git push)",
+)
+def commit_diff_to_git(
+    req: GitCommitDiffRequest,
+    session: SessionDep,
+    container: ContainerDep,
+    _: Operator,
+) -> dict[str, Any]:
+    import uuid as _uuid
+
+    settings = container.settings
+    rt = settings.apply_runtime_overlay()
+    job_svc = JobService(session, container.dispatcher)
+    job = job_svc.get_with_diff(_uuid.UUID(req.job_id))
+    device_diffs = [
+        {
+            "hostname": row.hostname,
+            "remediation_patch": row.remediation_config or "",
+            "intended_config": row.intended_snapshot.content if row.intended_snapshot else "",
+        }
+        for row in job.targets
+    ]
+    res = git_commit_and_push_diff(
+        settings.intent_repo_path,
+        job_id=str(job.id),
+        job_type=str(getattr(job.type, "value", job.type)),
+        device_diffs=device_diffs,
+        branch=str(rt.get("github_branch") or "main"),
+        remote_url=str(rt.get("github_repo_url") or settings.github_repo_url),
+    )
+    return res
+
+
+@api_router.post(
     "/git/webhook",
     tags=["intent"],
     summary="GitHub Webhook: авто-синхронизация инвентаря БД и префлайт Dry-Run при push в Git",
@@ -419,9 +463,11 @@ def get_integrations_status(
         "issues_count": len(issues),
     }
 
-    for cid in tg_targets:
-        if str(cid).lstrip("-").isdigit():
-            bind_telegram_chat_user(session, int(cid), settings=settings)
+    rt_overlay = settings.apply_runtime_overlay()
+    if rt_overlay.get("telegram_owner_linked"):
+        for cid in tg_targets:
+            if str(cid).lstrip("-").isdigit():
+                bind_telegram_chat_user(session, int(cid), settings=settings)
 
     db_users = list(session.scalars(select(User).order_by(User.username)).all())
     for u in db_users:
@@ -599,8 +645,9 @@ def recover_owner_access(
 def configure_bootstrap_layers(
     req: BootstrapConfigureRequest,
     container: ContainerDep,
+    session: SessionDep,
 ) -> dict[str, Any]:
-    return configure_layers(req, container)
+    return configure_layers(req, container, session)
 
 
 @api_router.post(

@@ -45,6 +45,191 @@ def _is_expired(exp) -> bool:
     return now_aware >= exp_aware
 
 
+def _reject_expired_token(
+    user: User, clean_client: str | None, clean_ip: str | None, settings: object | None
+) -> None:
+    try:
+        from netops.services.notifier import (  # noqa: PLC0415
+            record_security_event,
+            send_telegram_message,
+        )
+        from netops.settings import Settings  # noqa: PLC0415
+
+        s_obj = settings if isinstance(settings, Settings) else None
+        record_security_event(
+            "TOKEN_EXPIRED_REJECTED",
+            f"Попытка входа по истёкшему токену участника {user.username}",
+            username=user.username,
+            client_id=clean_client,
+            client_ip=clean_ip,
+            severity="error",
+            settings=s_obj,
+        )
+        if s_obj is not None:
+            send_telegram_message(
+                s_obj,
+                f"<b>[NetOps Security] Истёкший токен отклонён</b>\n"
+                f"<b>Участник:</b> <code>{user.username}</code>\n"
+                f"<b>Клиент:</b> <code>{clean_client or 'unknown'}</code> ({clean_ip or 'local'})",
+            )
+    except Exception:
+        pass
+    raise DeviceBoundConflictError(
+        f"Срок действия временного токена ({user.username}) истёк. Запросите продление у администратора."
+    )
+
+
+def _reject_device_conflict(
+    user: User,
+    clean_client: str | None,
+    clean_ip: str | None,
+    clean_ua: str | None,
+    settings: object | None,
+) -> None:
+    try:
+        from netops.services.notifier import (  # noqa: PLC0415
+            record_security_event,
+            send_telegram_message,
+        )
+        from netops.settings import Settings  # noqa: PLC0415
+
+        s_obj = settings if isinstance(settings, Settings) else None
+        record_security_event(
+            "DEVICE_CONFLICT_BLOCKED",
+            f"Заблокирован повторный вход по чужой ссылке {user.username} "
+            f"(привязана к {user.bound_client_id}, попытка с {clean_client or 'unknown'} / IP {clean_ip or 'unknown'})",
+            username=user.username,
+            client_id=clean_client,
+            client_ip=clean_ip,
+            severity="critical",
+            settings=s_obj,
+        )
+        if s_obj is not None:
+            send_telegram_message(
+                s_obj,
+                f"<b>[SECURITY ALERT] Попытка входа по чужой привязанной ссылке!</b>\n"
+                f"<b>Участник (ссылка):</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
+                f"<b>Законный владелец:</b> <code>{user.bound_client_id}</code> ({user.bound_ip or 'local'})\n"
+                f"<b>Заблокированный клиент:</b> <code>{clean_client or 'no-client-id'}</code> ({clean_ip or 'unknown'} · {clean_ua or 'Browser'})\n"
+                f"<i>Вход строго заблокирован (1 токен = 1 устройство).</i>",
+                reply_markup={
+                    "inline_keyboard": [
+                        [
+                            {
+                                "text": f"Заблокировать {user.username}",
+                                "callback_data": f"/block {user.username}",
+                            },
+                            {
+                                "text": f"Сбросить привязку {user.username}",
+                                "callback_data": f"/unbind {user.username}",
+                            },
+                        ]
+                    ]
+                },
+            )
+    except Exception:
+        pass
+    raise DeviceBoundConflictError(
+        f"Ссылка доступа ({user.username}) уже привязана к другому устройству ({user.bound_client_id}). "
+        "По одной персональной ссылке может войти только один участник."
+    )
+
+
+def _user_quick_actions_keyboard(username: str) -> dict[str, object]:
+    return {
+        "inline_keyboard": [
+            [
+                {"text": f"Токен {username}", "callback_data": f"/token {username}"},
+                {"text": f"Блок {username}", "callback_data": f"/block {username}"},
+                {"text": f"Отвязать {username}", "callback_data": f"/unbind {username}"},
+            ]
+        ]
+    }
+
+
+def _notify_first_token_bind(
+    session: Session,
+    user: User,
+    token: str,
+    clean_client: str | None,
+    clean_ip: str | None,
+    clean_ua: str | None,
+    settings: object | None,
+) -> None:
+    try:
+        from netops.services.notifier import (  # noqa: PLC0415
+            load_user_tokens,
+            record_security_event,
+            send_telegram_message,
+            sync_access_registry,
+        )
+        from netops.settings import Settings  # noqa: PLC0415
+
+        s_obj = settings if isinstance(settings, Settings) else None
+        record_security_event(
+            "TOKEN_BOUND",
+            f"Токен участника {user.username} привязан к устройству {clean_client} (IP {clean_ip or 'local'})",
+            username=user.username,
+            client_id=clean_client,
+            client_ip=clean_ip,
+            severity="info",
+            settings=s_obj,
+        )
+        sync_access_registry(session, s_obj)
+        if s_obj is not None:
+            scope = user.allowed_system or "Вся фабрика CLOS"
+            tok = load_user_tokens(s_obj).get(user.username) or token
+            ttl_str = (
+                f"до {user.expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
+                if user.expires_at
+                else "НАВСЕГДА (бессрочный)"
+            )
+            send_telegram_message(
+                s_obj,
+                f"<b>[NetOps Access] Первичная привязка персональной ссылки</b>\n"
+                f"<b>Участник (ID #{user.id}):</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
+                f"<b>Токен доступа:</b> <code>{tok}</code>\n"
+                f"<b>Срок действия:</b> <code>{ttl_str}</code>\n"
+                f"<b>Система стенда:</b> <code>{scope}</code>\n"
+                f"<b>Привязанное устройство:</b> <code>{clean_client}</code>\n"
+                f"<b>IP / Клиент:</b> <code>{clean_ip or 'local'}</code> · {clean_ua or 'Browser'}\n"
+                f"<i>Ссылка заперта за этим устройством. Повторный вход с другого браузера невозможен.</i>",
+                reply_markup=_user_quick_actions_keyboard(user.username),
+            )
+    except Exception:
+        pass
+
+
+def _notify_new_browser_session(
+    user: User,
+    minted_token: str | None,
+    clean_client: str,
+    clean_ip: str | None,
+    clean_ua: str | None,
+    settings: object | None,
+) -> None:
+    try:
+        from netops.services.notifier import load_user_tokens, send_telegram_message  # noqa: PLC0415
+        from netops.settings import Settings  # noqa: PLC0415
+
+        if isinstance(settings, Settings):
+            scope = user.allowed_system or "Вся фабрика CLOS"
+            tok = minted_token or load_user_tokens(settings).get(user.username) or "—"
+            send_telegram_message(
+                settings,
+                f"<b>[NetOps Access] Новая сессия в браузере</b>\n"
+                f"<b>Участник:</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
+                f"<b>Токен доступа:</b> <code>{tok}</code>\n"
+                f"<b>Система стенда:</b> <code>{scope}</code>\n"
+                f"<b>Устройство клиента:</b> <code>{clean_client}</code>\n"
+                f"<b>IP / Клиент:</b> <code>{clean_ip or 'local'}</code> · {clean_ua or 'Browser'}\n"
+                f"<i>Управление: /users, /token {user.username}, /block {user.username}, /unbind {user.username}</i>",
+                reply_markup=_user_quick_actions_keyboard(user.username),
+            )
+    except Exception:
+        pass
+
+
 class UserService:
     def __init__(self, session: Session, *, reserved_usernames: Collection[str] = ()) -> None:
         self._session = session
@@ -62,9 +247,7 @@ class UserService:
         user = self._session.scalar(
             select(User).where(User.token_sha256 == hash_token(token))
         )
-        if user is None:
-            return None
-        if not user.is_active:
+        if user is None or not user.is_active:
             return None
 
         now = utcnow()
@@ -73,86 +256,12 @@ class UserService:
         clean_ua = (user_agent or "").strip()[:255] or None
 
         if _is_expired(user.expires_at):
-            try:
-                from netops.services.notifier import (  # noqa: PLC0415
-                    record_security_event,
-                    send_telegram_message,
-                )
-                from netops.settings import Settings  # noqa: PLC0415
-
-                s_obj = settings if isinstance(settings, Settings) else None
-                record_security_event(
-                    "TOKEN_EXPIRED_REJECTED",
-                    f"Попытка входа по истёкшему токену участника {user.username}",
-                    username=user.username,
-                    client_id=clean_client,
-                    client_ip=clean_ip,
-                    severity="error",
-                    settings=s_obj,
-                )
-                if s_obj is not None:
-                    send_telegram_message(
-                        s_obj,
-                        f"<b>[NetOps Security] Истёкший токен отклонён</b>\n"
-                        f"<b>Участник:</b> <code>{user.username}</code>\n"
-                        f"<b>Клиент:</b> <code>{clean_client or 'unknown'}</code> ({clean_ip or 'local'})",
-                    )
-            except Exception:
-                pass
-            raise DeviceBoundConflictError(
-                f"Срок действия временного токена ({user.username}) истёк. Запросите продление у администратора."
-            )
+            _reject_expired_token(user, clean_client, clean_ip, settings)
 
         first_bind = False
         if user.bound_client_id is not None:
             if clean_client != user.bound_client_id:
-                try:
-                    from netops.services.notifier import (  # noqa: PLC0415
-                        record_security_event,
-                        send_telegram_message,
-                    )
-                    from netops.settings import Settings  # noqa: PLC0415
-
-                    s_obj = settings if isinstance(settings, Settings) else None
-                    record_security_event(
-                        "DEVICE_CONFLICT_BLOCKED",
-                        f"Заблокирован повторный вход по чужой ссылке {user.username} "
-                        f"(привязана к {user.bound_client_id}, попытка с {clean_client or 'unknown'} / IP {clean_ip or 'unknown'})",
-                        username=user.username,
-                        client_id=clean_client,
-                        client_ip=clean_ip,
-                        severity="critical",
-                        settings=s_obj,
-                    )
-                    if s_obj is not None:
-                        send_telegram_message(
-                            s_obj,
-                            f"<b>[SECURITY ALERT] Попытка входа по чужой привязанной ссылке!</b>\n"
-                            f"<b>Участник (ссылка):</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
-                            f"<b>Законный владелец:</b> <code>{user.bound_client_id}</code> ({user.bound_ip or 'local'})\n"
-                            f"<b>Заблокированный клиент:</b> <code>{clean_client or 'no-client-id'}</code> ({clean_ip or 'unknown'} · {clean_ua or 'Browser'})\n"
-                            f"<i>Вход строго заблокирован (1 токен = 1 устройство).</i>",
-                            reply_markup={
-                                "inline_keyboard": [
-                                    [
-                                        {
-                                            "text": f"Заблокировать {user.username}",
-                                            "callback_data": f"/block {user.username}",
-                                        },
-                                        {
-                                            "text": f"Сбросить привязку {user.username}",
-                                            "callback_data": f"/unbind {user.username}",
-                                        },
-                                    ]
-                                ]
-                            },
-                        )
-                except Exception:
-                    pass
-                raise DeviceBoundConflictError(
-                    f"Ссылка доступа ({user.username}) уже привязана к другому устройству ({user.bound_client_id}). "
-                    "По одной персональной ссылке может войти только один участник."
-                )
+                _reject_device_conflict(user, clean_client, clean_ip, clean_ua, settings)
             user.last_seen_at = now
             if clean_ip:
                 user.bound_ip = clean_ip
@@ -178,65 +287,9 @@ class UserService:
             self._session.commit()
 
         if first_bind:
-            try:
-                from netops.services.notifier import (  # noqa: PLC0415
-                    load_user_tokens,
-                    record_security_event,
-                    send_telegram_message,
-                    sync_access_registry,
-                )
-                from netops.settings import Settings  # noqa: PLC0415
-
-                s_obj = settings if isinstance(settings, Settings) else None
-                record_security_event(
-                    "TOKEN_BOUND",
-                    f"Токен участника {user.username} привязан к устройству {clean_client} (IP {clean_ip or 'local'})",
-                    username=user.username,
-                    client_id=clean_client,
-                    client_ip=clean_ip,
-                    severity="info",
-                    settings=s_obj,
-                )
-                sync_access_registry(self._session, s_obj)
-                if s_obj is not None:
-                    scope = user.allowed_system or "Вся фабрика CLOS"
-                    tok = load_user_tokens(s_obj).get(user.username) or token
-                    ttl_str = (
-                        f"до {user.expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
-                        if user.expires_at
-                        else "НАВСЕГДА (бессрочный)"
-                    )
-                    send_telegram_message(
-                        s_obj,
-                        f"<b>[NetOps Access] Первичная привязка персональной ссылки</b>\n"
-                        f"<b>Участник (ID #{user.id}):</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
-                        f"<b>Токен доступа:</b> <code>{tok}</code>\n"
-                        f"<b>Срок действия:</b> <code>{ttl_str}</code>\n"
-                        f"<b>Система стенда:</b> <code>{scope}</code>\n"
-                        f"<b>Привязанное устройство:</b> <code>{clean_client}</code>\n"
-                        f"<b>IP / Клиент:</b> <code>{clean_ip or 'local'}</code> · {clean_ua or 'Browser'}\n"
-                        f"<i>Ссылка заперта за этим устройством. Повторный вход с другого браузера невозможен.</i>",
-                        reply_markup={
-                            "inline_keyboard": [
-                                [
-                                    {
-                                        "text": f"Токен {user.username}",
-                                        "callback_data": f"/token {user.username}",
-                                    },
-                                    {
-                                        "text": f"Блок {user.username}",
-                                        "callback_data": f"/block {user.username}",
-                                    },
-                                    {
-                                        "text": f"Отвязать {user.username}",
-                                        "callback_data": f"/unbind {user.username}",
-                                    },
-                                ]
-                            ]
-                        },
-                    )
-            except Exception:
-                pass
+            _notify_first_token_bind(
+                self._session, user, token, clean_client, clean_ip, clean_ua, settings
+            )
 
         return ApiPrincipal(
             username=user.username,
@@ -280,7 +333,7 @@ class UserService:
 
             short_id = clean_client.replace("dev-", "")[:6]
             base_name = "owner" if principal.role == UserRole.OWNER else principal.username
-            candidate_name = f"{base_name}-{short_id}"
+            candidate_name = "owner" if base_name == "owner" else f"{base_name}-{short_id}"
             existing_user = self._session.scalar(
                 select(User).where(User.username == candidate_name)
             )
@@ -297,7 +350,7 @@ class UserService:
                 user.last_seen_at = now
                 self._session.commit()
             else:
-                db_role = UserRole.ADMIN if principal.role == UserRole.OWNER else principal.role
+                db_role = principal.role
                 minted_token = generate_token()
                 user = User(
                     username=candidate_name,
@@ -328,46 +381,9 @@ class UserService:
                     return principal
 
         if first_bind and settings is not None:
-            try:
-                from netops.services.notifier import (  # noqa: PLC0415
-                    load_user_tokens,
-                    send_telegram_message,
-                )
-                from netops.settings import Settings  # noqa: PLC0415
-
-                if isinstance(settings, Settings):
-                    scope = user.allowed_system or "Вся фабрика CLOS"
-                    tok = minted_token or load_user_tokens(settings).get(user.username) or "—"
-                    send_telegram_message(
-                        settings,
-                        f"<b>[NetOps Access] Новая сессия в браузере</b>\n"
-                        f"<b>Участник:</b> <code>{user.username}</code> ({user.role.value.upper()})\n"
-                        f"<b>Токен доступа:</b> <code>{tok}</code>\n"
-                        f"<b>Система стенда:</b> <code>{scope}</code>\n"
-                        f"<b>Устройство клиента:</b> <code>{clean_client}</code>\n"
-                        f"<b>IP / Клиент:</b> <code>{clean_ip or 'local'}</code> · {clean_ua or 'Browser'}\n"
-                        f"<i>Управление: /users, /token {user.username}, /block {user.username}, /unbind {user.username}</i>",
-                        reply_markup={
-                            "inline_keyboard": [
-                                [
-                                    {
-                                        "text": f"Токен {user.username}",
-                                        "callback_data": f"/token {user.username}",
-                                    },
-                                    {
-                                        "text": f"Блок {user.username}",
-                                        "callback_data": f"/block {user.username}",
-                                    },
-                                    {
-                                        "text": f"Отвязать {user.username}",
-                                        "callback_data": f"/unbind {user.username}",
-                                    },
-                                ]
-                            ]
-                        },
-                    )
-            except Exception:
-                pass
+            _notify_new_browser_session(
+                user, minted_token, clean_client, clean_ip, clean_ua, settings
+            )
 
         from netops.enums import UserRole  # noqa: PLC0415
 
@@ -377,6 +393,7 @@ class UserService:
             role=effective_role,
             allowed_system=user.allowed_system,
         )
+
 
     def list_users(self) -> Sequence[User]:
         return self._session.scalars(select(User).order_by(User.username)).all()

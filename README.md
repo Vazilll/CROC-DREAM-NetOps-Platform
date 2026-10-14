@@ -13,7 +13,7 @@
 
 | Модуль / Каталог | Инструкция | За что отвечает блок |
 |------------------|------------|----------------------|
-| **`backend/`** | [**`backend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/README.md) | Серверное ядро FastAPI, PostgreSQL/SQLite + Alembic, Celery/Redis, транзакционные пайплайны `dry-run` / `deploy` / `drift`, драйверы `Scrapli` и `OfflineLab`, `TimesFM 3.0`, `AI Guard`, `Emergency Hub`, `FastMCP` |
+| **`backend/`** | [**`backend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/README.md) | Серверное ядро FastAPI, PostgreSQL/SQLite + Alembic, Celery/Redis, транзакционные пайплайны `dry-run` / `deploy` / `drift`, драйверы `Scrapli` и `OfflineLab`, Statistical Forecast, `AI Guard`, `Emergency Hub`, `FastMCP` |
 | **`frontend/`** | [**`frontend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/README.md) | Клиентское ядро NOC (React 19 + TypeScript 5.9, `0 any`), раскладка по папкам `layout/`, `views/`, `modals/`, `charts/`, темы `Dark`/`Light`, локализация `RU`/`EN`, визард «Матрёшка», хоткеи |
 | **`intent/`** | [**`intent/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/README.md) | Git Source of Truth: реестр устройств `inventory.yaml`, декларативные профили узлов `devices/*.yaml` и правила нормализации `diff_filters.yaml` |
 | **`templates/`** | [**`templates/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates/README.md) | Мульти-вендорный движок шаблонов Jinja2 (`StrictUndefined`) для 6 сетевых ОС (`Cisco IOS-XE`, `Arista EOS`, `Huawei VRP`, `Eltex MES`, `Juniper Junos`, `YADRO KORNFE`) |
@@ -42,11 +42,11 @@
 - Платформа выполняет **Pre-Flight Lint** всей фабрики (проверка пересечений IP/масок, дублей Router ID и ASN).
 - Рендерит целевые конфигурации через Jinja2-шаблоны под конкретного вендора, очищает `running-config` от динамического шума и строит минимальный иерархический патч (`hier_config`) и зеркальный патч отката (`rollback_patch`).
 - Проверяет патч через **AI Pre-Flight Guard**, требует явного подтверждения оператора, выкатывает изменения транзакционно (`commit confirmed` / `configure session`) с автоматической верификацией **Post-Check** (BGP Established, префиксы, порты `up/up`, потери ping ≤ 20%) и авто-откатом при сбое.
-- Каждые 15 минут сканирует сеть на конфигурационный дрейф (**Drift Engine**) и прогнозирует исчерпание ресурсов CPU и аплинков с помощью модели временных рядов **TimesFM 3.0**.
+- Каждые 15 минут сканирует сеть на конфигурационный дрейф (**Drift Engine**) и прогнозирует исчерпание ресурсов CPU и аплинков с помощью модели временных рядов **Statistical Forecast**.
 
 **Ключевой сквозной конвейер:**
 
-`Git/YAML Intent → Pre-Flight Lint → Jinja2 Render → Dry-Run & Hier-Diff → AI Guard & Approval → Transactional Deploy / Auto-Rollback → Drift & TimesFM Monitoring`
+`Git/YAML Intent → Pre-Flight Lint → Jinja2 Render → Dry-Run & Hier-Diff → AI Guard & Approval → Transactional Deploy / Auto-Rollback → Drift & Statistical Forecast Monitoring`
 
 ---
 
@@ -74,7 +74,7 @@
 | **Multi-Vendor Jinja2 Templates (6 платформ)** | ✅ Готово (`base`, `interfaces`, `acls`, `bgp`) | [`templates/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates) |
 | **Иерархический Diff и Нормализация CLI** | ✅ Готово (`hier_config` + `diff_filters.yaml`) | [`backend/netops/network/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network) |
 | **Двойной сетевой контур (`Scrapli SSH` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API) | [`scrapli_driver.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/scrapli_driver.py), [`offline.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/offline.py) |
-| **Предиктивная аналитика `TimesFM 3.0` + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/forecast.py), [`ai_guard.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/ai_guard.py) |
+| **Предиктивная аналитика Statistical Forecast + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/forecast.py), [`ai_guard.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/ai_guard.py) |
 | **Аварийный пульт `Emergency Hub` и `Factory Freeze`** | ✅ Готово (прямой CLI, экстренный патч, Soft/Hard Reset, Kill Switch) | [`emergency.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/emergency.py), [`EmergencyHub.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/EmergencyHub.tsx) |
 | **4-шаговый визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (Telegram Owner, SSH Probe, матрица паролей, GitHub SoT, `Dark`/`Light`, `RU`/`EN`) | [`system.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/system.py), [`WelcomeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/WelcomeModal.tsx) |
 | **Frontend NOC SPA (React 19 + TS Strict, `0 any`)** | ✅ Готово (25 компонентов в 4 доменных папках, 2D/3D топология, RBAC) | [`frontend/src/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src) |
@@ -139,7 +139,7 @@ python3 backend/scripts/smoke_stack.py
 ## 6. Сквозной демо-сценарий (для защиты)
 
 1. **Первичная инициализация («Матрёшка»)**: откройте `http://127.0.0.1:5173/?setup=1`, переключите тему (`Dark` / `Light`) или язык (`RU` / `EN`) и пройдите 4 шага проверки контура.
-2. **Обзор топологии и прогнозов (`Dashboard`)**: покажите граф CLOS-фабрики (`2 Spine` + `2 Leaf`), статус `AI Pre-Flight Guard` и прогноз загрузки `TimesFM 3.0`.
+2. **Обзор топологии и прогнозов (`Dashboard`)**: покажите граф CLOS-фабрики (`2 Spine` + `2 Leaf`), статус `AI Pre-Flight Guard` и прогноз загрузки Statistical Forecast.
 3. **Инспекция узла и Intent (`DevicePage` / `DeviceDetailModal`)**: кликните на любой узел на карте, откройте YAML-интент или перейдите в диагностику узла с графиками метрик и таблицей BGP-соседей.
 4. **Dry-Run и Diff (`DryRunModal` → `DiffViewer`)**: запустите `Dry-Run`, покажите построчное сравнение `running` vs `candidate` и вызовите ИИ-объяснение рисков.
 5. **Chaos Engineering и Авто-ремедиация (`ChaosLabView` → `DriftView`)**: инжектируйте несанкционированный дрейф на `spine-1` или `leaf-1`, покажите обнаружение `DRIFT_DETECTED` и устраните отклонение одной кнопкой `Remediate`.

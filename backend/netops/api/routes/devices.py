@@ -101,13 +101,50 @@ def probe_device(req: DeviceProbeRequest, container: ContainerDep, _: Admin) -> 
 def create_device(
     data: DeviceCreate, service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> Device:
-    device = service.create(data)
+    from sqlalchemy import select  # noqa: PLC0415
+
+    from netops.errors import ConflictError  # noqa: PLC0415
+    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+
+    try:
+        device = service.create(data)
+    except ConflictError:
+        if data.hardware_specs is None and data.username is None:
+            raise
+        existing = service._session.scalars(
+            select(Device).where(
+                (Device.management_ip == str(data.management_ip))
+                & (Device.management_port == data.management_port)
+            )
+        ).first() or service._session.scalars(
+            select(Device).where(Device.hostname == data.hostname)
+        ).first()
+        if existing is None:
+            raise
+        hostname_taken = service._session.scalars(
+            select(Device).where(
+                (Device.hostname == data.hostname) & (Device.id != existing.id)
+            )
+        ).first()
+        existing.hostname = existing.hostname if hostname_taken else data.hostname
+        existing.management_ip = str(data.management_ip)
+        existing.management_port = data.management_port
+        existing.platform = data.platform
+        existing.role = data.role
+        existing.auth_profile = data.auth_profile
+        existing.management_mode = data.management_mode
+        existing.proxy_jump = data.proxy_jump
+        if data.hardware_specs is not None:
+            existing.hardware_specs = data.hardware_specs
+        service._commit(f"Device {existing.hostname}")
+        device = existing
     if data.username or (
         container.settings.network_driver != "offline" and not os.environ.get("PYTEST_CURRENT_TEST")
     ):
         bind_device_to_sot(data, device, container)
         device.status = DeviceStatus.IN_SYNC
         service._session.commit()
+    sync_access_registry(service._session, container.settings)
     return service.get(device.id)
 
 
@@ -124,10 +161,17 @@ def update_device(
 def delete_device(
     device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> Response:
+    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+
     device = service.get(device_id)
     hostname = device.hostname
     service.delete(device_id)
-    remove_device_from_sot(hostname, container.settings.intent_repo_path)
+    remove_device_from_sot(
+        hostname,
+        container.settings.intent_repo_path,
+        container.settings.offline_lab_path,
+    )
+    sync_access_registry(service._session, container.settings)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -167,6 +211,8 @@ def device_emergency_action(
 def sync_inventory(
     service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> InventorySyncResult:
+    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+
     settings = container.settings
     if settings.netbox_url and settings.netbox_token:
         inventory = load_netbox_inventory(
@@ -174,4 +220,6 @@ def sync_inventory(
         )
     else:
         inventory = container.intents.load_inventory()
-    return service.sync_inventory(inventory)
+    res = service.sync_inventory(inventory)
+    sync_access_registry(service._session, settings)
+    return res

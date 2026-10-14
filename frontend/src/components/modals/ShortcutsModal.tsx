@@ -50,7 +50,7 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({ isOpen, onClose,
     {
       role: 'Viewer',
       badge: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
-      desc: isEn ? 'Read-only: CLOS topology, Monaco diff, TimesFM telemetry' : 'Аудит и наблюдение: топология CLOS, Monaco Diff, TimesFM',
+      desc: isEn ? 'Read-only: topology, Monaco diff, telemetry' : 'Аудит и наблюдение: топология, Monaco Diff, телеметрия',
     },
   ];
 

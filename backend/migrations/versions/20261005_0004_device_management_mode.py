@@ -17,29 +17,34 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    existing_columns = {col["name"] for col in sa.inspect(bind).get_columns("devices")}
     with op.batch_alter_table("devices") as batch_op:
-        batch_op.add_column(
-            sa.Column(
-                "management_mode",
-                sa.String(32),
-                nullable=False,
-                server_default="MONITORING_ONLY",
+        if "management_mode" not in existing_columns:
+            batch_op.add_column(
+                sa.Column(
+                    "management_mode",
+                    sa.String(32),
+                    nullable=False,
+                    server_default="MONITORING_ONLY",
+                )
             )
-        )
-        batch_op.add_column(
-            sa.Column(
-                "proxy_jump",
-                sa.String(255),
-                nullable=True,
+        if "proxy_jump" not in existing_columns:
+            batch_op.add_column(
+                sa.Column(
+                    "proxy_jump",
+                    sa.String(255),
+                    nullable=True,
+                )
             )
-        )
-        batch_op.add_column(
-            sa.Column(
-                "hardware_specs",
-                sa.String(2048),
-                nullable=True,
+        if "hardware_specs" not in existing_columns:
+            batch_op.add_column(
+                sa.Column(
+                    "hardware_specs",
+                    sa.String(2048),
+                    nullable=True,
+                )
             )
-        )
 
 
 def downgrade() -> None:

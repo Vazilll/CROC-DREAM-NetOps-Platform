@@ -65,6 +65,35 @@ class _BasePipeline:
         self._session.commit()
         return results
 
+    def _auto_commit_diff_to_git(self, job: Job) -> None:
+        try:
+            from netops.services.git_sot import git_commit_and_push_diff  # noqa: PLC0415
+
+            repo_root = getattr(self._toolchain.intents, "root", None)
+            if repo_root is None:
+                return
+            device_diffs = [
+                {
+                    "hostname": row.hostname,
+                    "remediation_patch": row.remediation_config or "",
+                    "intended_config": row.intended_snapshot.content if row.intended_snapshot else "",
+                }
+                for row in job.targets
+            ]
+            res = git_commit_and_push_diff(
+                repo_root,
+                job_id=str(job.id),
+                job_type=str(getattr(job.type, "value", job.type)),
+                device_diffs=device_diffs,
+            )
+            if res.get("status") != "skipped_pytest":
+                self._recorder.info(
+                    "git-sot",
+                    f"Auto-commit to Git SoT: {res.get('branch', 'main')}@{res.get('commit_short', 'HEAD')} (pushed={res.get('pushed', False)})",
+                )
+        except Exception:
+            pass
+
 
 class DryRunPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
@@ -76,6 +105,7 @@ class DryRunPipeline(_BasePipeline):
             else:
                 row.mark(TargetStatus.SUCCESS)
         self._session.commit()
+        self._auto_commit_diff_to_git(job)
 
 
 # Устройства обновляем по одному; после первой ошибки раскатку останавливаем.
@@ -91,6 +121,8 @@ class DeployPipeline(_BasePipeline):
             if not self._deploy_row(executor, row):
                 failed_on = row.hostname
             self._recorder.progress(index, total)
+        if failed_on is None:
+            self._auto_commit_diff_to_git(job)
 
     def _deploy_row(self, executor: DeploymentExecutor, row: JobTarget) -> bool:
         device = row.device

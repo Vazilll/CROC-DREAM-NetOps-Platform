@@ -57,17 +57,14 @@ os.environ.setdefault(
     "NETOPS_API_TOKENS",
     '{"dev-owner-token": {"username": "owner", "role": "owner"}, "dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}, "dev-jury-token": {"username": "jury", "role": "viewer"}, "croc-admin-token": {"username": "admin", "role": "admin"}, "croc-demo-jury": {"username": "jury", "role": "viewer"}}',
 )
-os.environ.setdefault(
-    "NETOPS_AUTH_PROFILES",
-    '{"spine1_auth": {"username": "admin", "password": "F5ga6jfkig1"}, "spine2_auth": {"username": "admin", "password": "F5ga6jfkig2"}, "leaf1_auth": {"username": "admin", "password": "admin@123"}, "leaf2_auth": {"username": "admin", "password": "admin@123"}, "lab": {"username": "admin", "password": "admin"}}',
-)
-os.environ.setdefault("NETOPS_CLAB_HOST", "5.228.243.54")
-os.environ.setdefault("NETOPS_CLAB_PORT", "221")
-os.environ.setdefault("NETOPS_CLAB_USER", "crocdream")
-os.environ.setdefault("NETOPS_CLAB_KEY_PATH", os.path.expanduser("~/.ssh/id_ed25519"))
-os.environ.setdefault("NETOPS_CLAB_TOPOLOGY_PATH", "/home/crocdream/clab-quickstart/fabric.clab.yaml")
 if is_live:
-    os.environ.setdefault("NETOPS_PROMETHEUS_URL", "http://5.228.243.54:9090")
+    os.environ.setdefault("NETOPS_CLAB_HOST", "5.228.243.54")
+    os.environ.setdefault("NETOPS_CLAB_PORT", "221")
+    os.environ.setdefault("NETOPS_CLAB_USER", "crocdream")
+    os.environ.setdefault("NETOPS_CLAB_KEY_PATH", os.path.expanduser("~/.ssh/id_ed25519"))
+    os.environ.setdefault("NETOPS_CLAB_TOPOLOGY_PATH", "/home/crocdream/clab-quickstart/fabric.clab.yaml")
+    os.environ.setdefault("NETOPS_PROMETHEUS_URL", "http://127.0.0.1:9090")
+
 
 
 import uvicorn
@@ -210,22 +207,26 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
         # RUNNING/PENDING от прошлого запуска, уже мертво и блокирует планировщик.
         try:
             _cleanup(timedelta(0))
-            with session_factory() as session:
-                from netops.telemetry import collector  # noqa: PLC0415
+            if settings.apply_runtime_overlay().get("bootstrap_completed"):
+                with session_factory() as session:
+                    from netops.telemetry import collector  # noqa: PLC0415
 
-                toolchain = build_toolchain(settings)
-                samples = collector.collect(session, toolchain)
-                collector.store(
-                    session,
-                    samples,
-                    retention=timedelta(days=settings.metrics_retention_days),
-                )
+                    toolchain = build_toolchain(settings)
+                    samples = collector.collect(session, toolchain)
+                    collector.store(
+                        session,
+                        samples,
+                        retention=timedelta(days=settings.metrics_retention_days),
+                    )
         except Exception:
             logger.exception("Beat: startup cleanup/metrics failed")
         time.sleep(first_delay)
         while True:
             try:
                 _cleanup(timedelta(seconds=settings.job_timeout_seconds))
+                if not settings.apply_runtime_overlay().get("bootstrap_completed"):
+                    time.sleep(5.0)
+                    continue
                 with session_factory() as session:
                     try:
                         from netops.telemetry import collector  # noqa: PLC0415
@@ -266,35 +267,47 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
         first_delay,
     )
 
-    if settings.telegram_bot_token:
-        from netops.telemetry.bot import build_bot  # noqa: PLC0415
+    from netops.telemetry.bot import build_bot  # noqa: PLC0415
 
-        def _bot_loop() -> None:
-            alert_interval = int(os.environ.get("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "3600"))
-            last_alert_ts = time.monotonic()
+    def _bot_loop() -> None:
+        alert_interval = int(os.environ.get("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "3600"))
+        last_alert_ts = time.monotonic()
+        active_tok = ""
+        bot = None
+        while True:
             try:
-                bot = build_bot(settings, settings.telegram_bot_token.get_secret_value())
-                bot.catch_up()
-                bot.send_startup_audit()
-                logger.info(
-                    "Telegram @Croc_Dream_bot started (chats: %s, verify-code gate: %s, alert interval: %ss)",
-                    bot._chat_ids,
-                    bot._open_registration,
-                    alert_interval,
+                settings.apply_runtime_overlay()
+                cur_tok = (
+                    settings.telegram_bot_token.get_secret_value().strip()
+                    if settings.telegram_bot_token
+                    else ""
                 )
-                while True:
-                    t0 = time.monotonic()
-                    bot.poll_once()
-                    now = time.monotonic()
-                    if now - last_alert_ts >= alert_interval:
-                        bot.send_alerts()
-                        last_alert_ts = now
-                    if now - t0 < 2.0:
-                        time.sleep(2.0)
+                if not cur_tok:
+                    time.sleep(3.0)
+                    continue
+                if cur_tok != active_tok or bot is None:
+                    bot = build_bot(settings, cur_tok)
+                    active_tok = cur_tok
+                    bot.catch_up()
+                    bot.send_startup_audit()
+                    logger.info(
+                        "Telegram @Croc_Dream_bot started dynamically (chats: %s, verify-code gate: %s)",
+                        bot._chat_ids,
+                        bot._open_registration,
+                    )
+                t0 = time.monotonic()
+                bot.poll_once()
+                now = time.monotonic()
+                if now - last_alert_ts >= alert_interval:
+                    bot.send_alerts()
+                    last_alert_ts = now
+                if now - t0 < 2.0:
+                    time.sleep(2.0)
             except Exception:
-                logger.exception("Telegram MetricsBot loop stopped")
+                logger.exception("Telegram MetricsBot loop error, retrying in 5s")
+                time.sleep(5.0)
 
-        threading.Thread(target=_bot_loop, name="netops-telegram-bot", daemon=True).start()
+    threading.Thread(target=_bot_loop, name="netops-telegram-bot", daemon=True).start()
 
 
 def main() -> None:

@@ -1,4 +1,4 @@
-"""Unit tests for TimesFM 3.0 AI Telemetry Guard runtime error detection."""
+"""Unit tests for statistical quantile AI Telemetry Guard runtime error detection."""
 
 from __future__ import annotations
 

@@ -34,9 +34,12 @@ class TelegramApi(Protocol):
     def updates(self, offset: int | None) -> list[dict[str, Any]]: ...
 
 
+_BOT_POLLING_ACTIVE = False
+
+
 # Токен подставляется в URL, поэтому в логи попадают только имена методов.
 class HttpTelegramApi:
-    def __init__(self, token: str, *, poll_timeout: int = 25) -> None:
+    def __init__(self, token: str, *, poll_timeout: int = 2) -> None:
         self._token = token
         self._poll_timeout = poll_timeout
 
@@ -178,7 +181,7 @@ def bind_telegram_chat_user(
     user: User | None = None
     effective_role_label = known.get("role") or bindings.get("role") or "admin"
 
-    if explicit_token:
+    if explicit_token and explicit_token not in ("claim_owner", "recover_owner"):
         tok = explicit_token.strip()
         user = session.scalar(
             select(User).where(
@@ -191,6 +194,30 @@ def bind_telegram_chat_user(
             user.verification_code = None
             user.verification_expires_at = None
             effective_role_label = user.role.value
+
+    owner_user = session.scalar(select(User).where(User.username == "owner"))
+    if user is None and (
+        explicit_token in ("claim_owner", "recover_owner")
+        or owner_user is None
+        or not owner_user.telegram_chat_id
+        or owner_user.telegram_chat_id == str(chat_id)
+    ):
+        if owner_user is None:
+            owner_tok = f"crk_owner_{chat_id}"
+            owner_user = User(
+                username="owner",
+                role=UserRole.ADMIN,
+                token_sha256=hash_token(owner_tok),
+                is_active=True,
+                telegram_chat_id=str(chat_id),
+                telegram_username=tg_handle or None,
+                telegram_verified_at=utcnow(),
+            )
+            session.add(owner_user)
+            session.commit()
+            save_user_token("owner", owner_tok, settings)
+        user = owner_user
+        effective_role_label = "owner"
 
     if user is None:
         user = session.scalar(select(User).where(User.telegram_chat_id == str(chat_id)))
@@ -240,8 +267,16 @@ def bind_telegram_chat_user(
     session.commit()
 
     token = ensure_user_token(session, user, settings)
-    role_badge = "owner" if chat_id == 7325469808 else user.role.value
+    role_badge = "owner" if (user.username == "owner" or chat_id == 7325469808) else user.role.value
     if settings is not None:
+        if user.username == "owner":
+            settings.save_runtime_overlay(
+                {
+                    "telegram_owner_linked": True,
+                    "telegram_chat_id": str(chat_id),
+                    "telegram_verified_username": tg_handle or disp_name,
+                }
+            )
         save_telegram_binding(
             chat_id,
             {
@@ -371,8 +406,6 @@ class MetricsBot:
                 from netops.models import User  # noqa: PLC0415
                 from netops.services.notifier import sync_access_registry  # noqa: PLC0415
 
-                for cid in self._chat_ids:
-                    bind_telegram_chat_user(session, cid, settings=self._settings)
                 for u in session.scalars(select(User)).all():
                     ensure_user_token(session, u, self._settings)
                 sync_access_registry(session, self._settings)
@@ -424,15 +457,41 @@ class MetricsBot:
                 severity="info",
                 settings=self._settings,
             )
-            for cid in self._chat_ids:
+            for cid in self._owner_chat_ids(session):
                 self._send(cid, report, reply_markup={"inline_keyboard": _menu_keyboard()})
             return report
 
+    def _owner_chat_ids(self, session: Session) -> list[int]:
+        from netops.models import User  # noqa: PLC0415
+
+        owner = session.scalar(select(User).where(User.username == "owner"))
+        if (
+            owner is not None
+            and owner.telegram_chat_id
+            and str(owner.telegram_chat_id).lstrip("-").isdigit()
+        ):
+            return [int(owner.telegram_chat_id)]
+        if (
+            self._settings is not None
+            and self._settings.telegram_chat_id
+            and str(self._settings.telegram_chat_id).lstrip("-").isdigit()
+        ):
+            return [int(self._settings.telegram_chat_id)]
+        return list(self._chat_ids[:1])
+
     def poll_once(self) -> None:
+        global _BOT_POLLING_ACTIVE
+        _BOT_POLLING_ACTIVE = True
         for update in self._api.updates(self._state.last_update_id):
             self._state.last_update_id = int(update["update_id"]) + 1
             if "callback_query" in update:
                 self._handle_callback(update["callback_query"] or {})
+            elif "my_chat_member" in update:
+                cm = dict(update["my_chat_member"] or {})
+                new_status = str((cm.get("new_chat_member") or {}).get("status") or "")
+                if new_status in ("member", "administrator", "creator"):
+                    cm.setdefault("text", "/start")
+                    self._handle(cm)
             else:
                 self._handle(update.get("message") or {})
 
@@ -459,6 +518,19 @@ class MetricsBot:
         if not isinstance(chat_id, int):
             return False
         if chat_id in self._chat_ids:
+            if self._settings is not None:
+                from netops.models import User  # noqa: PLC0415
+
+                with self._session_factory() as session:
+                    owner_u = session.scalar(select(User).where(User.username == "owner"))
+                    if owner_u is None or not owner_u.telegram_chat_id:
+                        bind_telegram_chat_user(
+                            session,
+                            chat_id,
+                            tg_username=(from_user or {}).get("username"),
+                            first_name=(from_user or {}).get("first_name"),
+                            settings=self._settings,
+                        )
             return True
         if not self._open_registration:
             logger.warning(
@@ -485,6 +557,15 @@ class MetricsBot:
             matched_user = session.scalar(
                 select(User).where(User.telegram_chat_id == str(chat_id))
             )
+            owner_u = session.scalar(select(User).where(User.username == "owner"))
+            if matched_user is None and (owner_u is None or not owner_u.telegram_chat_id):
+                matched_user, _, _ = bind_telegram_chat_user(
+                    session,
+                    chat_id,
+                    tg_username=tg_user,
+                    first_name=first_name,
+                    settings=self._settings,
+                )
             if matched_user is None and chat_id in KNOWN_TELEGRAM_PROFILES:
                 matched_user, _, _ = bind_telegram_chat_user(
                     session,
@@ -531,7 +612,7 @@ class MetricsBot:
                     f"3. Отправьте полученный 6-значный код сюда:\n"
                     f"/verify <КОД>",
                 )
-                for owner_cid in self._chat_ids:
+                for owner_cid in self._owner_chat_ids(session):
                     self._send(
                         owner_cid,
                         f"[SECURITY ALERT] Попытка обращения к боту с неверифицированного Telegram:\n"
@@ -560,7 +641,7 @@ class MetricsBot:
                 severity="info",
                 settings=self._settings,
             )
-            for owner_cid in self._chat_ids:
+            for owner_cid in self._owner_chat_ids(session):
                 if owner_cid != chat_id:
                     self._send(
                         owner_cid,
@@ -661,156 +742,42 @@ class MetricsBot:
         chat_id: int | None = None,
         from_user: dict[str, Any] | None = None,
     ) -> str:
-        role = self._caller_role(session, chat_id)
-        admin_only = ("/block", "/unblock", "/unbind", "/role", "/ttl", "/cleanup", "/freeze")
-        operator_plus = ("/collect", "/scan")
-        if command in admin_only and role != "admin":
-            from netops.services.notifier import record_security_event  # noqa: PLC0415
-
-            record_security_event(
-                "RBAC_TELEGRAM_DENIED",
-                f"Отказ в доступе к команде {command} для TG чата {chat_id} (роль: {role})",
-                telegram_chat_id=chat_id,
-                severity="warning",
-                settings=self._settings,
-            )
-            return f"⛔ Отказ в доступе: команда {command} требует прав ADMIN (ваша роль: {role.upper()})."
-        if command in operator_plus and role not in ("admin", "operator"):
-            return f"⛔ Отказ в доступе: команда {command} требует прав OPERATOR или ADMIN (ваша роль: {role.upper()})."
-
-        if command in ("/verify", "/start", "/auth") and (self._settings is not None or args):
-            explicit_tok = args[0] if args else None
-            if command == "/verify" and not explicit_tok:
-                return (
-                    "Укажите 6-значный код верификации из веб-панели:\n"
-                    "/verify <КОД>\n"
-                    "Код создаётся в веб-интерфейсе CROC DREAM NetOps -> «Доступ и Безопасность» -> «Код верификации TG»."
-                )
-            is_recover = explicit_tok == "recover_owner"
-            if explicit_tok in ("claim_owner", "recover_owner"):
-                explicit_tok = None
-            user, token, role_badge = bind_telegram_chat_user(
-                session,
-                chat_id or 0,
-                tg_username=(from_user or {}).get("username"),
-                first_name=(from_user or {}).get("first_name"),
-                explicit_token=explicit_tok,
-                settings=self._settings,
-            )
-            if is_recover:
-                user.bound_client_id = None
-                user.bound_ip = None
-                user.bound_user_agent = None
-                user.bound_at = None
-                session.commit()
-            if self._settings is not None and chat_id:
-                self._settings.save_runtime_overlay(
-                    {
-                        "telegram_chat_id": str(chat_id),
-                        "telegram_verified_username": (from_user or {}).get("username") or user.username,
-                    }
-                )
-            mode = (
-                "ONLINE (Scrapli SSH -> 5.228.243.54:2211..2222)"
-                if (self._settings and self._settings.network_driver == "scrapli")
-                else "OFFLINE (эмуляция стенда)"
-            )
-            ttl_str = (
-                f"Временный до {user.expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
-                if user.expires_at
-                else "НАВСЕГДА (бессрочный)"
-            )
-            recover_banner = (
-                "🔓 Старая привязка ПК сброшена! Перейдите по ссылке ниже с нового компьютера, чтобы привязать его:\n"
-                if is_recover
-                else ""
-            )
-            return (
-                f"CROC DREAM NetOps Bot (@Croc_Dream_bot) — Верификация подтверждена\n"
-                f"{recover_banner}"
-                f"Контур стенда: {mode}\n"
-                f"Участник: ID #{user.id} {user.username} [{role_badge.upper()}]\n"
-                f"Telegram ID: {chat_id} (@{user.telegram_username or 'verified'})\n"
-                f"Привязанная система: {user.allowed_system or 'Вся фабрика CLOS'}\n"
-                f"Привязанный токен: {token}\n"
-                f"Срок действия токена: {ttl_str}\n"
-                f"Веб-панель (публичная): http://5.228.243.54:5173/?token={token}\n"
-                f"Веб-панель (локальная): http://127.0.0.1:5173/?token={token}\n\n"
-                + _overview_text(session, self._settings)
-            )
+        if command in ("/start", "/verify"):
+            return _answer_verify_or_start(session, command, args, chat_id, from_user, self._settings)
         if command == "/recover":
-            user, token, role_badge = bind_telegram_chat_user(
-                session,
-                chat_id or 0,
-                tg_username=(from_user or {}).get("username"),
-                first_name=(from_user or {}).get("first_name"),
-                settings=self._settings,
-            )
-            user.bound_client_id = None
-            user.bound_ip = None
-            user.bound_user_agent = None
-            user.bound_at = None
-            session.commit()
-            return (
-                f"🔓 Привязка старого ПК для {user.username} [{role_badge.upper()}] успешно сброшена!\n"
-                f"Откройте пульт на новом устройстве по вашей персональной ссылке:\n"
-                f"• Публичная: http://5.228.243.54:5173/?token={token}\n"
-                f"• Локальная: http://127.0.0.1:5173/?token={token}\n"
-                f"• Резервный ключ: {token}"
-            )
-        if command == "/overview":
-            return _overview_text(session, self._settings)
-        if command == "/status":
-            return _status_text(session, self._settings)
-        if command == "/drift":
-            return _drift_text(session)
-        if command == "/jobs":
-            return _jobs_text(session)
-        if command == "/metrics":
-            return _metrics_text(session)
-        if command in ("/ai", "/ask", "/copilot"):
-            return _ai_copilot_text(session, args, settings=self._settings)
-        if command == "/collect":
-            return _collect_now_text(session, self._settings)
-        if command == "/scan":
-            return _scan_now_text(session, self._session_factory, self._settings)
-        if command == "/freeze":
-            return _freeze_text(args, self._settings)
-        if command in ("/users", "/tokens"):
-            return _users_text(session, self._settings)
-        if command == "/cleanup":
-            return _cleanup_duplicates_text(session, self._settings)
-        if command == "/token":
-            return _token_text(session, args, settings=self._settings)
-        if command == "/ttl":
-            return _set_user_ttl_text(session, args, settings=self._settings)
-        if command == "/security":
-            return _security_text(self._settings)
-        if command in ("/block", "/unblock"):
-            return _set_user_active_text(session, args, active=(command == "/unblock"))
-        if command == "/unbind":
-            return _unbind_user_text(session, args)
-        if command == "/role":
-            return _set_user_role_text(session, args)
-        return (
-            "Метрики, AI-Копилот, реестр и безопасность NetOps (@Croc_Dream_bot):\n"
-            "/ai [вопрос] — ИИ-аудит фабрики, прогноз TimesFM 3.0 и ответ на любой вопрос\n"
-            "/collect — принудительно снять свежие метрики с роутеров по SSH\n"
-            "/scan — запустить внеочередное сканирование дрейфа (Drift Scan)\n"
-            "/freeze [on|off] — аварийный Kill Switch (блокировка деплоев на фабрике)\n"
-            "/verify <код> — привязать Telegram к системе по 6-значному коду из фронтенда\n"
-            "/overview — наглядная сводка: что и где сейчас происходит на стенде\n"
-            "/status — устройства, IP:порт, роли и статусы синхронизации\n"
-            "/drift — где найден дрейф и какие именно строки расходятся\n"
-            "/jobs — последние задачи пайплайна и целевые узлы\n"
-            "/metrics — живая телеметрия CPU, RAM, портов, BGP и пингов\n"
-            "/users — единый реестр участников (ID, TG ID, системы, сроки токенов)\n"
-            "/token <имя> — открыть персональную карточку и пульт управления участником\n"
-            "/ttl <имя> <минуты|forever> — задать время жизни токена или навсегда\n"
-            "/security — журнал событий безопасности и заблокированных атак\n"
-            "/block <имя> / /unblock <имя> — ограничить или разблокировать доступ\n"
-            "/role <имя> <viewer|operator|admin> — сменить роль\n"
-            "/unbind <имя> — отвязать устройство от ссылки"
+            return _answer_recover(session, chat_id, from_user, self._settings)
+        if command == "/help":
+            return _BOT_HELP_TEXT
+
+        simple_routes = {
+            "/overview": lambda: _overview_text(session, self._settings),
+            "/status": lambda: _status_text(session, self._settings),
+            "/drift": lambda: _drift_text(session),
+            "/jobs": lambda: _jobs_text(session),
+            "/metrics": lambda: _metrics_text(session),
+            "/users": lambda: _users_text(session, self._settings),
+            "/tokens": lambda: _users_text(session, self._settings),
+            "/cleanup": lambda: _cleanup_duplicates_text(session, self._settings),
+            "/token": lambda: _token_text(session, args, settings=self._settings),
+            "/ttl": lambda: _set_user_ttl_text(session, args, settings=self._settings),
+            "/security": lambda: _security_text(self._settings),
+            "/block": lambda: _set_user_active_text(session, args, active=False),
+            "/unblock": lambda: _set_user_active_text(session, args, active=True),
+            "/unbind": lambda: _unbind_user_text(session, args),
+            "/role": lambda: _set_user_role_text(session, args),
+            "/collect": lambda: _collect_now_text(session, self._settings),
+            "/scan": lambda: _scan_now_text(session, self._sessions, self._settings),
+            "/freeze": lambda: _freeze_text(args, self._settings),
+            "/ai": lambda: _ai_copilot_text(session, args, settings=self._settings),
+            "/ask": lambda: _ai_copilot_text(session, args, settings=self._settings),
+        }
+        handler = simple_routes.get(command)
+        if handler is not None:
+            return handler()
+        if not command.startswith("/"):
+            return _ai_copilot_text(session, [command, *args], settings=self._settings)
+        return _ai_copilot_text(
+            session, [command.lstrip("/"), *args], settings=self._settings
         )
 
     def _new_alerts(self, session: Session) -> list[str]:
@@ -849,6 +816,124 @@ class MetricsBot:
     def _broadcast(self, text: str) -> None:
         for chat_id in self._chat_ids:
             self._send(chat_id, text)
+
+
+_BOT_HELP_TEXT = (
+    "Метрики, AI-Копилот, реестр и безопасность NetOps (@Croc_Dream_bot):\n"
+    "/ai [вопрос] — ИИ-аудит фабрики, прогноз нагрузки и ответ на любой вопрос\n"
+    "/collect — принудительно снять свежие метрики с роутеров по SSH\n"
+    "/scan — запустить внеочередное сканирование дрейфа (Drift Scan)\n"
+    "/freeze [on|off] — аварийный Kill Switch (блокировка деплоев на фабрике)\n"
+    "/verify <код> — привязать Telegram к системе по 6-значному коду из фронтенда\n"
+    "/overview — наглядная сводка: что и где сейчас происходит на стенде\n"
+    "/status — устройства, IP:порт, роли и статусы синхронизации\n"
+    "/drift — где найден дрейф и какие именно строки расходятся\n"
+    "/jobs — последние задачи пайплайна и целевые узлы\n"
+    "/metrics — живая телеметрия CPU, RAM, портов, BGP и пингов\n"
+    "/users — единый реестр участников (ID, TG ID, системы, сроки токенов)\n"
+    "/token <имя> — открыть персональную карточку и пульт управления участником\n"
+    "/ttl <имя> <минуты|forever> — задать время жизни токена или навсегда\n"
+    "/security — журнал событий безопасности и заблокированных атак\n"
+    "/block <имя> / /unblock <имя> — ограничить или разблокировать доступ\n"
+    "/role <имя> <viewer|operator|admin> — сменить роль\n"
+    "/unbind <имя> — отвязать устройство от ссылки"
+)
+
+
+def _answer_verify_or_start(
+    session: Session,
+    command: str,
+    args: Sequence[str],
+    chat_id: int | None,
+    from_user: dict[str, Any] | None,
+    settings: Any,
+) -> str:
+    explicit_tok = args[0] if args else None
+    if command == "/verify" and not explicit_tok:
+        return (
+            "Укажите 6-значный код верификации из веб-панели:\n"
+            "/verify <КОД>\n"
+            "Код создаётся в веб-интерфейсе CROC DREAM NetOps -> «Доступ и Безопасность» -> «Код верификации TG»."
+        )
+    is_recover = explicit_tok == "recover_owner"
+    if explicit_tok in ("claim_owner", "recover_owner"):
+        explicit_tok = None
+    user, token, role_badge = bind_telegram_chat_user(
+        session,
+        chat_id or 0,
+        tg_username=(from_user or {}).get("username"),
+        first_name=(from_user or {}).get("first_name"),
+        explicit_token=explicit_tok,
+        settings=settings,
+    )
+    if is_recover:
+        user.bound_client_id = None
+        user.bound_ip = None
+        user.bound_user_agent = None
+        user.bound_at = None
+        session.commit()
+    if settings is not None and chat_id:
+        settings.save_runtime_overlay(
+            {
+                "telegram_chat_id": str(chat_id),
+                "telegram_verified_username": (from_user or {}).get("username") or user.username,
+            }
+        )
+    mode = (
+        "ONLINE (Scrapli SSH -> 5.228.243.54:2211..2222)"
+        if (settings and settings.network_driver == "scrapli")
+        else "OFFLINE (эмуляция стенда)"
+    )
+    ttl_str = (
+        f"Временный до {user.expires_at.strftime('%Y-%m-%d %H:%M UTC')}"
+        if user.expires_at
+        else "НАВСЕГДА (бессрочный)"
+    )
+    recover_banner = (
+        "🔓 Старая привязка ПК сброшена! Перейдите по ссылке ниже с нового компьютера, чтобы привязать его:\n"
+        if is_recover
+        else ""
+    )
+    return (
+        f"CROC DREAM NetOps Bot (@Croc_Dream_bot) — Верификация подтверждена\n"
+        f"{recover_banner}"
+        f"Контур стенда: {mode}\n"
+        f"Участник: ID #{user.id} {user.username} [{role_badge.upper()}]\n"
+        f"Telegram ID: {chat_id} (@{user.telegram_username or 'verified'})\n"
+        f"Привязанная система: {user.allowed_system or 'Вся фабрика CLOS'}\n"
+        f"Привязанный токен: {token}\n"
+        f"Срок действия токена: {ttl_str}\n"
+        f"Веб-панель (публичная): http://5.228.243.54:5173/?token={token}\n"
+        f"Веб-панель (локальная): http://127.0.0.1:5173/?token={token}\n\n"
+        + _overview_text(session, settings)
+    )
+
+
+def _answer_recover(
+    session: Session,
+    chat_id: int | None,
+    from_user: dict[str, Any] | None,
+    settings: Any,
+) -> str:
+    user, token, role_badge = bind_telegram_chat_user(
+        session,
+        chat_id or 0,
+        tg_username=(from_user or {}).get("username"),
+        first_name=(from_user or {}).get("first_name"),
+        settings=settings,
+    )
+    user.bound_client_id = None
+    user.bound_ip = None
+    user.bound_user_agent = None
+    user.bound_at = None
+    session.commit()
+    return (
+        f"🔓 Привязка старого ПК для {user.username} [{role_badge.upper()}] успешно сброшена!\n"
+        f"Откройте пульт на новом устройстве по вашей персональной ссылке:\n"
+        f"• Публичная: http://5.228.243.54:5173/?token={token}\n"
+        f"• Локальная: http://127.0.0.1:5173/?token={token}\n"
+        f"• Резервный ключ: {token}"
+    )
 
 
 def _max_drift_id(session: Session) -> int:
@@ -1407,7 +1492,7 @@ def _ai_copilot_text(
         status_tag = "OK" if (v_cpu.healthy and v_upl.healthy and ok_pre) else "ALERT"
         verdicts.append(
             f"• {d.hostname} [{d.status.value}]: Guard={status_tag} | "
-            f"CPU={v_cpu.observed_value:g}% (коридор TimesFM [{v_cpu.expected_range[0]:g}..{v_cpu.expected_range[1]:g}%]) | "
+            f"CPU={v_cpu.observed_value:g}% (коридор [{v_cpu.expected_range[0]:g}..{v_cpu.expected_range[1]:g}%]) | "
             f"{pre_msg}"
         )
         if not v_cpu.healthy and v_cpu.problem:
@@ -1420,7 +1505,7 @@ def _ai_copilot_text(
     context_block = (
         f"Режим фабрики: {freeze_note}\n"
         f"Сводка метрик:\n" + "\n".join(summary_lines) + "\n\n"
-        f"Вердикты AI Telemetry Guard (Google TimesFM 3.0):\n" + "\n".join(verdicts)
+        f"Вердикты мониторинга телеметрии:\n" + "\n".join(verdicts)
     )
 
     sys_prompt = (

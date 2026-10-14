@@ -123,7 +123,7 @@ TOOLS = [
     },
     {
         "name": "netops_get_telemetry_forecast",
-        "description": "Fetch real-time CPU/RAM/BGP telemetry and predictive TimesFM forecast for an intent device.",
+        "description": "Fetch real-time CPU/RAM/BGP telemetry and predictive statistical forecast for an intent device.",
         "inputSchema": {
             "type": "object",
             "properties": {

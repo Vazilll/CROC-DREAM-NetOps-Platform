@@ -19,13 +19,6 @@ import {
 import { api, getErrorMessage } from '../../api';
 import type { EmergencyAuditLog } from '../../api';
 
-const DEFAULT_DEVICES = [
-  { hostname: 'spine-1.croc.lab', platform: 'cisco_iosxe', label: 'spine-1.croc.lab (cisco_iosxe)' },
-  { hostname: 'spine-2.croc.lab', platform: 'arista_eos', label: 'spine-2.croc.lab (arista_eos)' },
-  { hostname: 'leaf-1.croc.lab', platform: 'huawei_vrp', label: 'leaf-1.croc.lab (huawei_vrp)' },
-  { hostname: 'leaf-2.croc.lab', platform: 'huawei_vrp', label: 'leaf-2.croc.lab (huawei_vrp)' },
-];
-
 const PRESETS: Record<string, string[]> = {
   arista_eos: ['show ip bgp summary', 'show ip route', 'show interfaces status', 'show running-config'],
   cisco_iosxe: ['show ip bgp summary', 'show ip interface brief', 'show ip route', 'show version'],
@@ -38,8 +31,8 @@ interface EmergencyHubProps {
 }
 
 export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitchRole }) => {
-  const [devices, setDevices] = useState<Array<{ hostname: string; platform: string; label: string }>>(DEFAULT_DEVICES);
-  const [selectedDevice, setSelectedDevice] = useState<string>(DEFAULT_DEVICES[0].hostname);
+  const [devices, setDevices] = useState<Array<{ hostname: string; platform: string; label: string }>>([]);
+  const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [command, setCommand] = useState<string>('show ip bgp summary');
   const [cliOutput, setCliOutput] = useState<string>('// Готов к приему команд оператора...');
   const [isExecutingCmd, setIsExecutingCmd] = useState<boolean>(false);
@@ -78,15 +71,16 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     api
       .getDevices()
       .then((list) => {
-        if (active && list.length > 0) {
-          const mapped = list.map((d) => ({
-            hostname: d.hostname,
-            platform: d.platform,
-            label: `${d.hostname} (${d.platform})`,
-          }));
-          setDevices(mapped);
-          setSelectedDevice((prev) => (mapped.some((m) => m.hostname === prev) ? prev : mapped[0].hostname));
-        }
+        if (!active) return;
+        const mapped = list.map((d) => ({
+          hostname: d.hostname,
+          platform: d.platform,
+          label: `${d.hostname} (${d.platform})`,
+        }));
+        setDevices(mapped);
+        setSelectedDevice((prev) =>
+          mapped.length === 0 ? '' : mapped.some((m) => m.hostname === prev) ? prev : mapped[0].hostname
+        );
       })
       .catch(() => {});
     api
@@ -106,10 +100,10 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   }, []);
 
   const activeDeviceObj = devices.find((d) => d.hostname === selectedDevice) || devices[0];
-  const activePresets = PRESETS[activeDeviceObj.platform] || PRESETS.arista_eos;
+  const activePresets = (activeDeviceObj && PRESETS[activeDeviceObj.platform]) || PRESETS.arista_eos;
 
   const handleRunCommand = async (cmdToRun = command) => {
-    if (!cmdToRun.trim()) return;
+    if (!cmdToRun.trim() || !selectedDevice) return;
     setIsExecutingCmd(true);
     setCliOutput((prev) => `${prev}\n\n$ [${selectedDevice}] # ${cmdToRun}\nВыполнение...`);
     try {
@@ -124,7 +118,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   };
 
   const handleApplyPatch = async () => {
-    if (!patchText.trim()) return;
+    if (!patchText.trim() || !selectedDevice) return;
     setIsApplyingPatch(true);
     setPatchResult(null);
     try {
@@ -279,11 +273,17 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-mono bg-white/[0.05] border border-white/10 text-white focus:outline-none focus:border-cyan-500"
             >
-              {devices.map((d) => (
-                <option key={d.hostname} value={d.hostname} className="bg-slate-900 text-white">
-                  {d.label}
+              {devices.length === 0 ? (
+                <option value="" className="bg-slate-900 text-white">
+                  Нет подключенных устройств
                 </option>
-              ))}
+              ) : (
+                devices.map((d) => (
+                  <option key={d.hostname} value={d.hostname} className="bg-slate-900 text-white">
+                    {d.label}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 

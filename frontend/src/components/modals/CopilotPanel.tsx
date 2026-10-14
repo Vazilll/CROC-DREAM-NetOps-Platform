@@ -184,13 +184,13 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
               <p className="text-slate-600 dark:text-zinc-400 leading-relaxed">
                 Contextual AI assistant for the CLOS fabric. Analyzes current screen (
                 <span className="text-indigo-600 dark:text-cyan-300 font-mono font-semibold">{activeScreen}</span>), Git SoT state,
-                drift, and TimesFM ML forecasts.
+                drift, and telemetry forecasts.
               </p>
             ) : (
               <p className="text-slate-600 dark:text-zinc-400 leading-relaxed">
                 Контекстный AI-ассистент фабрики CLOS. Анализирует текущий экран (
                 <span className="text-indigo-600 dark:text-cyan-300 font-mono font-semibold">{activeScreen}</span>), состояние Git SoT,
-                дрейф и ML-прогнозы TimesFM.
+                дрейф и прогнозы телеметрии.
               </p>
             )}
             <div className="space-y-1.5">

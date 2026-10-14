@@ -171,7 +171,24 @@ def _sync_http_request(
 def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]]:
     """Configured providers in cascade order: (name, base_url, token, model, timeout)."""
     candidates: list[tuple[str, str, str, str, float]] = []
-    if settings.ollama_url:
+    seen_urls: set[str] = set()
+    for idx, entry in enumerate(getattr(settings, "llm_cascade", None) or []):
+        if not isinstance(entry, dict):
+            continue
+        base_url = str(entry.get("base_url") or "").strip()
+        model_name = str(entry.get("model") or "").strip()
+        api_key = str(entry.get("api_key") or entry.get("token") or "ollama").strip()
+        name = str(entry.get("name") or f"Provider-{idx + 1}").strip()
+        if not base_url or not model_name:
+            continue
+        try:
+            timeout = float(entry.get("timeout_seconds") or 2.5)
+        except (TypeError, ValueError):
+            timeout = 2.5
+        candidates.append((name, base_url, api_key, model_name, max(timeout, 1.0)))
+        seen_urls.add(f"{base_url}:{model_name}")
+
+    if settings.ollama_url and f"{settings.ollama_url}:{settings.ollama_model}" not in seen_urls:
         candidates.append((
             "Local-Ollama",
             settings.ollama_url,
@@ -179,7 +196,7 @@ def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]
             settings.ollama_model,
             settings.ollama_timeout_seconds,
         ))
-    if settings.groq_api_key:
+    if settings.groq_api_key and f"{settings.groq_base_url}:{settings.groq_model}" not in seen_urls:
         candidates.append((
             "Groq",
             settings.groq_base_url,
@@ -187,7 +204,7 @@ def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]
             settings.groq_model,
             max(settings.groq_timeout_seconds, 3.0),
         ))
-    if settings.gemini_api_key:
+    if settings.gemini_api_key and f"{settings.gemini_base_url}:{settings.gemini_model}" not in seen_urls:
         candidates.append((
             "Google-Gemini",
             settings.gemini_base_url,
@@ -195,7 +212,7 @@ def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]
             settings.gemini_model,
             max(settings.gemini_timeout_seconds, 10.0),
         ))
-    if settings.llm_api_key:
+    if settings.llm_api_key and f"{settings.llm_base_url}:{settings.llm_model}" not in seen_urls:
         candidates.append((
             "Team-MiMo",
             settings.llm_base_url,

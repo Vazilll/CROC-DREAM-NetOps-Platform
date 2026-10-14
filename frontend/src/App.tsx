@@ -146,6 +146,9 @@ export function App() {
         if (st && st.bootstrap_completed === false) {
           localStorage.removeItem('netops_onboarding_done');
           setWelcomeModalOpen(true);
+        } else if (st && st.bootstrap_completed && st.caller_is_bound_owner) {
+          localStorage.setItem('netops_onboarding_done', 'true');
+          setWelcomeModalOpen(false);
         }
       })
       .catch(() => {});
@@ -248,9 +251,11 @@ export function App() {
     try {
       const data = await api.getJobs();
       setJobs((prev) => (areJobsEqual(prev, data) ? prev : data));
-      if (data.length > 0) {
-        setSelectedJobId((current) => current || data[0].id);
-      }
+      setSelectedJobId((current) => {
+        if (current && data.some((j) => j.id === current)) return current;
+        const diffJob = data.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
+        return diffJob?.id ?? data[0]?.id ?? null;
+      });
     } catch (err: unknown) {
       console.error('Failed to load jobs', err);
     }
@@ -292,9 +297,11 @@ export function App() {
         if (!active) return;
         setDevices((prev) => (areDevicesEqual(prev, devs) ? prev : devs));
         setJobs((prev) => (areJobsEqual(prev, jbs) ? prev : jbs));
-        if (jbs.length > 0) {
-          setSelectedJobId((current) => current || jbs[0].id);
-        }
+        setSelectedJobId((current) => {
+          if (current && jbs.some((j) => j.id === current)) return current;
+          const diffJob = jbs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
+          return diffJob?.id ?? jbs[0]?.id ?? null;
+        });
         setApiHealthy(true);
       } catch (err: unknown) {
         if (!active) return;
@@ -417,14 +424,14 @@ export function App() {
     try {
       await api.deleteDevice(id);
       showToast(locale === 'en' ? 'Device deleted successfully' : 'Устройство успешно удалено', 'success');
-      await fetchDevices();
+      await Promise.all([fetchDevices(), fetchJobs()]);
       if (returnToList) {
         setActiveTab('devices');
       }
     } catch (err: unknown) {
       showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${getErrorMessage(err)}`, 'error');
     }
-  }, [fetchDevices, locale, showToast]);
+  }, [fetchDevices, fetchJobs, locale, showToast]);
 
   const handleBackFromDevice = useCallback(() => {
     setActiveTab('devices');

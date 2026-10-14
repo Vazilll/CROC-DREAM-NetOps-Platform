@@ -314,7 +314,7 @@ def generate_fallback_action(
 @router.get(
     "/devices/{device_id}/forecast",
     response_model=ForecastRead,
-    summary="Metric history and TimesFM forecast of a device",
+    summary="Metric history and statistical telemetry forecast of a device",
 )
 async def device_forecast(
     device_id: int,
@@ -331,6 +331,38 @@ async def device_forecast(
         device.id,
         device.hostname,
         str(device.role),
+        metric,
+        horizon,
+        session_factory=container.session_factory,
+    )
+
+
+@router.get(
+    "/insights/forecast/{hostname}",
+    response_model=ForecastRead,
+    summary="Metric history and statistical telemetry forecast of a device by hostname",
+)
+async def device_forecast_by_hostname(
+    hostname: str,
+    service: DeviceServiceDep,
+    container: ContainerDep,
+    _: Viewer,
+    metric: Metric = "uplink_util_pct",
+    horizon: Horizon = 72,
+) -> ForecastRead:
+    dev_obj = (
+        service.get(int(hostname))
+        if hostname.isdigit()
+        else next((d for d in service.list_devices(limit=500) if d.hostname == hostname), None)
+    )
+    if dev_obj is None:
+        raise HTTPException(status_code=404, detail=f"Device '{hostname}' not found")
+    return await asyncio.to_thread(
+        build_forecast,
+        container.settings,
+        dev_obj.id,
+        dev_obj.hostname,
+        str(dev_obj.role),
         metric,
         horizon,
         session_factory=container.session_factory,
@@ -442,7 +474,7 @@ class AiGuardResponse(BaseModel):
 @router.get(
     "/ai-guard/check/{device_id}",
     response_model=AiGuardResponse,
-    summary="Runtime error & anomaly detection via TimesFM 3.0",
+    summary="Runtime error & anomaly detection via statistical quantile guard",
 )
 @router.get("/insights/ai-guard/check/{device_id}", response_model=AiGuardResponse, include_in_schema=False)
 async def ai_guard_check_device(

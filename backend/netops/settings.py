@@ -64,8 +64,8 @@ class Settings(BaseSettings):
             "lab": AuthProfile(username="admin", password=SecretStr("admin")),
             "spine1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
             "spine2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
-            "leaf1_auth": AuthProfile(username="admin", password=SecretStr("Huawei@123")),
-            "leaf2_auth": AuthProfile(username="admin", password=SecretStr("Huawei@123")),
+            "leaf1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
+            "leaf2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
         }
     )
 
@@ -93,9 +93,11 @@ class Settings(BaseSettings):
     llm_model: str = "MiMo-V2.6-Flash"
     llm_timeout_seconds: float = 2.0
 
-    # Time-series forecasting: TimesFM runs as a separate process (backend/tools/timesfm_server.py)
-    # so torch stays out of the API dependencies. Empty URL = statistical fallback only.
-    forecast_url: str = "http://127.0.0.1:8100/forecast"
+    # Custom dynamic LLM cascade configs: [{"name": "Groq", "base_url": "...", "model": "...", "api_key": "...", "timeout_seconds": 2.0}]
+    llm_cascade: list[dict[str, object]] = Field(default_factory=list)
+
+    # Time-series forecasting (empty URL = built-in statistical linear trend & quantile envelope)
+    forecast_url: str = ""
     forecast_timeout_seconds: float = 5.0
 
     # NetBox as the inventory source (empty URL = inventory.yaml of the intent repository).
@@ -163,10 +165,18 @@ class Settings(BaseSettings):
             and (self.intent_repo_path / "inventory.live.yaml").is_file()
         ):
             self.inventory_file = "inventory.live.yaml"
-        custom_auth = self.offline_lab_path / "custom_auth_profiles.json"
-        if custom_auth.is_file():
-            import json  # noqa: PLC0415
+        import os  # noqa: PLC0415
 
+        if "PYTEST_CURRENT_TEST" not in os.environ or "offline_lab_path" in self.model_fields_set:
+            self.apply_runtime_overlay(respect_explicit=True)
+        return self
+
+    def apply_runtime_overlay(self, *, respect_explicit: bool = False) -> dict[str, object]:
+        import json  # noqa: PLC0415
+
+        explicit = self.model_fields_set if respect_explicit else set()
+        custom_auth = self.offline_lab_path / "custom_auth_profiles.json"
+        if custom_auth.is_file() and "auth_profiles" not in explicit:
             try:
                 raw_profiles = json.loads(custom_auth.read_text(encoding="utf-8"))
                 for prof_name, creds in raw_profiles.items():
@@ -177,11 +187,6 @@ class Settings(BaseSettings):
                         )
             except Exception:
                 pass
-        self.apply_runtime_overlay()
-        return self
-
-    def apply_runtime_overlay(self) -> dict[str, object]:
-        import json  # noqa: PLC0415
 
         rt_file = self.offline_lab_path / "runtime_settings.json"
         if not rt_file.is_file():
@@ -190,13 +195,20 @@ class Settings(BaseSettings):
             data = json.loads(rt_file.read_text(encoding="utf-8"))
             if not isinstance(data, dict):
                 return {}
-            if data.get("github_repo_url"):
+            if data.get("github_repo_url") and "github_repo_url" not in explicit:
                 self.github_repo_url = str(data["github_repo_url"])
-            if data.get("network_driver") in ("offline", "scrapli"):
+            if data.get("network_driver") in ("offline", "scrapli") and "network_driver" not in explicit:
                 self.network_driver = data["network_driver"]
-            if data.get("telegram_bot_token"):
+                if (
+                    self.network_driver == "scrapli"
+                    and (self.intent_repo_path / "inventory.live.yaml").is_file()
+                ):
+                    self.inventory_file = "inventory.live.yaml"
+                elif self.network_driver == "offline":
+                    self.inventory_file = "inventory.yaml"
+            if data.get("telegram_bot_token") and "telegram_bot_token" not in explicit:
                 self.telegram_bot_token = SecretStr(str(data["telegram_bot_token"]))
-            if data.get("telegram_chat_id"):
+            if data.get("telegram_chat_id") and "telegram_chat_id" not in explicit:
                 self.telegram_chat_id = str(data["telegram_chat_id"])
                 try:
                     cid = int(self.telegram_chat_id.strip())
@@ -204,7 +216,7 @@ class Settings(BaseSettings):
                         self.telegram_chat_ids.append(cid)
                 except ValueError:
                     pass
-            if isinstance(data.get("telegram_chat_ids"), list):
+            if isinstance(data.get("telegram_chat_ids"), list) and "telegram_chat_ids" not in explicit:
                 for raw_cid in data["telegram_chat_ids"]:
                     try:
                         cid = int(str(raw_cid).strip())
@@ -212,26 +224,33 @@ class Settings(BaseSettings):
                             self.telegram_chat_ids.append(cid)
                     except ValueError:
                         pass
-            if data.get("clab_host"):
+            if data.get("clab_host") and "clab_host" not in explicit:
                 self.clab_host = str(data["clab_host"])
-            if data.get("clab_port"):
+            if data.get("clab_port") and "clab_port" not in explicit:
                 try:
                     self.clab_port = int(data["clab_port"])
                 except ValueError:
                     pass
-            if data.get("clab_user"):
+            if data.get("clab_user") and "clab_user" not in explicit:
                 self.clab_user = str(data["clab_user"])
-            if data.get("clab_password"):
+            if data.get("clab_password") and "clab_password" not in explicit:
                 self.clab_password = SecretStr(str(data["clab_password"]))
-            if data.get("groq_api_key"):
+            if data.get("groq_api_key") and "groq_api_key" not in explicit:
                 self.groq_api_key = SecretStr(str(data["groq_api_key"]))
-            if data.get("gemini_api_key"):
+            if data.get("gemini_api_key") and "gemini_api_key" not in explicit:
                 self.gemini_api_key = SecretStr(str(data["gemini_api_key"]))
-            if data.get("ollama_url") is not None:
+            if data.get("ollama_url") is not None and "ollama_url" not in explicit:
                 self.ollama_url = str(data["ollama_url"])
+            if data.get("prometheus_url") is not None and "prometheus_url" not in explicit:
+                self.prometheus_url = str(data["prometheus_url"])
+            if isinstance(data.get("llm_cascade"), list) and "llm_cascade" not in explicit:
+                self.llm_cascade = [
+                    item for item in data["llm_cascade"] if isinstance(item, dict)
+                ]
             return data
         except Exception:
             return {}
+
 
     def save_runtime_overlay(self, updates: dict[str, object]) -> dict[str, object]:
         import json  # noqa: PLC0415

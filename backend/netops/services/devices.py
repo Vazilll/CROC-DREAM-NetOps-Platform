@@ -143,10 +143,21 @@ class DeviceService:
         return device
 
     def delete(self, device_id: int) -> None:
+        from sqlalchemy import delete  # noqa: PLC0415
+        from netops.models import Job, JobTarget  # noqa: PLC0415
+
         device = self.get(device_id)
         if device.status is DeviceStatus.IN_PROGRESS:
             raise ConflictError(f"Device {device.hostname} is being deployed; try again later")
+        hostname = device.hostname
+        self._session.execute(
+            delete(JobTarget).where(
+                (JobTarget.device_id == device_id) | (JobTarget.hostname == hostname)
+            )
+        )
         self._session.delete(device)
+        self._session.flush()
+        self._session.execute(delete(Job).where(~Job.targets.any()))
         self._session.commit()
 
     def sync_inventory(self, inventory: Inventory) -> InventorySyncResult:

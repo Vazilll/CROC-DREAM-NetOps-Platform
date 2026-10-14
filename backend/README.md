@@ -20,7 +20,7 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Нормализация конфигов по правилам Ани: сравниваются только управляемые секции, служебные строки и хэши паролей отбрасываются | `netops/network/normalization.py`, `netops/network/diff_filters.yaml` |
 | Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
 | Живой SSH-драйвер (`Scrapli` + `Paramiko` fallback) и файловый эмулятор (`OfflineLab`) | `netops/network/scrapli_driver.py`, `netops/network/offline.py` |
-| Предиктивная аналитика временных рядов (`TimesFM 3.0`), `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/forecast.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
+| Предиктивная аналитика временных рядов (Statistical Forecast), `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/forecast.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
 | Аварийный пульт (`Emergency Hub`: прямой CLI, экстренный патч, Soft/Hard Reset, `Factory Freeze`) | `netops/api/routes/emergency.py`, `netops/services/freeze.py` |
 | 4-шаговый визард инициализации «Матрёшка», GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/notifier.py` |
 | RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами и областями доступа (`allowed_scopes`) | `netops/api/deps.py`, `netops/services/users.py` |
@@ -44,7 +44,7 @@ backend/
 ├── scripts/
 │   └── smoke_stack.py               # Сквозной smoke-тест Docker-стека
 ├── tools/
-│   └── timesfm_server.py            # Микросервер инференса временных рядов TimesFM
+│   └── Statistical Forecast_server.py            # Микросервер инференса временных рядов Statistical Forecast
 ├── tests/                           # 300+ модульных и интеграционных тестов (unit / integration / api)
 └── netops/
     ├── main.py                      # Точка входа ASGI (uvicorn netops.main:app)
@@ -62,7 +62,7 @@ backend/
     │       ├── devices.py           # CRUD узлов, /devices/probe, телеметрия, снапшоты, quick-action, reset-golden
     │       ├── jobs.py              # Запуск dry-run и deploy, лог шагов, вычисление diff
     │       ├── drift.py             # Внеочередной скан дрейфа, отчёт и авто-ремедиация (remediate)
-    │       ├── insights.py          # Прогноз TimesFM (/forecast), AI Guard (/ai-guard), Chaos Lab (/chaos), Copilot (/copilot), /jobs/{id}/explain
+    │       ├── insights.py          # Прогноз Statistical Forecast (/forecast), AI Guard (/ai-guard), Chaos Lab (/chaos), Copilot (/copilot), /jobs/{id}/explain
     │       ├── emergency.py         # Аварийная консоль (/emergency/command, /patch, /soft-reset, /hard-reset, /freeze, /audit)
     │       ├── system.py            # Визард «Матрёшка» (/system/bootstrap/*), GitHub SoT (/git/*), WebSocket (/ws/ticket, /ws/stream)
     │       └── users.py             # Управление пользователями, ролями, TTL-токенами и /auth/me
@@ -104,7 +104,7 @@ backend/
     │   ├── git_sot.py               # Метаданные Git с 10-секундным TTL-кэшем, git pull и синхронизация
     │   ├── bootstrap.py             # 4-шаговый визард «Матрёшка», перенос прав Owner и параллельный TCP-дискавери сервера
     │   ├── chaos.py                 # Сценарии Chaos Engineering (инъекция дрейфа, падение портов, сброс к эталону)
-    │   ├── forecast.py              # Расчёт прогнозов временных рядов TimesFM 3.0 (квантили p10/p50/p90 и ETA отказа)
+    │   ├── forecast.py              # Расчёт прогнозов временных рядов Statistical Forecast (квантили p10/p50/p90 и ETA отказа)
     │   ├── ai_guard.py              # Эвристический и ИИ-анализ безопасности патча перед деплоем (Pre-Flight Guard)
     │   ├── llm.py                   # Интеграция с LLM (OpenRouter / Gemini / локальная эвристика) для объяснения diff и Copilot
     │   ├── freeze.py                # Глобальный рубильник заморозки изменений (Factory Freeze в Redis / памяти)
@@ -246,11 +246,11 @@ python3 backend/scripts/smoke_stack.py
 | GET | `/api/v1/drift/report` | viewer | последняя проверка каждого устройства + число строк отклонений |
 | POST | `/api/v1/drift/remediate` | operator | автоматическое устранение дрейфа (`DRIFT_REMEDIATE`) |
 
-### 3. Предиктивная аналитика TimesFM 3.0, AI Guard и Chaos Lab (`routes/insights.py`)
+### 3. Предиктивная аналитика Statistical Forecast, AI Guard и Chaos Lab (`routes/insights.py`)
 
 | Метод | URL | Роль | Что делает |
 |---|---|---|---|
-| GET | `/api/v1/forecast` | viewer | прогноз временных рядов `TimesFM 3.0` (`cpu_pct`, `uplink_util_pct`) с квантилями `p10`/`p90` и расчётом времени до пробития SLA (`eta_hours`) |
+| GET | `/api/v1/forecast` | viewer | прогноз временных рядов Statistical Forecast (`cpu_pct`, `uplink_util_pct`) с квантилями `p10`/`p90` и расчётом времени до пробития SLA (`eta_hours`) |
 | POST | `/api/v1/ai-guard` | viewer | проверка безопасности изменений (`AI Pre-Flight Guard`) перед выкаткой |
 | POST | `/api/v1/chaos` | operator | инъекция тестовых сбоев в стенд (несанкционированный CLI-дрейф, BGP flap, перегрузка линка) |
 | POST | `/api/v1/copilot` | viewer | интерактивный чат с ИИ-ассистентом `NetOps Copilot` с контекстом всей фабрики |

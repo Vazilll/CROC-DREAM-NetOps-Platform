@@ -132,19 +132,19 @@ class DeploymentExecutor:
         if not verdict.healthy:
             return verdict
 
-        # TimesFM 3.0 AI Telemetry Guard: detect silent operational failures, blackholes & storms
+        # Telemetry Guard: detect silent operational failures, blackholes & storms
         if getattr(self._toolchain, "ai_guard", None) is not None:
             self._recorder.info(
-                "ai-guard", "TimesFM 3.0: Verifying telemetry envelope during trial window", hostname=device.hostname
+                "ai-guard", "Telemetry Guard: Verifying telemetry envelope during trial window", hostname=device.hostname
             )
             ai_verdict = self._toolchain.ai_guard.verify_execution(device)
             if not ai_verdict.healthy:
                 self._recorder.error(
-                    "ai-guard", f"TimesFM 3.0 anomaly: {ai_verdict.problem}", hostname=device.hostname
+                    "ai-guard", f"Telemetry anomaly: {ai_verdict.problem}", hostname=device.hostname
                 )
-                return HealthVerdict((f"AI Telemetry Guard (TimesFM 3.0): {ai_verdict.problem}",))
+                return HealthVerdict((f"Telemetry Guard: {ai_verdict.problem}",))
             self._recorder.info(
-                "ai-guard", f"TimesFM 3.0: {ai_verdict.message}", hostname=device.hostname
+                "ai-guard", f"Telemetry Guard: {ai_verdict.message}", hostname=device.hostname
             )
 
         return verdict

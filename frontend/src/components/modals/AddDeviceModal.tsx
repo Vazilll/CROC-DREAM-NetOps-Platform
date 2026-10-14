@@ -12,7 +12,6 @@ import {
   Loader2,
   ShieldAlert,
   Radio,
-  Zap,
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type { Device, DeviceProbeResult, Platform, DeviceRole, UserRole } from '../../api';
@@ -92,7 +91,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         proxy_jump: proxyJump.trim() || undefined,
       });
       setProbeResult(res);
-      if (res.hostname && !hostname) {
+      if (res.hostname) {
         setHostname(res.hostname);
       }
       if (res.detected_platform) {
@@ -164,6 +163,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
   const handleClose = () => {
     setStep(1);
+    setHostname('');
     setProbeResult(null);
     setProbeError('');
     onClose();
@@ -212,84 +212,6 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               {/* STEP 1: Connection & Credentials */}
               {step === 1 && (
                 <div className="space-y-4">
-                  {/* Presets Chips for Live Lab */}
-                  <div className="p-3 rounded-xl bg-[#0c0e14] border border-white/[0.06] space-y-2">
-                    <div className="text-[11px] font-semibold text-zinc-400 flex items-center justify-between">
-                      <span className="flex items-center gap-1.5 text-cyan-400">
-                        <Zap className="w-3.5 h-3.5 text-cyan-400" />
-                        Быстрый выбор узлов стенда (5.228.243.54):
-                      </span>
-                      <span className="text-[10px] text-zinc-500 font-mono">Live Containerlab</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        {
-                          label: 'spine-1 (:2211 Cisco)',
-                          port: 2211,
-                          role: 'spine' as DeviceRole,
-                          platform: 'cisco_iosxe' as Platform,
-                          user: 'admin',
-                          pass: 'F5ga6jfkig1',
-                          jump: '',
-                        },
-                        {
-                          label: 'spine-2 (:2212 Arista)',
-                          port: 2212,
-                          role: 'spine' as DeviceRole,
-                          platform: 'arista_eos' as Platform,
-                          user: 'admin',
-                          pass: 'F5ga6jfkig2',
-                          jump: '',
-                        },
-                        {
-                          label: 'leaf-1 (:2221 Huawei)',
-                          port: 2221,
-                          role: 'leaf' as DeviceRole,
-                          platform: 'huawei_vrp' as Platform,
-                          user: 'admin',
-                          pass: 'admin@123',
-                          jump: 'crocdream@5.228.243.54:221',
-                        },
-                        {
-                          label: 'leaf-2 (:2222 Huawei)',
-                          port: 2222,
-                          role: 'leaf' as DeviceRole,
-                          platform: 'huawei_vrp' as Platform,
-                          user: 'admin',
-                          pass: 'admin@123',
-                          jump: 'crocdream@5.228.243.54:221',
-                        },
-                        {
-                          label: 'Host (:221 Debian)',
-                          port: 221,
-                          role: 'server' as DeviceRole,
-                          platform: 'linux_server' as Platform,
-                          user: 'crocdream',
-                          pass: '',
-                          jump: '',
-                        },
-                      ].map((item) => (
-                        <button
-                          key={item.port}
-                          type="button"
-                          onClick={() => {
-                            setIp('5.228.243.54');
-                            setPort(item.port);
-                            setCustomCreds(true);
-                            setUsername(item.user);
-                            setPassword(item.pass);
-                            setProxyJump(item.jump);
-                            setRole(item.role);
-                            setPlatform(item.platform);
-                          }}
-                          className="px-2.5 py-1 rounded bg-white/[0.04] hover:bg-cyan-500/20 hover:text-cyan-300 border border-white/[0.08] hover:border-cyan-500/40 text-[11px] font-mono text-zinc-300 transition-all cursor-pointer"
-                        >
-                          {item.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2">
                       <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">

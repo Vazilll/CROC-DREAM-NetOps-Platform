@@ -1,9 +1,9 @@
-"""AI Telemetry Guard: Runtime error and anomaly detection powered by Google TimesFM 3.0.
+"""AI Telemetry Guard: Runtime error and anomaly detection via statistical quantile envelopes.
 
 Evaluates post-change telemetry during the transactional commit-confirmed trial window.
 Detects silent routing blackholes, traffic collapses, and control-plane storms before
 they become production incidents, triggering automated rollbacks when anomalies exceed
-TimesFM predictive quantiles.
+predictive Q10/Q90 quantiles.
 """
 
 from __future__ import annotations
@@ -34,11 +34,11 @@ class AiGuardVerdict:
     deviation_pct: float
     problem: str | None = None
     message: str = ""
-    provider: str = "Google TimesFM 3.0"
+    provider: str = "Telemetry Guard"
 
 
 class AiTelemetryGuard:
-    """Inspects post-change telemetry using TimesFM predictive quantile envelopes."""
+    """Inspects post-change telemetry using predictive quantile envelopes."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -63,12 +63,12 @@ class AiTelemetryGuard:
         metric: str = "uplink_util_pct",
         horizon: int = 12,
     ) -> AiGuardVerdict:
-        """Verify that observed telemetry during commit trial falls within TimesFM bounds."""
+        """Verify that observed telemetry during commit trial falls within expected bounds."""
         hostname = device.hostname
         role = str(getattr(device, "role", "leaf"))
         device_id = getattr(device, "id", 1)
 
-        # 1. Obtain TimesFM forecast (with statistical fallback if service offline)
+        # 1. Obtain telemetry forecast
         forecast = build_forecast(
             self._settings,
             device_id=device_id,
@@ -115,9 +115,8 @@ class AiTelemetryGuard:
         else:
             observed = round(forecast.history[-1] if forecast.history else window_median, 2)
 
-        # 3. Check for Anomalies against TimesFM Quantiles
+        # 3. Check for Anomalies against Quantiles
         # Mode A: Critical Traffic Drop (Silent Blackhole)
-        # Port is up/up, but traffic collapsed far below TimesFM 10th percentile
         if window_lower >= 10.0 and observed < (window_lower * 0.4):
             dev_pct = round(((observed - window_median) / max(window_median, 1.0)) * 100, 1)
             problem = (
@@ -136,7 +135,6 @@ class AiTelemetryGuard:
             )
 
         # Mode B: Micro-loop or Control Plane Surge
-        # Traffic or CPU spiked far above TimesFM 90th percentile
         if observed > (window_upper * 1.5) or observed >= 90.0:
             dev_pct = round(((observed - window_median) / max(window_median, 1.0)) * 100, 1)
             problem = (
@@ -154,11 +152,11 @@ class AiTelemetryGuard:
                 provider=forecast.provider,
             )
 
-        # Nominal execution: Observed metric falls within TimesFM predictive corridor
+        # Nominal execution: Observed metric falls within predictive corridor
         dev_pct = round(((observed - window_median) / max(window_median, 1.0)) * 100, 1)
         msg = (
             f"Телеметрия в норме: факт {observed:g}% укладывается в доверительный интервал "
-            f"TimesFM [{window_lower:g}% .. {window_upper:g}%]"
+            f"[{window_lower:g}% .. {window_upper:g}%]"
         )
         return AiGuardVerdict(
             healthy=True,
@@ -188,7 +186,7 @@ class AiTelemetryGuard:
             if fc.breach_in_minutes is not None and fc.breach_in_minutes <= 30:
                 return (
                     False,
-                    f"TimesFM 3.0 прогнозирует превышение порога по «{fc.label}» через "
+                    f"Прогнозируется превышение порога по «{fc.label}» через "
                     f"~{fc.breach_in_minutes} мин. Проведение деплоя заблокировано.",
                 )
-        return True, "Pre-flight TimesFM проверка успешна: перегрузок не прогнозируется."
+        return True, "Pre-flight проверка успешна: перегрузок не прогнозируется."

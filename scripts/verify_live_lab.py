@@ -22,8 +22,8 @@ from netops.network.scrapli_driver import ScrapliNetworkDriver
 AUTH_PROFILES_DEFAULT: dict[str, Credentials] = {
     "spine1_auth": Credentials(username="admin", password="F5ga6jfkig1"),
     "spine2_auth": Credentials(username="admin", password="F5ga6jfkig2"),
-    "leaf1_auth": Credentials(username="admin", password="admin"),
-    "leaf2_auth": Credentials(username="admin", password="admin"),
+    "leaf1_auth": Credentials(username="admin", password="F5ga6jfkig"),
+    "leaf2_auth": Credentials(username="admin", password="F5ga6jfkig2"),
     "lab": Credentials(username="admin", password="admin"),
 }
 

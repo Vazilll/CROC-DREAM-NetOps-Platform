@@ -11,6 +11,7 @@ import {
   Copy,
   Check,
   Zap,
+  GitBranch,
 } from 'lucide-react';
 import { api } from '../../api';
 import type { JobDiff, DeviceDiff, JobSummary, RiskExplanation } from '../../api';
@@ -184,6 +185,8 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   const [viewEngine, setViewEngine] = useState<'monaco' | 'plain'>('monaco');
   const [loading, setLoading] = useState(false);
   const [prevSelectedJobId, setPrevSelectedJobId] = useState<string | null>(selectedJobId);
+  const [committingGit, setCommittingGit] = useState(false);
+  const [gitCommitNote, setGitCommitNote] = useState('');
 
   const [aiAnalysis, setAiAnalysis] = useState<RiskExplanation | null>(null);
   const [analyzingAi, setAnalyzingAi] = useState(false);
@@ -197,6 +200,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   if (selectedJobId !== prevSelectedJobId) {
     setPrevSelectedJobId(selectedJobId);
     setAiAnalysis(null);
+    setGitCommitNote('');
     setLoading(Boolean(selectedJobId));
   }
 
@@ -207,22 +211,25 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   }, []);
 
   useEffect(() => {
-    if (!selectedJobId) {
+    const selectedDiffJob = selectedJobId ? diffJobs.find((j) => j.id === selectedJobId) : undefined;
+    if (!selectedDiffJob) {
       const readyJob = diffJobs.find((j) => j.status === 'SUCCESS' || j.status === 'FAILED') || diffJobs[0];
       if (readyJob) {
         onSelectJob(readyJob.id);
+      } else {
+        setDiffData(null);
+        setLoading(false);
       }
       return;
     }
 
-    const currentJob = jobs.find((j) => j.id === selectedJobId);
-    if (currentJob && (currentJob.status === 'RUNNING' || currentJob.status === 'PENDING')) {
+    if (selectedDiffJob.status === 'RUNNING' || selectedDiffJob.status === 'PENDING') {
       return;
     }
 
     let active = true;
     api
-      .getJobDiff(selectedJobId)
+      .getJobDiff(selectedDiffJob.id)
       .then((data) => {
         if (!active) return;
         setDiffData(data);
@@ -232,6 +239,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
       .catch((err) => {
         if (!active) return;
         console.warn('Job diff pending or unavailable', err);
+        setDiffData(null);
         setLoading(false);
       });
 
@@ -271,47 +279,27 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
       const res = await api.explainDiff(selectedJobId.toString(), activeDeviceDiff.hostname);
       setAiAnalysis(res);
     } catch (err) {
-      console.warn('Backend LLM explain endpoint failed, using client heuristic fallback', err);
-      const remediation = activeDeviceDiff.remediation_patch || '';
-      const remLower = remediation.toLowerCase();
-      const hasBgp = remLower.includes('bgp') || remLower.includes('router-id') || remLower.includes('peer ');
-      const hasInterface = remLower.includes('interface') || remLower.includes('mtu') || remLower.includes('ip address') || remLower.includes('undo ip address');
-      const hasAcl = remLower.includes('access-list') || remLower.includes('permit') || remLower.includes('rule ') || remLower.includes('undo rule');
-
-      let riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL' = 'LOW';
-      const keyPoints: string[] = [];
-
-      if (!remediation.trim()) {
-        keyPoints.push('Конфигурация устройства полностью синхронизирована с Git SoT.');
-        keyPoints.push('Патч пустой: нет необходимости применять изменения.');
-      } else {
-        if (hasBgp) {
-          riskLevel = 'MEDIUM';
-          keyPoints.push('Внесены изменения в конфигурацию процесса BGP или списки соседей.');
-          keyPoints.push('Рекомендуется контроль таймеров сходимости BGP (до 60 секунд).');
-        }
-        if (hasInterface) {
-          keyPoints.push('Модификация параметров физических интерфейсов или MTU.');
-        }
-        if (hasAcl) {
-          riskLevel = 'HIGH';
-          keyPoints.push('Правка списков контроля доступа (ACL) — риск блокировки трафика.');
-        }
-        keyPoints.push('Сгенерирован зеркальный патч отката (Rollback Patch) для экстренного восстановления.');
-      }
-
-      setAiAnalysis({
-        summary: remediation.trim()
-          ? `Анализ диффа для ${activeDeviceDiff.hostname}: обнаружены модификации сетевого намерения.`
-          : `Устройство ${activeDeviceDiff.hostname} находится в актуальном эталонном состоянии.`,
-        risk_level: riskLevel,
-        key_points: keyPoints,
-        recommendations: ['Проверьте ping до шлюза после наката'],
-        is_safe: riskLevel === 'LOW',
-        provider: 'Client-side Heuristic Fallback',
-      });
+      console.error('Backend LLM explain endpoint failed', err);
     } finally {
       setAnalyzingAi(false);
+    }
+  };
+
+  const handleCommitDiffToGit = async () => {
+    if (!selectedJobId) return;
+    setCommittingGit(true);
+    setGitCommitNote('');
+    try {
+      const res = await api.commitDiffToGit(selectedJobId);
+      setGitCommitNote(
+        res.pushed
+          ? `Отправлено по SSH: ${res.branch}@${res.commit_short}`
+          : `Коммит создан: ${res.branch}@${res.commit_short}`
+      );
+    } catch {
+      setGitCommitNote('Ошибка git push по SSH');
+    } finally {
+      setCommittingGit(false);
     }
   };
 
@@ -330,7 +318,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
-              Иерархическое сравнение (Running vs Intended) с расчетом remediate/rollback
+              Иерархическое сравнение (Running vs Intended) с авто-коммитом в Git по SSH
             </p>
           </div>
         </div>
@@ -353,6 +341,18 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
               ))
             )}
           </select>
+
+          {selectedJobId && (
+            <button
+              onClick={handleCommitDiffToGit}
+              disabled={committingGit}
+              className="px-3.5 py-1.5 bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 rounded-xl text-xs font-mono font-semibold flex items-center space-x-1.5 transition cursor-pointer disabled:opacity-50"
+              title="Сделать git commit снапшота Diff и отправить git push по SSH"
+            >
+              <GitBranch className="w-3.5 h-3.5" />
+              <span>{committingGit ? 'Git Push...' : gitCommitNote || 'Коммит в Git (SSH)'}</span>
+            </button>
+          )}
 
           {selectedJobId && (
             <button

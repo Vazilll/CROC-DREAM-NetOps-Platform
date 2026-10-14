@@ -771,11 +771,11 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
         </div>
       )}
 
-      {/* TAB 2: ПРОГНОЗ И WHAT-IF (TimesFM 3.0 & Stress Testing) */}
+      {/* TAB 2: ПРОГНОЗ И WHAT-IF (Stress Testing) */}
       {tab === 'Прогноз и What-If' && (
         <div className="space-y-6">
           <Panel
-            title="Прогноз телеметрии TimesFM 3.0 (горизонт 6 часов)"
+            title="Прогноз телеметрии (горизонт 6 часов)"
             accent="bg-indigo-600"
             right={
               <span className="flex gap-1">
@@ -797,7 +797,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             {!forecastData && !forecastError && (
               <div className="text-zinc-500 text-sm py-12 text-center flex flex-col items-center gap-2">
                 <RefreshCw className="w-5 h-5 animate-spin text-cyan-400" />
-                <span>Запуск нейросетевого инференса TimesFM 3.0…</span>
+                <span>Расчёт прогноза телеметрии…</span>
               </div>
             )}
             {forecastData && (

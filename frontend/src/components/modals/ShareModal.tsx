@@ -39,12 +39,8 @@ interface ShareModalProps {
 
 const MINTED_STORAGE_KEY = 'netops_minted_tokens_v1';
 
-const SYSTEM_TARGETS = [
+const BASE_SYSTEM_TARGETS = [
   { value: '', label: 'Вся фабрика CLOS (все системы и узлы)' },
-  { value: 'spine-1.croc.lab', label: 'spine-1.croc.lab (Arista EOS)' },
-  { value: 'spine-2.croc.lab', label: 'spine-2.croc.lab (Cisco IOS-XE)' },
-  { value: 'leaf-1.croc.lab', label: 'leaf-1.croc.lab (Huawei VRP)' },
-  { value: 'leaf-2.croc.lab', label: 'leaf-2.croc.lab (Huawei VRP)' },
   { value: 'telemetry:prometheus', label: 'Telemetry (Prometheus / Grafana)' },
   { value: 'sot:netbox', label: 'Source of Truth (NetBox / GitOps)' },
 ];
@@ -163,6 +159,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
   // Integrations & Telegram state
   const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
+  const [deviceTargets, setDeviceTargets] = useState<Array<{ value: string; label: string }>>([]);
   const [loadingIntegrations, setLoadingIntegrations] = useState(false);
   const [syncingGit, setSyncingGit] = useState(false);
   const [telegramNote, setTelegramNote] = useState('');
@@ -222,7 +219,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     let active = true;
     const poll = async () => {
       try {
-        const integData = await api.getIntegrationsStatus();
+        const [integData, devList] = await Promise.all([
+          api.getIntegrationsStatus(),
+          api.getDevices().catch(() => []),
+        ]);
         let userList: UserAccount[] = integData.sessions || [];
         try {
           userList = await api.getUsers();
@@ -232,6 +232,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         if (!active) return;
         setUsers(userList);
         setIntegrations(integData);
+        setDeviceTargets(
+          devList.map((d) => ({
+            value: d.hostname,
+            label: `${d.hostname} (${d.platform})`,
+          }))
+        );
         if (integData.user_tokens) {
           setMintedTokens((prev) => {
             const merged = { ...prev, ...integData.user_tokens };
@@ -257,6 +263,11 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   if (!isOpen) return null;
 
   const canvasName = api.getCanvasName();
+  const SYSTEM_TARGETS = [
+    BASE_SYSTEM_TARGETS[0],
+    ...deviceTargets,
+    ...BASE_SYSTEM_TARGETS.slice(1),
+  ];
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -1187,7 +1198,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     <div className="text-sm font-bold text-emerald-300">
                       {integrations?.database?.counts?.metric_samples ?? '—'}
                     </div>
-                    <div className="text-[10px] text-zinc-400">TimesFM метрик</div>
+                    <div className="text-[10px] text-zinc-400">Срезов метрик</div>
                   </div>
                 </div>
 
