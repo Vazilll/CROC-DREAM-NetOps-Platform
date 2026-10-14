@@ -18,6 +18,9 @@ interface {{ iface.name }}
 {% if iface.ipv4_address %}
    ip address {{ iface.ipv4_address.with_prefixlen }}
 {% endif %}
+{% if not iface.name.lower().startswith("loopback") %}
+   ip access-group FABRIC-IN in
+{% endif %}
 {% if not iface.enabled %}
    shutdown
 {% endif %}
