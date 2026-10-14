@@ -82,7 +82,6 @@ def main() -> int:
     # 2. Database Connectivity
     print(f"\n{BOLD}2. Database Health & Storage:{RESET}")
     try:
-        from netops.settings import get_settings
         from netops.db import build_engine, build_session_factory
         from sqlalchemy import text
 

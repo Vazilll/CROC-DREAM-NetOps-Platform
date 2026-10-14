@@ -21,7 +21,7 @@ import platform
 import re
 import subprocess
 import sys
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     import psutil
@@ -92,7 +92,7 @@ def mask_secrets(cmdline_raw: Any) -> str:
     return text
 
 
-def tool_get_system_overview() -> Dict[str, Any]:
+def tool_get_system_overview() -> dict[str, Any]:
     """Read-only system overview: CPU, Memory, Swap, Uptime, OS info."""
     boot_time = psutil.boot_time()
     uptime_sec = int(datetime.datetime.now().timestamp() - boot_time)
@@ -143,7 +143,7 @@ def tool_get_system_overview() -> Dict[str, Any]:
     }
 
 
-def tool_get_disk_usage(path: Optional[str] = None) -> Dict[str, Any]:
+def tool_get_disk_usage(path: str | None = None) -> dict[str, Any]:
     """Read-only disk statistics for mounted partitions and target path."""
     partitions_data = []
     for part in psutil.disk_partitions(all=False):
@@ -192,7 +192,7 @@ def tool_get_disk_usage(path: Optional[str] = None) -> Dict[str, Any]:
     }
 
 
-def tool_get_top_processes(limit: int = 10, sort_by: str = "cpu") -> Dict[str, Any]:
+def tool_get_top_processes(limit: int = 10, sort_by: str = "cpu") -> dict[str, Any]:
     """List top running processes with cmdline secrets masked."""
     # Enforce safe bounds
     safe_limit = max(1, min(int(limit), 50))
@@ -232,7 +232,7 @@ def tool_get_top_processes(limit: int = 10, sort_by: str = "cpu") -> Dict[str, A
     }
 
 
-def tool_get_service_status(service_name: str) -> Dict[str, Any]:
+def tool_get_service_status(service_name: str) -> dict[str, Any]:
     """Check status of a whitelisted systemd service."""
     if not service_name:
         return {"error": "Missing 'service_name' argument"}
@@ -249,7 +249,7 @@ def tool_get_service_status(service_name: str) -> Dict[str, Any]:
     if clean_name not in allowed:
         return {
             "error": f"Access denied: '{clean_name}' is not in the whitelist of monitored services.",
-            "allowed_services": sorted(list(allowed)),
+            "allowed_services": sorted(allowed),
         }
 
     systemctl_path = "/usr/bin/systemctl"
@@ -272,7 +272,7 @@ def tool_get_service_status(service_name: str) -> Dict[str, Any]:
             timeout=5,
         )
 
-        props: Dict[str, str] = {}
+        props: dict[str, str] = {}
         for line in res.stdout.splitlines():
             if "=" in line:
                 k, v = line.split("=", 1)
@@ -293,12 +293,12 @@ def tool_get_service_status(service_name: str) -> Dict[str, Any]:
     except subprocess.TimeoutExpired:
         return {"error": f"Timeout querying status for service '{clean_name}'"}
     except Exception as ex:
-        return {"error": f"Failed to check service: {str(ex)}"}
+        return {"error": f"Failed to check service: {ex!s}"}
 
 
-def tool_list_whitelisted_services() -> Dict[str, Any]:
+def tool_list_whitelisted_services() -> dict[str, Any]:
     """List all systemd services that can be monitored."""
-    allowed = sorted(list(get_allowed_services()))
+    allowed = sorted(get_allowed_services())
     return {
         "count": len(allowed),
         "allowed_services": allowed,
@@ -379,7 +379,7 @@ TOOLS_METADATA = [
 ]
 
 
-def execute_tool(name: str, args: Dict[str, Any]) -> tuple[Dict[str, Any], bool]:
+def execute_tool(name: str, args: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Dispatch tool execution and return (result_data, is_error)."""
     try:
         if name == "get_system_overview":
@@ -399,7 +399,7 @@ def execute_tool(name: str, args: Dict[str, Any]) -> tuple[Dict[str, Any], bool]
         else:
             return {"error": f"Tool '{name}' not found"}, True
     except Exception as ex:
-        return {"error": f"Internal error executing tool '{name}': {str(ex)}"}, True
+        return {"error": f"Internal error executing tool '{name}': {ex!s}"}, True
 
 
 def run_stdio_server():
@@ -433,7 +433,7 @@ def run_stdio_server():
             sys.stderr.flush()
             continue
 
-        response: Dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
+        response: dict[str, Any] = {"jsonrpc": "2.0", "id": req_id}
 
         if method == "initialize":
             response["result"] = {

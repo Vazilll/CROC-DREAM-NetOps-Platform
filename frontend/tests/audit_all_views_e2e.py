@@ -14,7 +14,7 @@ Validates Acceptance Criteria 6:
 
 import os
 import sys
-import time
+
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5173/?token=dev-admin-token"
@@ -110,7 +110,7 @@ def run_e2e_audit():
         # Verify DiffViewer loaded
         diff_heading = page.locator('h2:has-text("Monaco Diff & LLM Guard")')
         assert diff_heading.is_visible(), "DiffViewer heading not found"
-        
+
         # Verify Monaco / Diff container presence
         diff_editor = page.locator('.monaco-editor, .monaco-diff-editor, div:has-text("Текущая (Running Config)")').first
         assert diff_editor.is_visible(), "Diff editor container not visible"
@@ -125,7 +125,7 @@ def run_e2e_audit():
         # Verify DriftView content
         drift_element = page.locator('button:has-text("Запустить полный скан дрейфа"), button:has-text("Drift Scan")').first
         assert drift_element.is_visible(), "DriftView scan button not found"
-        
+
         # Check scan drift button and compliance cards
         assert page.locator('span:has-text("GitOps Continuous Audit")').is_visible()
         print("   DriftView and scan control are 100% operational.")
@@ -142,7 +142,7 @@ def run_e2e_audit():
         chaos_cards = page.locator('button:has-text("Внедрить"), button:has-text("Уронить"), button:has-text("Смоделировать"), button:has-text("Сбросить")').count()
         assert chaos_cards >= 5, f"Expected chaos injection cards, found {chaos_cards}"
         print(f"   Chaos injection scenarios available: {chaos_cards}")
-        
+
         reset_btn = page.locator('button:has-text("Сбросить к эталону")').first
         assert reset_btn.is_visible(), "Reset to baseline button missing in Chaos Lab"
         print("   Chaos Lab scenarios and Git baseline reset operational.")

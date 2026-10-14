@@ -1,5 +1,6 @@
-import os
 import asyncio
+import os
+
 from playwright.async_api import async_playwright
 
 CHROME_PATH = "/home/tarhes/.cache/ms-playwright/chromium-1248/chrome-linux64/chrome"

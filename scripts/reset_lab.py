@@ -11,7 +11,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -25,7 +24,6 @@ from netops.db import Base, build_engine, build_session_factory
 from netops.intent.repository import IntentRepository
 from netops.network.rendering import JinjaConfigRenderer
 from netops.services import DeviceService
-from netops.settings import get_settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("reset_lab")
@@ -92,7 +90,7 @@ def reset_environment(seed: bool = False) -> None:
     print("=================================================================")
     print("  [OK] Sbros okruzheniya uspeshno zavershen!")
     print(f"  [OK] Database: {db_file} (clean schema)")
-    print(f"  [OK] Default credentials: admin / admin")
+    print("  [OK] Default credentials: admin / admin")
     print(f"  [OK] Configs in {lab_dir} synchronized with baseline.")
     print("=================================================================")
 
