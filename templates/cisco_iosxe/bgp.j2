@@ -2,6 +2,7 @@
 router bgp {{ intent.bgp.asn }}
  bgp router-id {{ intent.bgp.router_id }}
  bgp log-neighbor-changes
+ no bgp default ipv4-unicast
 {% for neighbor in intent.bgp.neighbors %}
  neighbor {{ neighbor.peer_ip }} remote-as {{ neighbor.remote_asn }}
 {% if neighbor.description %}

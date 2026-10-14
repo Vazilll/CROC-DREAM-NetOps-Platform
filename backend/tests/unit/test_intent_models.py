@@ -14,6 +14,9 @@ def _errors(model: type[Any], data: dict[str, Any]) -> list[tuple[tuple[Any, ...
     return [(error["loc"], error["type"]) for error in excinfo.value.errors()]
 
 
+_ACL_RULE = {"sequence": 10, "action": "permit", "protocol": "ip"}
+
+
 def _device(**fields: Any) -> dict[str, Any]:
     return {"hostname": "leaf-1.croc.lab", **fields}
 
@@ -91,6 +94,20 @@ class TestDeviceIntent:
             DeviceIntent, _device(interfaces=[{"name": "Ethernet1"}, {"name": "ethernet1"}])
         )
         assert errors == [(("interfaces",), "duplicate_interface")]
+
+    def test_interface_acl_must_be_declared(self) -> None:
+        data = _device(
+            interfaces=[{"name": "Ethernet1", "acl_in": "MGMT-IN"}],
+            acls=[{"name": "FABRIC-IN", "rules": [_ACL_RULE]}],
+        )
+        assert _errors(DeviceIntent, data) == [((), "unknown_acl")]
+
+    def test_declared_interface_acl_is_accepted(self) -> None:
+        data = _device(
+            interfaces=[{"name": "Ethernet1", "acl_in": "FABRIC-IN"}],
+            acls=[{"name": "FABRIC-IN", "rules": [_ACL_RULE]}],
+        )
+        assert DeviceIntent.model_validate(data).interfaces[0].acl_in == "FABRIC-IN"
 
     def test_duplicate_acl_names_are_rejected(self) -> None:
         acl = {
