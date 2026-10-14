@@ -22,6 +22,9 @@ from netops.services import DeviceService, JobService
 from netops.settings import Settings
 from netops.toolchain import Toolchain, build_toolchain
 
+Settings.model_config["env_file"] = None
+Settings.model_rebuild(force=True)
+
 FIXTURES = Path(__file__).parent / "fixtures"
 TEMPLATES = FIXTURES / "templates"
 

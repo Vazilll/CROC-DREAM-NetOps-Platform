@@ -25,16 +25,6 @@ import {
 import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
 import { AddDeviceModal } from './AddDeviceModal';
 
-const DEFAULT_SPARKLINE = [20, 22, 24, 25, 23, 27, 28, 26, 30, 32, 34, 33];
-const DEFAULT_TIMELINE_UP = Array(24).fill('UP');
-const DEFAULT_TIMELINE_DRIFT = Array(24).fill('DRIFT');
-const DEFAULT_TIMELINE_DOWN = Array(24).fill('DOWN');
-const getDefaultTimeline = (status: string) => {
-  if (status === 'IN_SYNC') return DEFAULT_TIMELINE_UP;
-  if (status === 'DRIFT_DETECTED') return DEFAULT_TIMELINE_DRIFT;
-  return DEFAULT_TIMELINE_DOWN;
-};
-
 interface DeviceListProps {
   devices: Device[];
   loading: boolean;
@@ -70,7 +60,7 @@ const Filter: React.FC<{
   <select
     value={value}
     onChange={(e) => onChange(e.target.value)}
-    className="bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/[0.08] rounded-md px-2 py-1.5 text-xs text-slate-800 dark:text-zinc-200 focus:outline-none focus:border-cyan-500/50 cursor-pointer"
+    className="bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] rounded-md px-2.5 py-1.5 text-xs text-[var(--text-primary)] focus:outline-none cursor-pointer"
   >
     <option value="">{label}: все</option>
     {Object.entries(options).map(([k, v]) => (
@@ -176,7 +166,11 @@ export const DeviceList: React.FC<DeviceListProps> = ({
     setSelected((s) => (s.includes(id) ? s.filter((i) => i !== id) : [...s, id]));
   const allSelected = rows.length > 0 && rows.every((d) => selected.includes(d.id));
   const targets = selected.length ? selected : rows.map((d) => d.id);
-  const scope = selected.length ? `${locale === 'en' ? 'selected' : 'выбрано'}: ${selected.length}` : (locale === 'en' ? 'all in list' : 'все в списке');
+  const scope = selected.length
+    ? `${locale === 'en' ? 'selected' : 'выбрано'}: ${selected.length}`
+    : locale === 'en'
+    ? 'all in list'
+    : 'все в списке';
 
   const btn =
     'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors disabled:opacity-40';
@@ -184,49 +178,49 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   return (
     <div className="space-y-4">
       {/* Title & Top Toolbar */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-lg font-semibold text-white tracking-tight">
+          <h1 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">
             {locale === 'en' ? 'Hardware Inventory' : 'Инвентарь оборудования'}{' '}
-            <span className="text-zinc-500 font-normal text-sm ml-1 font-mono">
+            <span className="text-[var(--text-muted)] font-normal text-sm ml-1 font-mono tabular-nums">
               {rows.length} {locale === 'en' ? 'of' : 'из'} {devices.length}
             </span>
           </h1>
-          <p className="text-xs text-zinc-400 mt-0.5">
+          <p className="text-xs text-[var(--text-secondary)] mt-0.5">
             {locale === 'en'
               ? 'Physical fabric state (Oper Status) and Git SoT intent compliance (Intent Status)'
               : 'Учет физического состояния фабрики (Oper Status) и соответствия намерениям Git SoT (Intent Status)'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {(userRole === 'admin' || userRole === 'owner') && selected.length > 0 && (
             <button
               onClick={handleBulkDelete}
-              className={`${btn} bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-300 font-semibold shadow-sm`}
+              className={`${btn} bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 font-semibold`}
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
+              <Trash2 className="w-3.5 h-3.5" />
               <span>{t.deleteSelectedBtn} ({selected.length})</span>
             </button>
           )}
           {(userRole === 'admin' || userRole === 'owner') && (
             <button
               onClick={() => setAddModalOpen(true)}
-              className={`${btn} bg-gradient-to-r from-cyan-500 to-indigo-600 text-white hover:from-cyan-400 hover:to-indigo-500 font-semibold shadow-sm`}
+              className={`${btn} bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 font-semibold`}
             >
               <Plus className="w-3.5 h-3.5" /> {t.addDeviceBtn}
             </button>
           )}
           <button
             onClick={onSyncInventory}
-            className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
+            className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
           >
-            <RefreshCw className="w-3.5 h-3.5" /> {t.syncInventoryBtn}
+            <RefreshCw className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> {t.syncInventoryBtn}
           </button>
           <button
             onClick={onLintIntent}
-            className={`${btn} border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05]`}
+            className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
           >
-            <FileCheck2 className="w-3.5 h-3.5" /> Pre-flight Lint
+            <FileCheck2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Pre-flight Lint
           </button>
         </div>
       </div>
@@ -234,12 +228,12 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       {/* Filter Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative">
-          <Search className="w-3.5 h-3.5 text-zinc-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Имя или IP…"
-            className="bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-white/[0.08] rounded-md pl-8 pr-3 py-1.5 text-xs text-slate-800 dark:text-zinc-200 w-48 focus:outline-none focus:border-cyan-500/50"
+            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] rounded-md pl-8 pr-3 py-1.5 text-xs text-[var(--text-primary)] w-48 focus:outline-none focus:border-[var(--text-secondary)]"
           />
         </div>
         <Filter value={role} onChange={setRole} label="Роль" options={ROLE_NAMES} />
@@ -263,24 +257,24 @@ export const DeviceList: React.FC<DeviceListProps> = ({
         />
 
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-[11px] text-zinc-500 font-mono">{scope}</span>
+          <span className="text-[11px] text-[var(--text-muted)] font-mono tabular-nums">{scope}</span>
           <button
             disabled={!targets.length}
             onClick={() => onRunDryRun(targets)}
-            className={`${btn} bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-semibold shadow-sm`}
+            className={`${btn} bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 font-semibold`}
           >
             <Play className="w-3.5 h-3.5 fill-current" /> Dry-run
           </button>
           <button
             disabled={!targets.length}
             onClick={() => onScanDrift(selected.length ? selected : undefined)}
-            className={`${btn} border border-white/[0.1] text-zinc-200 hover:bg-white/[0.05]`}
+            className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
           >
-            <ShieldCheck className="w-3.5 h-3.5" /> Скан дрейфа
+            <ShieldCheck className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Скан дрейфа
           </button>
           <button
             onClick={onRefresh}
-            className={`${btn} text-zinc-400 hover:text-white p-2`}
+            className={`${btn} text-[var(--text-secondary)] hover:text-[var(--text-primary)] p-2`}
             title="Обновить"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
@@ -289,17 +283,17 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       </div>
 
       {/* High-Density Inventory Table */}
-      <div className="rounded-lg border border-white/[0.08] bg-[#0c0e14] overflow-hidden">
+      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
+          <table className="w-full text-left text-xs border-collapse tabular-nums">
             <thead>
-              <tr className="bg-white/[0.03] text-[11px] uppercase tracking-wide text-zinc-400 border-b border-white/[0.06]">
+              <tr className="bg-[var(--bg-elevated)]/60 text-[11px] uppercase tracking-wide text-[var(--text-muted)] border-b border-[var(--border-subtle)]">
                 <th className="w-10 px-3 py-2.5">
                   <input
                     type="checkbox"
                     checked={allSelected}
                     onChange={() => setSelected(allSelected ? [] : rows.map((d) => d.id))}
-                    className="rounded border-slate-300 dark:border-zinc-700 cursor-pointer accent-cyan-500"
+                    className="rounded border-[var(--border-hover)] cursor-pointer accent-zinc-200"
                   />
                 </th>
                 {COLUMNS.map((c) => (
@@ -311,11 +305,11 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                           dir: s.key === c.key ? (-s.dir as 1 | -1) : 1,
                         }))
                       }
-                      className="flex items-center gap-1 uppercase tracking-wide cursor-pointer hover:text-white transition-colors"
+                      className="flex items-center gap-1 uppercase tracking-wide cursor-pointer hover:text-[var(--text-primary)] transition-colors"
                     >
                       {c.label}
                       <ArrowUpDown
-                        className={`w-3 h-3 ${sort.key === c.key ? 'text-cyan-400' : 'opacity-30'}`}
+                        className={`w-3 h-3 ${sort.key === c.key ? 'text-[var(--text-primary)]' : 'opacity-35'}`}
                       />
                     </button>
                   </th>
@@ -325,12 +319,12 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                 <th className="px-3 py-2.5 font-medium text-right">Действия</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-white/[0.04]">
+            <tbody className="divide-y divide-[var(--border-subtle)]">
               {rows.map((d) => (
                 <tr
                   key={d.id}
                   onClick={() => onOpenDevice(d.id)}
-                  className="hover:bg-white/[0.03] cursor-pointer transition-colors group"
+                  className="hover:bg-[var(--bg-elevated)]/40 cursor-pointer transition-colors group"
                 >
                   {/* Select Checkbox */}
                   <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
@@ -338,17 +332,17 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       type="checkbox"
                       checked={selected.includes(d.id)}
                       onChange={() => toggle(d.id)}
-                      className="rounded border-slate-300 dark:border-zinc-700 cursor-pointer accent-cyan-500"
+                      className="rounded border-[var(--border-hover)] cursor-pointer accent-zinc-200"
                     />
                   </td>
 
                   {/* Device Hostname & IP */}
                   <td className="px-3 py-2">
                     <div className="flex flex-col">
-                      <span className="font-semibold text-cyan-300 font-mono tracking-tight whitespace-nowrap group-hover:text-cyan-200">
+                      <span className="font-semibold text-[var(--text-primary)] font-mono tracking-tight whitespace-nowrap group-hover:underline">
                         {d.hostname}
                       </span>
-                      <span className="font-mono text-[11px] text-zinc-500">
+                      <span className="font-mono text-[11px] text-[var(--text-muted)]">
                         {d.management_ip}:{d.management_port}
                       </span>
                     </div>
@@ -356,14 +350,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
 
                   {/* Role Pill */}
                   <td className="px-3 py-2">
-                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-300 border border-white/[0.06]">
+                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
                       {ROLE_NAMES[d.role] ?? d.role}
                     </span>
                   </td>
 
                   {/* Platform Pill */}
                   <td className="px-3 py-2">
-                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-400 border border-white/[0.06]">
+                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
                       {PLATFORM_NAMES[d.platform] ?? d.platform}
                     </span>
                   </td>
@@ -387,7 +381,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                             }
                           }}
                           disabled={promotingId === d.id}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 transition-colors flex items-center gap-1 cursor-pointer"
+                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors flex items-center gap-1 cursor-pointer"
                           title="Активировать прямое управление (Promote to MANAGED)"
                         >
                           <Zap className="w-2.5 h-2.5" />
@@ -397,12 +391,12 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     </div>
                   </td>
 
-                  {/* Oper Status (Physical Link Reachability) */}
+                  {/* Oper Status */}
                   <td className="px-3 py-2">
                     <OperStatusBadge status={d.oper_status ?? 'UP'} />
                   </td>
 
-                  {/* Intent Status (Git SoT Sync) */}
+                  {/* Intent Status */}
                   <td className="px-3 py-2">
                     <StatusBadge status={d.status} />
                   </td>
@@ -410,29 +404,27 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   {/* Micro-Sparkline */}
                   <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="sparkline" data-testid="sparkline">
-                      <Sparkline
-                        className="sparkline"
-                        points={
-                          d.sparkline && d.sparkline.length > 0
-                            ? d.sparkline
-                            : DEFAULT_SPARKLINE
-                        }
-                        width={70}
-                        height={18}
-                      />
+                      {d.sparkline && d.sparkline.length > 0 ? (
+                        <Sparkline
+                          className="sparkline"
+                          points={d.sparkline}
+                          width={76}
+                          height={20}
+                        />
+                      ) : (
+                        <span className="text-[10px] font-mono text-[var(--text-muted)]">N/A</span>
+                      )}
                     </div>
                   </td>
 
                   {/* 24h State Timeline */}
                   <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="state-timeline" data-testid="state-timeline">
-                      <StateTimeline
-                        states={
-                          d.state_timeline && d.state_timeline.length > 0
-                            ? d.state_timeline
-                            : getDefaultTimeline(d.status)
-                        }
-                      />
+                      {d.state_timeline && d.state_timeline.length > 0 ? (
+                        <StateTimeline states={d.state_timeline} />
+                      ) : (
+                        <span className="text-[10px] font-mono text-[var(--text-muted)]">N/A</span>
+                      )}
                     </div>
                   </td>
 
@@ -441,10 +433,10 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     <div className="inline-flex items-center gap-1 whitespace-nowrap">
                       <button
                         onClick={() => onOpenDevice(d.id)}
-                        className="px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-white/[0.06]"
+                        className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-[var(--border-subtle)]"
                         title="Открыть карточку устройства"
                       >
-                        <ExternalLink className="w-3 h-3 text-cyan-400" />
+                        <ExternalLink className="w-3 h-3 text-[var(--text-secondary)]" />
                         <span className="hidden 2xl:inline">{locale === 'en' ? 'Details' : 'Карточка'}</span>
                       </button>
 
@@ -453,19 +445,19 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                           if (onOpenDiff) onOpenDiff(d.id);
                           else onOpenDevice(d.id);
                         }}
-                        className="px-2 py-1 rounded bg-white/[0.04] hover:bg-white/[0.1] text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-white/[0.06]"
+                        className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-[var(--border-subtle)]"
                         title="Сверить конфигурации (Diff)"
                       >
-                        <GitCompare className="w-3 h-3 text-amber-400" />
+                        <GitCompare className="w-3 h-3 text-[var(--text-secondary)]" />
                         <span className="hidden 2xl:inline">Diff</span>
                       </button>
 
                       <button
                         onClick={() => onRunDryRun([d.id])}
-                        className="px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                        className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer"
                         title="Запустить префлайт Dry-run"
                       >
-                        <Play className="w-3 h-3 text-emerald-400" />
+                        <Play className="w-3 h-3 fill-current" />
                         <span className="hidden 2xl:inline">Dry-run</span>
                       </button>
 
@@ -476,10 +468,10 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                               await handleDelete(d.id);
                             }
                           }}
-                          className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                          className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-400 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
                           title={t.deleteDeviceBtn}
                         >
-                          <Trash2 className="w-3 h-3 text-rose-400" />
+                          <Trash2 className="w-3 h-3" />
                           <span className="hidden 2xl:inline">{t.deleteDeviceBtn}</span>
                         </button>
                       )}
@@ -491,11 +483,11 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                 <tr>
                   <td colSpan={11} className="px-6 py-16 text-center">
                     <div className="max-w-md mx-auto space-y-3">
-                      <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto">
-                        <Plus className="w-6 h-6" />
+                      <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mx-auto">
+                        <Plus className="w-5 h-5" />
                       </div>
-                      <h3 className="text-sm font-semibold text-white">Инвентарь фабрики пуст</h3>
-                      <p className="text-xs text-zinc-400 leading-relaxed">
+                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Инвентарь фабрики пуст</h3>
+                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
                         {devices.length
                           ? 'Нет устройств под выбранные фильтры'
                           : 'В системе пока нет активных устройств. Вы можете подключить первый Linux-сервер или сетевой коммутатор через SSH Probe либо синхронизировать Git SoT.'}
@@ -505,14 +497,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                           {(userRole === 'admin' || userRole === 'owner') && (
                             <button
                               onClick={() => setAddModalOpen(true)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-500 hover:bg-cyan-400 text-zinc-950 transition-colors cursor-pointer"
+                              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 transition-opacity cursor-pointer"
                             >
                               <Plus className="w-3.5 h-3.5" /> Добавить сервер / коммутатор
                             </button>
                           )}
                           <button
                             onClick={onSyncInventory}
-                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-white/[0.1] text-zinc-300 hover:bg-white/[0.05] transition-colors cursor-pointer"
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border-subtle)] text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-colors cursor-pointer"
                           >
                             <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать Git SoT
                           </button>

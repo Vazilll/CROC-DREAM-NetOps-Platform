@@ -406,7 +406,14 @@ def build_forecast(
         result = cached[1]
 
     spec = METRICS[metric]
-    series = metric_series(hostname, role, metric, POINTS_PER_DAY)
+    is_offline = settings.network_driver == "offline"
+    series = metric_series(
+        hostname,
+        role,
+        metric,
+        POINTS_PER_DAY,
+        allow_synthetic_offline=is_offline,
+    )
     if result is None:
         if settings.forecast_url and len(series) >= 3:
             cooldown_until = _service_failure_cooldown.get(settings.forecast_url, 0.0)
@@ -457,6 +464,7 @@ def build_forecast(
         label=spec.label,
         unit=spec.unit,
         threshold=spec.threshold,
+        simulated=is_offline or len(series) == 0,
         end_ts=end_ts,
         history=series[-HISTORY_SHOWN:],
         median=median,

@@ -51,6 +51,7 @@ class Toolchain:
             host=str(device.management_ip),
             port=device.management_port,
             credentials=credentials,
+            proxy_jump=getattr(device, "proxy_jump", None),
         )
 
 
@@ -70,18 +71,35 @@ def build_toolchain(settings: Settings) -> Toolchain:
             deployer = driver
             health_probe = driver
 
+    creds_map = {
+        name: Credentials(profile.username, profile.password.get_secret_value())
+        for name, profile in settings.auth_profiles.items()
+    }
+    try:
+        import json  # noqa: PLC0415
+
+        custom_auth_file = settings.offline_lab_path / "custom_auth_profiles.json"
+        if custom_auth_file.is_file():
+            raw_profiles = json.loads(custom_auth_file.read_text(encoding="utf-8"))
+            for prof_name, prof_data in raw_profiles.items():
+                if isinstance(prof_data, dict) and "username" in prof_data:
+                    creds_map[prof_name] = Credentials(
+                        str(prof_data["username"]), str(prof_data.get("password", ""))
+                    )
+    except Exception:
+        pass
+
     return Toolchain(
         intents=IntentRepository(settings.intent_repo_path, inventory_file=settings.inventory_file),
         renderer=JinjaConfigRenderer(settings.templates_path),
-        normalizer=ConfigNormalizer.from_file(settings.normalization_rules_path),
+        normalizer=ConfigNormalizer.from_file(
+            settings.diff_filters_path or settings.normalization_rules_path
+        ),
         diff_engine=HierConfigDiffEngine(),
         collector=collector,
         deployer=deployer,
         health_probe=health_probe,
-        credentials={
-            name: Credentials(profile.username, profile.password.get_secret_value())
-            for name, profile in settings.auth_profiles.items()
-        },
+        credentials=creds_map,
         confirm_timeout_seconds=settings.commit_confirm_timeout_seconds,
         max_ping_loss_percent=settings.max_ping_loss_percent,
         post_check_attempts=settings.post_check_attempts,

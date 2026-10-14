@@ -14,6 +14,9 @@ def _errors(model: type[Any], data: dict[str, Any]) -> list[tuple[tuple[Any, ...
     return [(error["loc"], error["type"]) for error in excinfo.value.errors()]
 
 
+_ACL_RULE = {"sequence": 10, "action": "permit", "protocol": "ip"}
+
+
 def _device(**fields: Any) -> dict[str, Any]:
     return {"hostname": "leaf-1.croc.lab", **fields}
 
@@ -91,6 +94,20 @@ class TestDeviceIntent:
             DeviceIntent, _device(interfaces=[{"name": "Ethernet1"}, {"name": "ethernet1"}])
         )
         assert errors == [(("interfaces",), "duplicate_interface")]
+
+    def test_interface_acl_must_be_declared(self) -> None:
+        data = _device(
+            interfaces=[{"name": "Ethernet1", "acl_in": "MGMT-IN"}],
+            acls=[{"name": "FABRIC-IN", "rules": [_ACL_RULE]}],
+        )
+        assert _errors(DeviceIntent, data) == [((), "unknown_acl")]
+
+    def test_declared_interface_acl_is_accepted(self) -> None:
+        data = _device(
+            interfaces=[{"name": "Ethernet1", "acl_in": "FABRIC-IN"}],
+            acls=[{"name": "FABRIC-IN", "rules": [_ACL_RULE]}],
+        )
+        assert DeviceIntent.model_validate(data).interfaces[0].acl_in == "FABRIC-IN"
 
     def test_duplicate_acl_names_are_rejected(self) -> None:
         acl = {
@@ -259,3 +276,28 @@ class TestInventory:
     def test_unknown_platform_is_rejected(self) -> None:
         device = self._device("a", "10.0.0.1") | {"platform": "junos"}
         assert _errors(Inventory, {"devices": [device]})[0][0] == ("devices", 0, "platform")
+
+    def test_id_and_status_from_the_spec_are_accepted(self) -> None:
+        device = self._device("a", "10.0.0.1") | {"id": 1, "status": "IN_SYNC"}
+        [parsed] = Inventory.model_validate({"devices": [device]}).devices
+        assert (parsed.id, parsed.status) == (1, "IN_SYNC")
+
+    def test_duplicate_ids_are_rejected(self) -> None:
+        devices = [
+            self._device("a", "10.0.0.1") | {"id": 1},
+            self._device("b", "10.0.0.2") | {"id": 1},
+        ]
+        assert _errors(Inventory, {"devices": devices}) == [(("devices",), "duplicate_id")]
+
+    def test_credentials_are_not_allowed_in_the_inventory(self) -> None:
+        data = {
+            "auth_profiles": {"lab": {"username": "admin", "password": "secret"}},
+            "devices": [self._device("a", "10.0.0.1")],
+        }
+        assert _errors(Inventory, data) == [((), "credentials_in_inventory")]
+
+    def test_eltex_platform_and_port_names(self) -> None:
+        device = self._device("leaf-eltex", "10.0.0.1") | {"platform": "eltex_esr"}
+        assert Inventory.model_validate({"devices": [device]}).devices[0].platform == "eltex_esr"
+        interface = InterfaceIntent(name="gigabitethernet 1/0/1", ipv4_address="10.10.0.9/31")
+        assert interface.name == "gigabitethernet 1/0/1"

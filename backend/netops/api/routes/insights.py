@@ -58,7 +58,7 @@ class CopilotReply(BaseModel):
 COPILOT_SYSTEM = (
     "Ты — AI Copilot платформы автоматизации сетей CLOS (Spine-Leaf). "
     "Отвечай по-русски, кратко и по делу, опираясь только на переданный контекст сети. "
-    "Метрики в контексте симулированы. Если данных не хватает — скажи об этом. "
+    "Если данных не хватает — скажи об этом. "
     "Не предлагай применять изменения без dry-run и проверки diff.\n\n"
     "Если ситуация требует действия оператора (устранение дрейфа, запуск dry-run, "
     "просмотр diff, переход к проблемному узлу или сканирование), в конце ответа на отдельной "
@@ -79,7 +79,7 @@ def extract_copilot_action(
 ) -> tuple[str, CopilotAction | None]:
     """Parse trailing ACTION: type|label|device_id tag from LLM output."""
     match = re.search(
-        r"(?:^|\n)ACTION:\s*([a-z_]+)\s*\|\s*([^|\n]+?)(?:\s*\|\s*(\d+)?)?\s*$",
+        r"(?:^|\n)ACTION:\s*(dry_run|remediate|open_device|scan_drift|open_diff)\s*\|\s*([^|\n]+?)(?:\s*\|\s*(\d+)?)?\s*$",
         text.strip(),
         re.MULTILINE,
     )
@@ -90,13 +90,11 @@ def extract_copilot_action(
     label = match.group(2).strip()
     raw_id = match.group(3)
     dev_id = int(raw_id) if raw_id and raw_id.isdigit() else default_device_id
-
-    valid_types = {"dry_run", "remediate", "open_device", "scan_drift", "open_diff"}
-    if act_type in valid_types:
-        clean_text = text[: match.start()].rstrip()
+    clean_text = text[: match.start()].rstrip()
+    try:
         return clean_text, CopilotAction(type=act_type, label=label, device_id=dev_id)  # type: ignore[arg-type]
-
-    return text.strip(), None
+    except Exception:
+        return clean_text, None
 
 
 def _device_fallback_action(
@@ -502,24 +500,24 @@ async def ai_guard_overview(
 
     devices = list(service.list_devices(limit=500))
     guard = AiTelemetryGuard(container.settings)
-    results = []
-    for d in devices:
-        verdict = await asyncio.to_thread(guard.verify_execution, d)
-        results.append(
-            AiGuardResponse(
-                hostname=d.hostname,
-                healthy=verdict.healthy,
-                metric=verdict.metric,
-                observed_value=verdict.observed_value,
-                expected_range=verdict.expected_range,
-                deviation_pct=verdict.deviation_pct,
-                problem=verdict.problem,
-                message=verdict.message,
-                provider=verdict.provider,
-                injected_simulation=guard.get_injected_anomaly(d.hostname),
-            )
+    verdicts = await asyncio.gather(
+        *(asyncio.to_thread(guard.verify_execution, d) for d in devices)
+    )
+    return [
+        AiGuardResponse(
+            hostname=d.hostname,
+            healthy=verdict.healthy,
+            metric=verdict.metric,
+            observed_value=verdict.observed_value,
+            expected_range=verdict.expected_range,
+            deviation_pct=verdict.deviation_pct,
+            problem=verdict.problem,
+            message=verdict.message,
+            provider=verdict.provider,
+            injected_simulation=guard.get_injected_anomaly(d.hostname),
         )
-    return results
+        for d, verdict in zip(devices, verdicts, strict=True)
+    ]
 
 
 class FabricSummaryResponse(BaseModel):
@@ -614,12 +612,12 @@ async def broadcast_to_telegram(
 
     summary_data = await get_fabric_summary(service, container, _)
     tg_text = (
-        "🌐 <b>[NetOps Platform] Оперативная сводка фабрики</b>\n\n"
-        f"📊 <b>Статус:</b> Всего {summary_data.total_devices} | "
-        f"🟢 Sync: {summary_data.in_sync_count} | "
-        f"🔴 Drift: {summary_data.drift_count} | "
-        f"⚪ Unreachable: {summary_data.unreachable_count}\n\n"
-        f"🧠 <b>AI Резюме:</b>\n{summary_data.ai_executive_summary}\n\n"
+        "<b>[NetOps Platform] Оперативная сводка фабрики</b>\n\n"
+        f"<b>Статус:</b> Всего {summary_data.total_devices} | "
+        f"Sync: {summary_data.in_sync_count} | "
+        f"Drift: {summary_data.drift_count} | "
+        f"Unreachable: {summary_data.unreachable_count}\n\n"
+        f"<b>AI Резюме:</b>\n{summary_data.ai_executive_summary}\n\n"
         f"<i>Провайдер: {summary_data.ai_provider}</i>"
     )
     sent = send_telegram_message(container.settings, tg_text)

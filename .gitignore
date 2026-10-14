@@ -39,3 +39,11 @@ screenshot_*.png
 test.png
 *.log
 backend/telemetry_cache.json
+backend/lab/
+*access_registry.json
+*telegram_bindings.json
+*telegram_subscribers.json
+*user_tokens.json
+*custom_auth_profiles.json
+lab/running/emergency_audit.jsonl
+lab/running/freeze_state.json

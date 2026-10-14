@@ -18,19 +18,39 @@ BACKEND_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BACKEND_DIR.parent
 sys.path.insert(0, str(BACKEND_DIR))
 
-is_offline = "--offline" in sys.argv or os.environ.get("NETOPS_OFFLINE", "0") == "1"
-is_live = not is_offline
+# Read .env so NETOPS_NETWORK_DRIVER / NETOPS_MODE from .env are respected before setting defaults
+_env_file = BACKEND_DIR / ".env"
+if _env_file.is_file():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _s = _line.strip()
+        if _s and not _s.startswith("#") and "=" in _s:
+            _k, _v = _s.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
+
+_mode = os.environ.get("NETOPS_MODE", "").strip().lower()
+_drv = os.environ.get("NETOPS_NETWORK_DRIVER", "").strip().lower()
+if "--live" in sys.argv or os.environ.get("NETOPS_LIVE", "") == "1" or _mode in ("online", "live"):
+    is_live = True
+elif "--offline" in sys.argv or _mode == "offline":
+    is_live = False
+elif _drv in ("scrapli", "offline"):
+    is_live = _drv == "scrapli"
+else:
+    is_live = False
+
+is_offline = not is_live
 default_driver = "scrapli" if is_live else "offline"
 default_inventory = "inventory.live.yaml" if is_live else "inventory.yaml"
 
 # Default environment variables for standalone local run
-os.environ.setdefault("NETOPS_DATABASE_URL", f"sqlite:///{BACKEND_DIR / 'netops_local.db'}")
+os.environ.setdefault("NETOPS_DATABASE_URL", "postgresql+psycopg://netops:netops@127.0.0.1:5432/netops")
 os.environ.setdefault("NETOPS_INTENT_REPO_PATH", str(PROJECT_ROOT / "intent"))
-os.environ.setdefault("NETOPS_INVENTORY_FILE", default_inventory)
+os.environ["NETOPS_INVENTORY_FILE"] = os.environ.get("NETOPS_INVENTORY_FILE", default_inventory)
 os.environ.setdefault("NETOPS_TEMPLATES_PATH", str(PROJECT_ROOT / "templates"))
 os.environ.setdefault("NETOPS_OFFLINE_LAB_PATH", str(PROJECT_ROOT / "lab" / "running"))
-os.environ.setdefault("NETOPS_NETWORK_DRIVER", default_driver)
-os.environ.setdefault("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "120")
+os.environ["NETOPS_NETWORK_DRIVER"] = default_driver
+os.environ.setdefault("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "3600")
+os.environ.setdefault("NETOPS_METRICS_INTERVAL_SECONDS", "3600")
 
 os.environ.setdefault("NETOPS_CORS_ORIGINS", '["*"]')
 os.environ.setdefault(
@@ -39,14 +59,15 @@ os.environ.setdefault(
 )
 os.environ.setdefault(
     "NETOPS_AUTH_PROFILES",
-    '{"spine1_auth": {"username": "admin", "password": "F5ga6jfkig1"}, "spine2_auth": {"username": "admin", "password": "F5ga6jfkig2"}, "leaf1_auth": {"username": "admin", "password": "admin"}, "leaf2_auth": {"username": "admin", "password": "admin"}, "lab": {"username": "admin", "password": "admin"}}',
+    '{"spine1_auth": {"username": "admin", "password": "F5ga6jfkig1"}, "spine2_auth": {"username": "admin", "password": "F5ga6jfkig2"}, "leaf1_auth": {"username": "admin", "password": "admin@123"}, "leaf2_auth": {"username": "admin", "password": "admin@123"}, "lab": {"username": "admin", "password": "admin"}}',
 )
 os.environ.setdefault("NETOPS_CLAB_HOST", "5.228.243.54")
 os.environ.setdefault("NETOPS_CLAB_PORT", "221")
 os.environ.setdefault("NETOPS_CLAB_USER", "crocdream")
 os.environ.setdefault("NETOPS_CLAB_KEY_PATH", os.path.expanduser("~/.ssh/id_ed25519"))
 os.environ.setdefault("NETOPS_CLAB_TOPOLOGY_PATH", "/home/crocdream/clab-quickstart/fabric.clab.yaml")
-os.environ.setdefault("NETOPS_PROMETHEUS_URL", "http://5.228.243.54:9090")
+if is_live:
+    os.environ.setdefault("NETOPS_PROMETHEUS_URL", "http://5.228.243.54:9090")
 
 
 import uvicorn
@@ -90,6 +111,34 @@ def init_local_environment() -> None:
 
     logger.info("Initializing database schema at %s...", settings.database_url)
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        from sqlalchemy import inspect as sa_inspect, text as sa_text  # noqa: PLC0415
+
+        user_cols = {c["name"] for c in sa_inspect(conn).get_columns("users")}
+        if "allowed_system" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN allowed_system VARCHAR(128)"))
+        if "bound_client_id" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_client_id VARCHAR(128)"))
+        if "bound_ip" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_ip VARCHAR(64)"))
+        if "bound_user_agent" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_user_agent VARCHAR(255)"))
+        if "bound_at" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_at TIMESTAMP"))
+        if "last_seen_at" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN last_seen_at TIMESTAMP"))
+        if "expires_at" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN expires_at TIMESTAMP"))
+        if "telegram_chat_id" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(64)"))
+        if "telegram_username" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(64)"))
+        if "telegram_verified_at" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_verified_at TIMESTAMP"))
+        if "verification_code" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_code VARCHAR(32)"))
+        if "verification_expires_at" not in user_cols:
+            conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_expires_at TIMESTAMP"))
 
     # Make sure lab running configs exist
     lab_dir = Path(settings.offline_lab_path)
@@ -142,7 +191,7 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
     from netops.pipeline import fail_stale_jobs  # noqa: PLC0415
     from netops.services import JobService  # noqa: PLC0415
 
-    first_delay = int(os.environ.get("NETOPS_BEAT_FIRST_DELAY_SECONDS", "15"))
+    first_delay = int(os.environ.get("NETOPS_BEAT_FIRST_DELAY_SECONDS", "3600"))
 
     def _cleanup(timeout: timedelta) -> None:
         with session_factory() as session:
@@ -157,13 +206,36 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
         # RUNNING/PENDING от прошлого запуска, уже мертво и блокирует планировщик.
         try:
             _cleanup(timedelta(0))
+            with session_factory() as session:
+                from netops.telemetry import collector  # noqa: PLC0415
+
+                toolchain = build_toolchain(settings)
+                samples = collector.collect(session, toolchain)
+                collector.store(
+                    session,
+                    samples,
+                    retention=timedelta(days=settings.metrics_retention_days),
+                )
         except Exception:
-            logger.exception("Beat: startup cleanup failed")
+            logger.exception("Beat: startup cleanup/metrics failed")
         time.sleep(first_delay)
         while True:
             try:
                 _cleanup(timedelta(seconds=settings.job_timeout_seconds))
                 with session_factory() as session:
+                    try:
+                        from netops.telemetry import collector  # noqa: PLC0415
+
+                        toolchain = build_toolchain(settings)
+                        samples = collector.collect(session, toolchain)
+                        collector.store(
+                            session,
+                            samples,
+                            retention=timedelta(days=settings.metrics_retention_days),
+                        )
+                    except Exception:
+                        logger.warning("Beat: metrics collection skipped due to error")
+
                     try:
                         snapshot = intent_repo.load()
                         device_svc = DeviceService(session)
@@ -189,6 +261,36 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
         settings.drift_scan_interval_seconds,
         first_delay,
     )
+
+    if settings.telegram_bot_token:
+        from netops.telemetry.bot import build_bot  # noqa: PLC0415
+
+        def _bot_loop() -> None:
+            alert_interval = int(os.environ.get("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "3600"))
+            last_alert_ts = time.monotonic()
+            try:
+                bot = build_bot(settings, settings.telegram_bot_token.get_secret_value())
+                bot.catch_up()
+                bot.send_startup_audit()
+                logger.info(
+                    "Telegram @Croc_Dream_bot started (chats: %s, verify-code gate: %s, alert interval: %ss)",
+                    bot._chat_ids,
+                    bot._open_registration,
+                    alert_interval,
+                )
+                while True:
+                    t0 = time.monotonic()
+                    bot.poll_once()
+                    now = time.monotonic()
+                    if now - last_alert_ts >= alert_interval:
+                        bot.send_alerts()
+                        last_alert_ts = now
+                    if now - t0 < 2.0:
+                        time.sleep(2.0)
+            except Exception:
+                logger.exception("Telegram MetricsBot loop stopped")
+
+        threading.Thread(target=_bot_loop, name="netops-telegram-bot", daemon=True).start()
 
 
 def main() -> None:

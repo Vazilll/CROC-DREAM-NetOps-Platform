@@ -33,7 +33,7 @@ const EVENT_CONFIG: Record<
   CHAOS: {
     color: '#f43f5e',
     label: 'CHAOS',
-    symbol: '⚡',
+    symbol: 'C',
     bg: 'bg-rose-500/10',
     border: 'border-rose-500/30',
   },

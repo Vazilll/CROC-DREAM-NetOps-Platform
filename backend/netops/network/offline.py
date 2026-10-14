@@ -55,6 +55,12 @@ class OfflineLab:
         self._ensure_reachable(target)
         if expected is None:
             return HealthSnapshot()
+        from netops.services.telemetry import synthetic_metric_series  # noqa: PLC0415
+
+        role = "spine" if "spine" in target.hostname else "leaf"
+        cpu_series = synthetic_metric_series(target.hostname, role, "cpu_pct", points=1)
+        mem_series = synthetic_metric_series(target.hostname, role, "memory_pct", points=1)
+        uplink_series = synthetic_metric_series(target.hostname, role, "uplink_util_pct", points=1)
         return HealthSnapshot(
             bgp_sessions={
                 peer: BgpSessionState("Established", prefixes_accepted=1)
@@ -65,6 +71,9 @@ class OfflineLab:
                 for name, enabled in expected.interfaces.items()
             },
             ping_loss_percent=dict.fromkeys(expected.bgp_peers, 0.0),
+            cpu_pct=cpu_series[-1] if cpu_series else 15.0,
+            memory_pct=mem_series[-1] if mem_series else 28.0,
+            uplink_util_pct=uplink_series[-1] if uplink_series else 22.0,
         )
 
     def _ensure_reachable(self, target: DeviceTarget) -> None:

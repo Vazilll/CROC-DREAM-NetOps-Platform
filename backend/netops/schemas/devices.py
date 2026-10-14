@@ -24,6 +24,8 @@ class DeviceCreate(BaseModel):
     platform: Platform
     role: DeviceRole
     auth_profile: Identifier = Field(examples=["lab"])
+    username: str | None = Field(default=None, exclude=True)
+    password: str | None = Field(default=None, exclude=True)
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] = "MONITORING_ONLY"
     proxy_jump: str | None = None
     hardware_specs: str | None = None
@@ -110,6 +112,14 @@ class DeviceEmergencyAction(BaseModel):
     action: Literal["rollback_last_commit", "reset_bgp_sessions", "restart_services", "reboot"]
     force: bool = False
     reason: str = "Emergency manual intervention"
+
+
+class DeviceEmergencyActionResult(BaseModel):
+    status: str
+    action: str
+    device: str
+    message: str
+    entry: dict[str, Any]
 
 
 class InventorySyncResult(BaseModel):

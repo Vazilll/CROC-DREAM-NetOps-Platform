@@ -51,14 +51,46 @@ UserServiceDep = Annotated[UserService, Depends(get_user_service)]
 
 
 def get_principal(
+    request: Request,
     container: ContainerDep,
     users: UserServiceDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)],
 ) -> ApiPrincipal:
+    from netops.services.users import DeviceBoundConflictError  # noqa: PLC0415
+
     principal = None
     if credentials is not None:
         token = credentials.credentials
-        principal = container.settings.authenticate(token) or users.authenticate(token)
+        forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        client_ip = forwarded or (request.client.host if request.client else None)
+        client_id = request.headers.get("X-Client-ID") or request.headers.get(
+            "X-Client-Device-Id"
+        )
+        user_agent = request.headers.get("User-Agent")
+
+        principal = container.settings.authenticate(token)
+        try:
+            if principal is not None:
+                principal = users.track_browser_session(
+                    principal,
+                    client_id=client_id,
+                    user_agent=user_agent,
+                    client_ip=client_ip,
+                    settings=container.settings,
+                )
+            else:
+                principal = users.authenticate(
+                    token,
+                    client_id=client_id,
+                    user_agent=user_agent,
+                    client_ip=client_ip,
+                    settings=container.settings,
+                )
+        except DeviceBoundConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
     if principal is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

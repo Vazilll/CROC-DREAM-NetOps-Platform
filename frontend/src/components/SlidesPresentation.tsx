@@ -90,7 +90,7 @@ export const SlidesPresentation: React.FC<SlidesProps> = ({ onLaunchDemo, onOpen
             {onLaunchDemo && (
               <button
                 onClick={onLaunchDemo}
-                className="px-5 py-2.5 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 hover:from-cyan-400 hover:to-indigo-500 text-white text-xs font-semibold tracking-wide uppercase shadow-lg shadow-cyan-500/20 transition flex items-center space-x-2 shrink-0 cursor-pointer"
+                className="px-4 py-2 rounded-md bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-xs font-medium tracking-wide transition flex items-center space-x-2 shrink-0 cursor-pointer"
               >
                 <Play className="w-3.5 h-3.5 fill-current" />
                 <span>Запустить Живое Демо</span>
@@ -474,17 +474,17 @@ set protocols bgp group FABRIC neighbor 172.20.20.11 peer-as 65001`}
             </div>
           </div>
 
-          <div className="p-6 rounded-2xl bg-gradient-to-r from-cyan-950/40 via-indigo-950/30 to-purple-950/30 border border-cyan-500/30 flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="p-6 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex flex-col md:flex-row items-center justify-between gap-4">
             <div className="space-y-1 text-center md:text-left">
-              <h3 className="text-white text-base font-bold">Готовы увидеть платформу в действии?</h3>
-              <p className="text-zinc-300 text-xs">
+              <h3 className="text-[var(--text-primary)] text-base font-semibold">Готовы увидеть платформу в действии?</h3>
+              <p className="text-[var(--text-secondary)] text-xs">
                 Перейдите к интерактивной топологии и запустите холодный прогон на всех устройствах.
               </p>
             </div>
             {onLaunchDemo && (
               <button
                 onClick={onLaunchDemo}
-                className="px-6 py-3 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-zinc-950 text-xs font-bold tracking-wider uppercase shadow-xl shadow-cyan-500/25 transition cursor-pointer shrink-0"
+                className="px-5 py-2.5 rounded-md bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-xs font-semibold tracking-wider uppercase transition cursor-pointer shrink-0"
               >
                 Открыть Консоль Управления ➔
               </button>

@@ -56,3 +56,37 @@ def test_template_syntax_errors_are_reported(tmp_path: Path) -> None:
     (tmp_path / "cisco_iosxe" / "base.j2").write_text("{% if %}\n")
     with pytest.raises(RenderError, match=r"cisco_iosxe/base\.j2"):
         JinjaConfigRenderer(tmp_path).render(DEVICE, INTENT)
+
+
+def test_ssti_sandbox_and_domestic_acls(tmp_path: Path) -> None:
+    (tmp_path / "cisco_iosxe").mkdir()
+    (tmp_path / "cisco_iosxe" / "base.j2").write_text("{{ ''.__class__.__mro__ }}\n")
+    with pytest.raises(RenderError, match=r"__class__"):
+        JinjaConfigRenderer(tmp_path).render(DEVICE, INTENT)
+
+    acl_intent = DeviceIntent.model_validate(
+        {
+            "hostname": "mes-1.croc.lab",
+            "acls": [
+                {
+                    "name": "FABRIC_IN",
+                    "rules": [
+                        {
+                            "sequence": 10,
+                            "action": "permit",
+                            "protocol": "ip",
+                            "source": "10.0.0.0/24",
+                            "destination": "any",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+    from netops.enums import Platform  # noqa: PLC0415
+
+    repo_templates = Path(__file__).resolve().parents[3] / "templates"
+    for plat in (Platform.ELTEX_MES, Platform.YADRO_KORNFE):
+        dev = DEVICE.model_copy(update={"platform": plat, "hostname": "mes-1.croc.lab"})
+        rendered = JinjaConfigRenderer(repo_templates).render(dev, acl_intent)
+        assert "FABRIC_IN" in rendered

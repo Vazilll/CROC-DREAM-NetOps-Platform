@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useId } from 'react';
 import { X, CheckCircle2, AlertTriangle, RotateCw, Clock } from 'lucide-react';
 import type { DeviceStatus, OperStatus } from '../api';
 
@@ -6,44 +6,44 @@ const STATUS: Record<string, { label: string; dot: string; text: string; bg: str
   IN_SYNC: {
     label: 'В синхроне',
     dot: 'bg-emerald-400',
-    text: 'text-emerald-400',
+    text: 'text-emerald-600 dark:text-emerald-400',
     bg: 'bg-emerald-500/10',
     border: 'border-emerald-500/20',
   },
   DRIFT_DETECTED: {
     label: 'Дрейф',
     dot: 'bg-amber-400',
-    text: 'text-amber-400',
+    text: 'text-amber-600 dark:text-amber-400',
     bg: 'bg-amber-500/10',
     border: 'border-amber-500/20',
   },
   UNREACHABLE: {
     label: 'Недоступно',
     dot: 'bg-rose-400',
-    text: 'text-rose-400',
+    text: 'text-rose-600 dark:text-rose-400',
     bg: 'bg-rose-500/10',
     border: 'border-rose-500/20',
   },
   IN_PROGRESS: {
     label: 'В работе',
     dot: 'bg-cyan-400 animate-pulse',
-    text: 'text-cyan-400',
+    text: 'text-cyan-600 dark:text-cyan-400',
     bg: 'bg-cyan-500/10',
     border: 'border-cyan-500/20',
   },
   UNKNOWN: {
     label: 'Неизвестно',
     dot: 'bg-zinc-500',
-    text: 'text-zinc-400',
-    bg: 'bg-white/[0.03]',
-    border: 'border-white/[0.08]',
+    text: 'text-[var(--text-secondary)]',
+    bg: 'bg-[var(--bg-subtle)]',
+    border: 'border-[var(--border-subtle)]',
   },
 };
 
 export const StatusBadge: React.FC<{ status: DeviceStatus; className?: string }> = React.memo(({ status, className = '' }) => {
   const s = STATUS[status] ?? STATUS.UNKNOWN;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono font-medium ${s.bg} ${s.text} ${s.border} ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono font-medium tabular-nums ${s.bg} ${s.text} ${s.border} ${className}`}>
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${s.dot}`} />
       <span>{s.label}</span>
     </span>
@@ -55,12 +55,12 @@ export const OperStatusBadge: React.FC<{ status?: OperStatus; className?: string
   const isDegraded = status === 'DEGRADED';
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono font-medium ${
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono font-medium tabular-nums ${
         isUp
-          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
           : isDegraded
-          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-          : 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+          : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
       } ${className}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isUp ? 'bg-emerald-400' : isDegraded ? 'bg-amber-400' : 'bg-rose-400'}`} />
@@ -73,50 +73,77 @@ export const Sparkline: React.FC<{
   points?: number[];
   width?: number;
   height?: number;
+  fullWidth?: boolean;
+  showValue?: boolean;
   className?: string;
-}> = React.memo(({ points = [], width = 72, height = 20, className = '' }) => {
-  if (!points || points.length < 2) {
-    return <span className="text-[11px] font-mono text-zinc-600">—</span>;
-  }
-  const min = Math.min(...points);
-  const max = Math.max(...points);
+}> = React.memo(({ points = [], width = 76, height = 22, fullWidth = false, showValue = true, className = '' }) => {
+  const gradId = useId();
+  const normalized =
+    points && points.length >= 2
+      ? points
+      : points && points.length === 1
+      ? [points[0], points[0], points[0], points[0]]
+      : [0, 0, 0, 0];
+
+  const min = Math.min(...normalized, 0);
+  const max = Math.max(...normalized, 100);
   const range = max - min || 1;
   const pad = 2;
   const w = width - pad * 2;
   const h = height - pad * 2;
 
-  const coords = points.map((v, i) => {
-    const x = pad + (i / (points.length - 1)) * w;
+  const xy = normalized.map((v, i) => {
+    const x = pad + (i / (normalized.length - 1)) * w;
     const y = height - pad - ((v - min) / range) * h;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
+    return { x, y };
   });
 
-  const first = points[0];
-  const last = points[points.length - 1];
+  const lineCoords = xy.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaCoords = `${xy[0].x.toFixed(1)},${height} ${lineCoords} ${xy[xy.length - 1].x.toFixed(1)},${height}`;
+
+  const first = normalized[0];
+  const last = normalized[normalized.length - 1];
   const diff = last - first;
-  const trendColor = diff > 5 ? '#f59e0b' : diff < -5 ? '#10b981' : '#06b6d4';
-  const arrow = diff > 5 ? '↗' : diff < -5 ? '↘' : '→';
+  const strokeColor = last > 80 ? '#f43f5e' : last > 55 ? '#f59e0b' : '#10b981';
+  const arrow = diff > 4 ? '↗' : diff < -4 ? '↘' : '→';
 
   return (
-    <div className={`inline-flex items-center gap-1.5 ${className}`}>
-      <svg width={width} height={height} className="shrink-0 overflow-visible">
+    <div className={`sparkline inline-flex items-center gap-1.5 tabular-nums ${fullWidth ? 'w-full' : ''} ${className}`}>
+      <svg
+        viewBox={`0 0 ${width} ${height}`}
+        width={fullWidth ? '100%' : width}
+        height={height}
+        preserveAspectRatio="none"
+        className="sparkline shrink-0 overflow-visible"
+      >
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.22" />
+            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+          </linearGradient>
+        </defs>
+        <polygon points={areaCoords} fill={`url(#${gradId})`} />
         <polyline
           fill="none"
-          stroke={trendColor}
+          stroke={strokeColor}
           strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
-          points={coords.join(' ')}
+          points={lineCoords}
         />
         <circle
-          cx={coords[coords.length - 1].split(',')[0]}
-          cy={coords[coords.length - 1].split(',')[1]}
+          cx={xy[xy.length - 1].x}
+          cy={xy[xy.length - 1].y}
           r="2"
-          fill={trendColor}
+          fill={strokeColor}
         />
       </svg>
-      <span className="font-mono text-[10px] text-zinc-400">{arrow}</span>
-      <span className="font-mono text-[10px] text-zinc-300">{Math.round(last)}%</span>
+      {showValue && (
+        <>
+          <span className="font-mono text-[10px] text-[var(--text-muted)]">{arrow}</span>
+          <span className="font-mono text-[10px] text-[var(--text-secondary)]">{Math.round(last)}%</span>
+        </>
+      )}
     </div>
   );
 });
@@ -126,17 +153,17 @@ export const StateTimeline: React.FC<{
   className?: string;
 }> = React.memo(({ states = [], className = '' }) => {
   if (!states || states.length === 0) {
-    return <span className="text-[11px] font-mono text-zinc-600">—</span>;
+    return <span className="text-[11px] font-mono text-[var(--text-muted)]">—</span>;
   }
   const getColor = (s: string) => {
-    if (s === 'UP' || s === 'IN_SYNC' || s === 'HEALTHY') return 'bg-emerald-500/80 hover:bg-emerald-400';
+    if (s === 'UP' || s === 'IN_SYNC' || s === 'HEALTHY') return 'bg-emerald-500/75 hover:bg-emerald-400';
     if (s === 'DRIFT' || s === 'DRIFT_DETECTED' || s === 'DEGRADED') return 'bg-amber-500/80 hover:bg-amber-400';
     if (s === 'DOWN' || s === 'UNREACHABLE' || s === 'CRITICAL') return 'bg-rose-500/80 hover:bg-rose-400';
-    return 'bg-zinc-700/60 hover:bg-zinc-600';
+    return 'bg-zinc-600/50 hover:bg-zinc-500';
   };
 
   return (
-    <div className={`inline-flex items-center gap-0.5 ${className}`} title="24h State Timeline (последние 24 часа)">
+    <div className={`inline-flex items-center gap-[2px] ${className}`} title="24h State Timeline (последние 24 часа)">
       {states.map((st, i) => (
         <span
           key={i}
@@ -154,12 +181,12 @@ export const ManagementModeBadge: React.FC<{ mode?: string; className?: string }
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[10px] font-mono font-medium ${
         isManaged
-          ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
-          : 'bg-zinc-800/80 text-zinc-400 border-zinc-700'
+          ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-hover)]'
+          : 'bg-[var(--bg-subtle)] text-[var(--text-muted)] border-[var(--border-subtle)]'
       } ${className}`}
       title={isManaged ? 'Управляемое: разрешены деплой и мутации' : 'Только наблюдение: безопасный режим чтения'}
     >
-      <span className={`w-1.5 h-1.5 rounded-full ${isManaged ? 'bg-indigo-400 shadow-[0_0_6px_rgba(129,140,248,0.8)]' : 'bg-zinc-500'}`} />
+      <span className={`w-1.5 h-1.5 rounded-full ${isManaged ? 'bg-emerald-400' : 'bg-zinc-500'}`} />
       <span>{isManaged ? 'УПРАВЛЯЕМОЕ' : 'НАБЛЮДЕНИЕ'}</span>
     </span>
   );
@@ -181,24 +208,22 @@ export const Panel: React.FC<{
   className = '',
 }) => {
   const dotColor = indicator ?? (
-    accent?.includes('cyan') ? 'bg-cyan-400' :
     accent?.includes('emerald') || accent?.includes('teal') ? 'bg-emerald-400' :
     accent?.includes('amber') ? 'bg-amber-400' :
     accent?.includes('rose') || accent?.includes('red') ? 'bg-rose-400' :
-    accent?.includes('indigo') || accent?.includes('violet') || accent?.includes('sky') ? 'bg-cyan-400' :
     'bg-zinc-500'
   );
 
   return (
-    <section className={`rounded-lg border border-white/[0.08] bg-[#0c0e14] overflow-hidden ${className}`}>
-      <div className="bg-[#10131d]/90 border-b border-white/[0.06] px-3 py-2 text-xs font-medium text-zinc-200 flex items-center justify-between">
-        <div className="flex items-center gap-2">
+    <section className={`rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden ${className}`}>
+      <div className="bg-[var(--bg-elevated)]/60 border-b border-[var(--border-subtle)] px-3.5 py-2 text-xs font-medium text-[var(--text-primary)] flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
           <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotColor}`} />
-          <span className="tracking-tight text-white font-medium">{title}</span>
+          <span className="tracking-tight font-medium truncate">{title}</span>
         </div>
-        {right && <div className="text-zinc-400 text-xs">{right}</div>}
+        {right && <div className="text-[var(--text-secondary)] text-xs shrink-0 whitespace-nowrap">{right}</div>}
       </div>
-      <div className="p-3">{children}</div>
+      <div className="p-3.5">{children}</div>
     </section>
   );
 });
@@ -211,14 +236,14 @@ export const BentoCard: React.FC<{
   children: React.ReactNode;
   className?: string;
 }> = React.memo(({ title, icon, indicator = 'bg-zinc-500', right, children, className = '' }) => (
-  <section className={`rounded-xl border border-white/[0.08] bg-[#0c0e15] overflow-hidden flex flex-col shadow-sm transition-all hover:border-white/[0.12] ${className}`}>
-    <div className="bg-[#10131d]/90 border-b border-white/[0.06] px-3.5 py-2.5 text-xs font-medium text-zinc-200 flex items-center justify-between shrink-0">
-      <div className="flex items-center gap-2">
+  <section className={`rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden flex flex-col transition-colors hover:border-[var(--border-hover)] ${className}`}>
+    <div className="bg-[var(--bg-elevated)]/50 border-b border-[var(--border-subtle)] px-3.5 py-2.5 text-xs font-medium text-[var(--text-primary)] flex items-center justify-between gap-2 shrink-0">
+      <div className="flex items-center gap-2 min-w-0">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${indicator}`} />
         {icon}
-        <span className="tracking-tight text-white font-medium">{title}</span>
+        <span className="tracking-tight font-medium truncate">{title}</span>
       </div>
-      {right && <div className="text-zinc-400 text-xs">{right}</div>}
+      {right && <div className="text-[var(--text-secondary)] text-xs shrink-0 whitespace-nowrap">{right}</div>}
     </div>
     <div className="p-3.5 flex-1 min-h-0 overflow-hidden">{children}</div>
   </section>
@@ -231,35 +256,35 @@ export const JobStatusBadge: React.FC<{ status: string; className?: string }> = 
   switch (status) {
     case 'SUCCESS':
       return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/25 ${className}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 ${className}`}>
           <CheckCircle2 className="w-3 h-3" />
           <span>SUCCESS</span>
         </span>
       );
     case 'FAILED':
       return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-rose-500/10 text-rose-400 border border-rose-500/25 ${className}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 ${className}`}>
           <AlertTriangle className="w-3 h-3" />
           <span>FAILED</span>
         </span>
       );
     case 'RUNNING':
       return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/25 animate-pulse ${className}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20 ${className}`}>
           <RotateCw className="w-3 h-3 animate-spin" />
           <span>RUNNING</span>
         </span>
       );
     case 'PENDING':
       return (
-        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-mono font-medium bg-amber-500/10 text-amber-400 border border-amber-500/25 ${className}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 ${className}`}>
           <Clock className="w-3 h-3" />
           <span>PENDING</span>
         </span>
       );
     default:
       return (
-        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-mono font-medium bg-zinc-800/80 text-zinc-400 border border-zinc-700 ${className}`}>
+        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-[var(--bg-subtle)] text-[var(--text-secondary)] border border-[var(--border-subtle)] ${className}`}>
           <span>{status}</span>
         </span>
       );
@@ -304,23 +329,23 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
-        className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity animate-fade-in"
+        className="fixed inset-0 bg-black/75 backdrop-blur-xs transition-opacity animate-fade-in"
         onClick={onClose}
       />
       <div
         role="dialog"
         aria-modal="true"
-        className={`relative w-full ${maxWidth} rounded-2xl bg-[#0c0e15] border border-white/[0.1] shadow-2xl overflow-hidden flex flex-col z-10 text-zinc-200 animate-win-fade`}
+        className={`relative w-full ${maxWidth} rounded-xl bg-[var(--bg-card)] border border-[var(--border-hover)] shadow-2xl overflow-hidden flex flex-col z-10 text-[var(--text-primary)] animate-win-fade`}
       >
-        <div className="px-5 py-4 border-b border-white/[0.08] flex items-center justify-between bg-[#10131d]/90">
+        <div className="px-5 py-3.5 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-elevated)]/70">
           <div className="flex items-center gap-2.5">
             {icon}
-            <h3 className="text-sm font-semibold text-white tracking-tight">{title}</h3>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">{title}</h3>
             {badge}
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
+            className="p-1 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)] transition-colors cursor-pointer"
             title="Закрыть (Esc)"
           >
             <X className="w-4 h-4" />
@@ -328,7 +353,7 @@ export const Modal: React.FC<ModalProps> = ({
         </div>
         <div className="p-5 overflow-y-auto max-h-[calc(90vh-120px)]">{children}</div>
         {footer && (
-          <div className="px-5 py-3 border-t border-white/[0.08] bg-[#0e111a] flex items-center justify-end gap-2">
+          <div className="px-5 py-3 border-t border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 flex items-center justify-end gap-2">
             {footer}
           </div>
         )}

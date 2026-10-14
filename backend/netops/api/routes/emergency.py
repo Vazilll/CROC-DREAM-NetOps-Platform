@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -70,13 +71,29 @@ class EmergencyPatchRequest(BaseModel):
     reason: str = Field(default="Emergency intervention", description="Audit reason for manual patch")
 
 
+class EmergencyCommandResponse(BaseModel):
+    status: str
+    device: str
+    command: str
+    output: str
+    failed: bool
+
+
+class EmergencyPatchResponse(BaseModel):
+    status: str
+    device: str
+    applied_lines: list[str]
+    output: str
+    reason: str
+
+
 class ResetResponse(BaseModel):
     status: str
     message: str
     details: str = ""
 
 
-@router.get("/audit", summary="Get emergency operations audit log")
+@router.get("/audit", response_model=list[dict[str, Any]], summary="Get emergency operations audit log")
 def get_emergency_audit(_: Viewer) -> list[dict[str, Any]]:
     if not AUDIT_LOG_FILE.exists():
         return []
@@ -136,7 +153,11 @@ def _emulate_offline_command(settings: Any, device_obj: Any, command: str) -> st
     return f"% Command executed on {device_obj.hostname} (offline simulation):\n{command}\n[OK]\n"
 
 
-@router.post("/command", summary="Execute live CLI command on network device (Operator/Admin)")
+@router.post(
+    "/command",
+    response_model=EmergencyCommandResponse,
+    summary="Execute live CLI command on network device (Operator/Admin)",
+)
 def execute_emergency_command(
     req: EmergencyCommandRequest,
     container: ContainerDep,
@@ -210,28 +231,6 @@ def execute_emergency_command(
                 "failed": res.failed,
             }
     except Exception as exc:
-        logger.warning("SSH command failed on %s: %s. Attempting offline lab fallback...", device_obj.hostname, exc)
-        cfg_file = container.settings.offline_lab_path / f"{device_obj.hostname}.cfg"
-        if cfg_file.exists():
-            sim_output = _emulate_offline_command(container.settings, device_obj, req.command)
-            fallback_text = f"[SSH Offline Lab Mode]\n{sim_output}"
-            record_audit(
-                user=principal.username,
-                action="cli_command",
-                device=device_obj.hostname,
-                payload=req.command,
-                reason="Interactive CLI (Lab Fallback)",
-                success=True,
-                output=fallback_text,
-            )
-            return {
-                "status": "ok",
-                "device": device_obj.hostname,
-                "command": req.command,
-                "output": fallback_text,
-                "failed": False,
-            }
-
         record_audit(
             user=principal.username,
             action="cli_command",
@@ -241,7 +240,7 @@ def execute_emergency_command(
             success=False,
             output=str(exc),
         )
-        logger.exception("Failed to execute emergency command on %s", device_obj.hostname)
+        logger.warning("Failed to execute emergency command on %s: %s", device_obj.hostname, exc)
         return {
             "status": "error",
             "device": device_obj.hostname,
@@ -251,7 +250,11 @@ def execute_emergency_command(
         }
 
 
-@router.post("/patch", summary="Apply emergency configuration patch directly (Admin only)")
+@router.post(
+    "/patch",
+    response_model=EmergencyPatchResponse,
+    summary="Apply emergency configuration patch directly (Admin only)",
+)
 def apply_emergency_patch(
     req: EmergencyPatchRequest,
     container: ContainerDep,
@@ -265,6 +268,26 @@ def apply_emergency_patch(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device '{req.device}' not found in active inventory",
         )
+
+    with container.session_factory() as session:
+        from sqlalchemy import select  # noqa: PLC0415
+        from netops.enums import JobStatus, JobType  # noqa: PLC0415
+        from netops.models import Job, JobTarget  # noqa: PLC0415
+
+        active_job = session.scalar(
+            select(Job.id)
+            .join(JobTarget)
+            .where(
+                JobTarget.hostname == device_obj.hostname,
+                Job.type.in_((JobType.DEPLOY, JobType.DRIFT_REMEDIATE)),
+                Job.status.in_((JobStatus.PENDING, JobStatus.RUNNING)),
+            )
+        )
+        if active_job is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"Device '{device_obj.hostname}' is locked by active pipeline job {active_job}",
+            )
 
     target = toolchain.target_for(device_obj)
     lines = [line.strip() for line in req.patch.splitlines() if line.strip() and not line.strip().startswith("!")]

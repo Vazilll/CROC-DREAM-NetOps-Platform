@@ -1,37 +1,33 @@
 devices:
-  - hostname: spine-1.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2211
-    platform: arista_eos
-    role: spine
-    auth_profile: lab
-  - hostname: spine-2.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2212
-    platform: arista_eos
-    role: spine
-    auth_profile: lab
-  - hostname: leaf-1.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2221
-    platform: cisco_iosxe
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-2.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2222
-    platform: cisco_iosxe
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-3.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2231
-    platform: huawei_vrp
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-4.croc.lab
-    management_ip: 5.228.243.54
-    management_port: 2232
-    platform: huawei_vrp
-    role: leaf
-    auth_profile: lab
+- id: 1
+  hostname: spine-1.croc.lab
+  management_ip: 172.20.20.5
+  management_port: 22
+  platform: cisco_iosxe
+  role: spine
+  auth_profile: spine1_auth
+  status: IN_SYNC
+- id: 2
+  hostname: spine-2.croc.lab
+  management_ip: 172.20.20.4
+  management_port: 22
+  platform: arista_eos
+  role: spine
+  auth_profile: spine2_auth
+  status: IN_SYNC
+- id: 3
+  hostname: leaf-1.croc.lab
+  management_ip: 172.20.20.2
+  management_port: 22
+  platform: huawei_vrp
+  role: leaf
+  auth_profile: leaf1_auth
+  status: IN_SYNC
+- id: 4
+  hostname: leaf-2.croc.lab
+  management_ip: 172.20.20.6
+  management_port: 22
+  platform: huawei_vrp
+  role: leaf
+  auth_profile: leaf2_auth
+  status: IN_SYNC

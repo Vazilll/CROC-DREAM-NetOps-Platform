@@ -79,6 +79,19 @@ class AiTelemetryGuard:
         )
 
         # Immediate trial window expected bounds (first 3-6 steps, i.e. 15-30 min)
+        is_offline = self._settings.network_driver == "offline"
+        injected = _active_injections.get(hostname)
+        if not forecast.history and not is_offline and not injected:
+            return AiGuardVerdict(
+                healthy=True,
+                metric=metric,
+                observed_value=0.0,
+                expected_range=(0.0, 0.0),
+                deviation_pct=0.0,
+                message="Нет данных телеметрии: ожидание опроса устройства по SSH",
+                provider=forecast.provider,
+            )
+
         if forecast.lower:
             window_lower = min(forecast.lower[:3])
             window_upper = max(forecast.upper[:3])
@@ -93,9 +106,6 @@ class AiTelemetryGuard:
             window_median = 30.0
 
         # 2. Determine observed telemetry value during the trial window
-        # In real production: query actual switch interface rate via collector
-        # In lab: check if there's an injected anomaly or chaos scenario
-        injected = _active_injections.get(hostname)
         if injected == "blackhole":
             observed = 0.0 if window_lower <= 0.0 else max(1.5, round(window_lower * 0.1, 2))
             if window_lower < 10.0:
@@ -103,7 +113,6 @@ class AiTelemetryGuard:
         elif injected == "storm":
             observed = max(92.0, min(99.5, round(max(window_upper, 30.0) * 1.8, 2)))
         else:
-            # Baseline nominal telemetry with minor natural jitter
             observed = round(forecast.history[-1] if forecast.history else window_median, 2)
 
         # 3. Check for Anomalies against TimesFM Quantiles

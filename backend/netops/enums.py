@@ -8,6 +8,7 @@ class Platform(StrEnum):
     ARISTA_EOS = "arista_eos"
     HUAWEI_VRP = "huawei_vrp"
     JUNIPER_JUNOS = "juniper_junos"
+    ELTEX_ESR = "eltex_esr"
     ELTEX_MES = "eltex_mes"
     YADRO_KORNFE = "yadro_kornfe"
     LINUX_SERVER = "linux_server"

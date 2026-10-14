@@ -31,154 +31,194 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
     }
   };
 
+  const cardClass =
+    'p-5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] flex flex-col justify-between space-y-4 transition-colors';
+  const codePill =
+    'px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] font-mono text-[11px] text-[var(--text-primary)]';
+  const actionBtn =
+    'w-full py-2 px-3 bg-[var(--bg-elevated)] hover:bg-[var(--text-primary)] text-[var(--text-primary)] hover:text-[var(--bg-main)] border border-[var(--border-subtle)] rounded-md text-xs font-medium transition-colors cursor-pointer disabled:opacity-50';
+
   return (
-    <div className="space-y-6">
-      <div className="p-6 rounded-2xl bg-gradient-to-r from-amber-500/[0.08] via-[var(--bg-card)] to-[var(--bg-card)] border border-amber-500/20">
-        <div className="flex items-center space-x-3 mb-2">
-          <div className="p-2 rounded-lg bg-amber-500/10 border border-amber-500/30">
-            <Flame className="w-5 h-5 text-amber-400" />
+    <div className="space-y-4">
+      {/* Header Banner */}
+      <div className="p-5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-2.5">
+            <div className="p-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
+              <Flame className="w-4 h-4 text-amber-400" />
+            </div>
+            <div>
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">{t.chaosTitle}</h2>
+              <div className="text-[11px] font-mono text-[var(--text-muted)]">{t.chaosSub}</div>
+            </div>
           </div>
-          <div>
-            <h2 className="text-sm font-bold font-mono text-white">{t.chaosTitle}</h2>
-            <div className="text-[11px] font-mono text-zinc-400">{t.chaosSub}</div>
-          </div>
+          <p className="text-xs text-[var(--text-secondary)] max-w-3xl leading-relaxed pt-1">
+            {locale === 'en'
+              ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei, commit trial auto-rollback, and TimesFM 3.0 AI Guard.'
+              : 'Модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя проверить работу Drift Engine на Cisco/Huawei, автооткат commit trial и защиту TimesFM 3.0 AI Guard.'}
+          </p>
         </div>
-        <p className="text-xs text-zinc-300 max-w-3xl leading-relaxed mt-2">
-          {locale === 'en'
-            ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei, commit trial auto-rollback, and TimesFM 3.0 AI Guard.'
-            : 'Этот модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя наглядно продемонстрировать работу Drift Engine на Cisco/Huawei, автооткат commit trial и защиту TimesFM 3.0 AI Guard.'}
-        </p>
       </div>
 
       {statusMessage && (
-        <div className="p-3.5 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 text-xs font-mono flex items-center space-x-2">
-          <Check className="w-4 h-4 text-cyan-400 shrink-0" />
+        <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-300 text-xs font-mono flex items-center gap-2">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{statusMessage}</span>
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
         {/* Scenario 1: Cisco ACL Drift */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-amber-500/40 transition">
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-amber-400">СЦЕНАРИЙ #1 (CISCO)</span>
-              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                СЦЕНАРИЙ #1 · CISCO IOS-XE
+              </span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Внепроцессный Дрейф ACL (Cisco)</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Имитация ручного входа по SSH на <code>leaf-1.croc.lab</code> и добавление строки <code>15 permit ip any any</code> в список <code>MGMT-IN</code> в обход репозитория Git.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Внепроцессный Дрейф ACL (Cisco)
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Имитация ручного входа по SSH на <code className={codePill}>leaf-1.croc.lab</code> и добавление строки{' '}
+              <code className={codePill}>15 permit ip any any</code> в список <code className={codePill}>MGMT-IN</code> в обход репозитория Git.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('acl_drift')}
             disabled={loading}
-            className="w-full py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className={actionBtn}
           >
             Внедрить дрейф Cisco
           </button>
         </div>
 
-        {/* Scenario 2: Huawei VRP ACL Drift */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-violet-500/40 transition">
+        {/* Scenario 2: Huawei VRP / Multi-Vendor ACL Drift */}
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-violet-400">СЦЕНАРИЙ #2 (HUAWEI)</span>
-              <AlertTriangle className="w-4 h-4 text-violet-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                СЦЕНАРИЙ #2 · MULTI-VENDOR
+              </span>
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Дрейф на Huawei VRP</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Внедрение несанкционированного правила <code>rule 15 permit ip</code> на <code>leaf-3.croc.lab</code> (Huawei VRP). Проверяет работу HierConfig с третьим вендором.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Дрейф на Huawei VRP / Leaf-2
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Внедрение несанкционированного правила <code className={codePill}>rule 15 permit ip</code> на резервном узле (
+              <code className={codePill}>leaf-2.croc.lab</code> / Huawei VRP). Проверяет работу HierConfig и транзакций{' '}
+              <code className={codePill}>commit trial</code>.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('huawei_drift')}
             disabled={loading}
-            className="w-full py-2 bg-violet-500/10 hover:bg-violet-500/20 text-violet-300 border border-violet-500/30 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className={actionBtn}
           >
-            Внедрить дрейф Huawei
+            Внедрить мультивендорный дрейф
           </button>
         </div>
 
         {/* Scenario 3: Port Down */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-rose-500/40 transition">
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-rose-400">СЦЕНАРИЙ #3</span>
-              <ShieldAlert className="w-4 h-4 text-rose-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                СЦЕНАРИЙ #3 · ФИЗИКА
+              </span>
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Авария Линка (Port Down)</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Падение межузлового линка <code>GigabitEthernet3</code> на <code>leaf-2.croc.lab</code>. Платформа фиксирует сбой post-check и автоматически блокирует деплой.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Авария Линка (Port Down)
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Падение межузлового линка <code className={codePill}>GigabitEthernet3</code> на{' '}
+              <code className={codePill}>leaf-2.croc.lab</code>. Платформа фиксирует сбой post-check и автоматически блокирует деплой.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('port_down')}
             disabled={loading}
-            className="w-full py-2 bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/30 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className={actionBtn}
           >
             Уронить интерфейс
           </button>
         </div>
 
         {/* Scenario 4: TimesFM AI Guard Silent Blackhole */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-cyan-500/30 flex flex-col justify-between space-y-4 hover:border-cyan-400/60 transition shadow-[0_0_15px_rgba(6,182,212,0.1)]">
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-cyan-400">TIMESFM 3.0 GUARD</span>
-              <ShieldAlert className="w-4 h-4 text-cyan-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                TIMESFM 3.0 · Q10 GUARD
+              </span>
+              <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Тихая авария (Silent Blackhole)</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Порты остаются в статусе <code>up/up</code>, но трафик падает в ноль. <strong>TimesFM 3.0</strong> выявляет пробой квантиля $Q_{10}$ во время окна <code>commit confirmed</code> и инициирует автооткат.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Тихая авария (Silent Blackhole)
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Порты остаются в статусе <code className={codePill}>up/up</code>, но трафик падает в ноль.{' '}
+              <strong>TimesFM 3.0</strong> выявляет пробой квантиля Q₁₀ во время окна{' '}
+              <code className={codePill}>commit confirmed</code> и инициирует автооткат.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('ai_blackhole')}
             disabled={loading}
-            className="w-full py-2 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className={actionBtn}
           >
             Смоделировать Blackhole
           </button>
         </div>
 
         {/* Scenario 5: TimesFM AI Guard Load Surge */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-fuchsia-500/30 flex flex-col justify-between space-y-4 hover:border-fuchsia-400/60 transition">
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-fuchsia-400">TIMESFM 3.0 GUARD</span>
-              <AlertTriangle className="w-4 h-4 text-fuchsia-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+                TIMESFM 3.0 · Q90 GUARD
+              </span>
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Шторм трафика / Микропетля</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Имитация аномального взлета нагрузки выше $Q_{90}$. TimesFM 3.0 блокирует закрепление коммита до устранения аномалии.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Шторм трафика / Микропетля
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Имитация аномального взлета нагрузки выше Q₉₀. TimesFM 3.0 блокирует закрепление коммита до устранения аномалии.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('ai_storm')}
             disabled={loading}
-            className="w-full py-2 bg-fuchsia-500/10 hover:bg-fuchsia-500/20 text-fuchsia-300 border border-fuchsia-500/40 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className={actionBtn}
           >
             Смоделировать шторм
           </button>
         </div>
 
         {/* Reset */}
-        <div className="p-5 rounded-2xl bg-[#0c0e14] border border-white/[0.08] flex flex-col justify-between space-y-4 hover:border-emerald-500/40 transition">
+        <div className={cardClass}>
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-mono font-bold text-emerald-400">СБРОС СТЕНДА</span>
-              <RotateCcw className="w-4 h-4 text-emerald-400" />
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+                ЭТАЛОН GIT SOT
+              </span>
+              <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
             </div>
-            <h3 className="text-sm font-bold font-mono text-white">Сброс к Git SoT</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed font-mono text-[11px]">
-              Возвращает рабочие конфигурации всех 6 коммутаторов к эталонным состояниям из Git за 1 секунду. Очищает аномалии AI Guard.
+            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+              Сброс к Git SoT
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
+              Возвращает рабочие конфигурации всех коммутаторов к эталонным состояниям из Git за 1 секунду. Очищает аномалии AI Guard.
             </p>
           </div>
           <button
             onClick={() => handleInjectChaos('reset_lab')}
             disabled={loading}
-            className="w-full py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-mono font-semibold transition cursor-pointer"
+            className="w-full py-2 px-3 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-semibold transition-opacity cursor-pointer disabled:opacity-50"
           >
             Сбросить к эталону (Reset)
           </button>
@@ -187,4 +227,3 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
     </div>
   );
 };
-

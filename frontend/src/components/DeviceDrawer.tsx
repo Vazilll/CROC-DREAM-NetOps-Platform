@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { api } from '../api';
 import type { DeviceDetail, UserRole } from '../api';
-import { StatusBadge } from './ui';
+import { StatusBadge, Sparkline } from './ui';
 import { PLATFORM_NAMES } from '../constants';
 
 interface DeviceDrawerProps {
@@ -325,8 +325,16 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                                   {nbr.description || 'eBGP Spine/Leaf peer'}
                                 </div>
                               </div>
-                              <div className="text-right text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                                Established
+                              <div
+                                className={`text-right text-[10px] px-2 py-0.5 rounded border ${
+                                  device.status === 'UNREACHABLE' || device.oper_status === 'DOWN'
+                                    ? 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+                                    : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                                }`}
+                              >
+                                {device.status === 'UNREACHABLE' || device.oper_status === 'DOWN'
+                                  ? 'Unreachable'
+                                  : 'Established'}
                               </div>
                             </div>
                           ))}
@@ -382,23 +390,16 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                         </span>
                       </div>
 
-                      {/* SVG Load sparkline */}
+                      {/* SVG Area Load sparkline */}
                       {device.sparkline && device.sparkline.length > 0 ? (
-                        <div className="h-20 w-full flex items-end gap-1 pt-2">
-                          {device.sparkline.map((val, idx) => (
-                            <div
-                              key={idx}
-                              style={{ height: `${Math.max(8, val)}%` }}
-                              className={`flex-1 rounded-t transition-all ${
-                                val > 80
-                                  ? 'bg-rose-500/60'
-                                  : val > 50
-                                  ? 'bg-amber-500/50'
-                                  : 'bg-emerald-500/40'
-                              }`}
-                              title={`Точка ${idx + 1}: ${val}%`}
-                            />
-                          ))}
+                        <div className="pt-2">
+                          <Sparkline
+                            points={device.sparkline}
+                            width={420}
+                            height={64}
+                            fullWidth
+                            showValue={false}
+                          />
                         </div>
                       ) : (
                         <div className="h-16 flex items-center justify-center text-xs text-zinc-500 font-mono">
@@ -410,7 +411,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                     <div className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] space-y-1.5 text-xs text-zinc-400">
                       <span className="text-zinc-300 font-medium font-mono text-[11px]">Аппаратные спецификации:</span>
                       <p className="font-mono text-[11px]">
-                        {device.hardware_specs || 'vCPU: 2 | RAM: 4GB | Port Profile: 100G/25G CLOS'}
+                        {device.hardware_specs || `${device.platform} · ${device.management_ip}:${device.management_port} · Портов в Intent: ${device.intent?.interfaces?.length ?? 0}`}
                       </p>
                     </div>
                   </div>

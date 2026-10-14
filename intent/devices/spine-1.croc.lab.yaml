@@ -1,41 +1,64 @@
-hostname: spine-1.croc.lab
+---
+hostname: "spine-1.croc.lab"
+
 interfaces:
-  - name: Loopback0
-    description: Router ID
-    ipv4_address: 10.255.0.1/32
-  - name: Ethernet1
-    description: Downlink to leaf-1
-    ipv4_address: 10.0.1.0/31
-    mtu: 9000
-  - name: Ethernet2
-    description: Downlink to leaf-2
-    ipv4_address: 10.0.2.0/31
-    mtu: 9000
-  - name: Ethernet3
-    description: Downlink to leaf-3
-    ipv4_address: 10.0.3.0/31
-    mtu: 9000
-  - name: Ethernet4
-    description: Downlink to leaf-4
-    ipv4_address: 10.0.4.0/31
-    mtu: 9000
+  - name: "Loopback0"
+    description: "Router-ID / BGP announce"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.255.0.11/32"
+    mtu: 1500
+
+  - name: "GigabitEthernet2"
+    description: "Downlink to leaf1 GigabitEthernet0/0/1"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.0/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+
+  - name: "GigabitEthernet3"
+    description: "Downlink to leaf2 GigabitEthernet0/0/1"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.2/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+
 bgp:
   asn: 65000
-  router_id: 10.255.0.1
+  router_id: "10.255.0.11"
   neighbors:
-    - peer_ip: 10.0.1.1
-      remote_asn: 65101
-      description: leaf-1
-      announced_prefixes: ["10.255.0.1/32"]
-    - peer_ip: 10.0.2.1
-      remote_asn: 65102
-      description: leaf-2
-      announced_prefixes: ["10.255.0.1/32"]
-    - peer_ip: 10.0.3.1
-      remote_asn: 65103
-      description: leaf-3
-      announced_prefixes: ["10.255.0.1/32"]
-    - peer_ip: 10.0.4.1
-      remote_asn: 65104
-      description: leaf-4
-      announced_prefixes: ["10.255.0.1/32"]
+    - peer_ip: "10.10.0.1"
+      remote_asn: 65001
+      description: "leaf1"
+      announced_prefixes:
+        - "10.255.0.11/32"
+    - peer_ip: "10.10.0.3"
+      remote_asn: 65002
+      description: "leaf2"
+      announced_prefixes:
+        - "10.255.0.11/32"
+
+acls:
+  - name: "FABRIC-IN"
+    type: "extended"
+    rules:
+      - sequence: 10
+        action: "permit"
+        protocol: "icmp"
+      - sequence: 20
+        action: "permit"
+        protocol: "tcp"
+        dst_port: "bgp"
+      - sequence: 30
+        action: "permit"
+        protocol: "tcp"
+        src_port: "bgp"
+      - sequence: 40
+        action: "deny"
+        protocol: "tcp"
+        dst_port: "telnet"
+      - sequence: 50
+        action: "permit"
+        protocol: "ip"

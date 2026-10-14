@@ -78,18 +78,39 @@ class JobRunner:
                 recorder.fail(f"Internal error: {type(exc).__name__}: {exc}")
             else:
                 recorder.finish()
+
+            try:
+                from netops.services.notifier import send_telegram_message  # noqa: PLC0415
+                from netops.settings import get_settings  # noqa: PLC0415
+
+                settings = get_settings()
+                if settings.telegram_bot_token and job.created_by != "scheduler":
+                    targets_str = ", ".join(
+                        f"{t.hostname} ({t.status.value})" for t in job.targets
+                    ) or "все узлы"
+                    send_telegram_message(
+                        settings,
+                        f"<b>[NetOps Pipeline | {job.type.value}]</b> Статус: <b>{job.status.value}</b>\n"
+                        f"<b>Автор:</b> <code>{job.created_by}</code>\n"
+                        f"<b>Узлы:</b> <code>{targets_str}</code>"
+                        + (f"\n<b>Ошибка:</b> <code>{job.error}</code>" if job.error else ""),
+                    )
+            except Exception:
+                pass
             return job.status
 
 
 def fail_stale_jobs(session: Session, *, timeout: timedelta) -> list[uuid.UUID]:
     cutoff = utcnow() - timeout
     stale = session.scalars(
-        select(Job).where(
+        select(Job)
+        .where(
             or_(
                 (Job.status == JobStatus.RUNNING) & (Job.started_at < cutoff),
                 (Job.status == JobStatus.PENDING) & (Job.created_at < cutoff),
             )
         )
+        .with_for_update(skip_locked=True)
     ).all()
     for job in stale:
         JobRecorder(session, job).fail(

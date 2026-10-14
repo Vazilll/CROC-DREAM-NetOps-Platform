@@ -126,3 +126,178 @@ def test_update_validation(client: TestClient) -> None:
     url = f"/api/v1/users/{user['id']}"
     assert client.patch(url, json={"role": None}, headers=ADMIN).status_code == 422
     assert client.patch(url, json={"username": "renamed"}, headers=ADMIN).status_code == 422
+
+
+def test_batch_invites_and_single_device_binding(client: TestClient) -> None:
+    batch_res = client.post(
+        "/api/v1/users/batch",
+        json={"prefix": "jury", "role": "viewer", "count": 3},
+        headers=ADMIN,
+    )
+    assert batch_res.status_code == 201, batch_res.text
+    created = batch_res.json()
+    assert len(created) == 3
+    assert [u["username"] for u in created] == ["jury-1", "jury-2", "jury-3"]
+
+    first = created[0]
+    token = first["token"]
+
+    # First device binds the token
+    res_a = client.get(
+        "/api/v1/auth/me",
+        headers={**_bearer(token), "X-Client-ID": "device-alpha", "User-Agent": "Firefox/Linux"},
+    )
+    assert res_a.status_code == 200
+    assert res_a.json() == {"username": "jury-1", "role": "viewer"}
+
+    # Second device attempting to use the same link is rejected with 403
+    res_b = client.get(
+        "/api/v1/auth/me",
+        headers={**_bearer(token), "X-Client-ID": "device-beta"},
+    )
+    assert res_b.status_code == 403
+
+    # Admin unbinds the device, allowing device-beta to connect
+    unbind_res = client.post(f"/api/v1/users/{first['id']}/unbind", headers=ADMIN)
+    assert unbind_res.status_code == 200
+    assert unbind_res.json()["bound_client_id"] is None
+
+    res_b_after = client.get(
+        "/api/v1/auth/me",
+        headers={**_bearer(token), "X-Client-ID": "device-beta"},
+    )
+    assert res_b_after.status_code == 200
+
+
+def test_allowed_system_restricts_device_visibility_and_records_session_telemetry(
+    client: TestClient,
+    devices: dict[str, Any],
+) -> None:
+
+    res = client.post(
+        "/api/v1/users",
+        json={
+            "username": "spine1-engineer",
+            "role": "operator",
+            "allowed_system": "spine-1.croc.lab",
+        },
+        headers=ADMIN,
+    )
+    assert res.status_code == 201, res.text
+    created = res.json()
+    assert created["allowed_system"] == "spine-1.croc.lab"
+    token = created["token"]
+
+    headers = {
+        **_bearer(token),
+        "X-Client-ID": "laptop-spine1",
+        "X-Forwarded-For": "10.20.30.40",
+        "User-Agent": "Chrome/125.0 Linux",
+    }
+
+    # User only sees spine-1.croc.lab in /api/v1/devices
+    devs = client.get("/api/v1/devices", headers=headers)
+    assert devs.status_code == 200
+    dev_list = devs.json()
+    assert len(dev_list) == 1
+    assert dev_list[0]["hostname"] == "spine-1.croc.lab"
+
+    # Trying to access another device directly returns 403
+    all_devs = client.get("/api/v1/devices", headers=ADMIN).json()
+    other_dev = next(d for d in all_devs if d["hostname"] != "spine-1.croc.lab")
+    forbidden = client.get(f"/api/v1/devices/{other_dev['id']}", headers=headers)
+    assert forbidden.status_code == 403
+
+    # Owner inspects /api/v1/users and sees bound_ip, bound_client_id, last_seen_at
+    profile = client.get(f"/api/v1/users/{created['id']}", headers=ADMIN).json()
+    assert profile["bound_client_id"] == "laptop-spine1"
+    assert profile["bound_ip"] == "10.20.30.40"
+    assert profile["last_seen_at"] is not None
+
+    # /api/v1/users/me returns the full user profile
+    me_full = client.get("/api/v1/users/me", headers=headers).json()
+    assert me_full["username"] == "spine1-engineer"
+    assert me_full["allowed_system"] == "spine-1.croc.lab"
+
+    # Owner changes allowed_system to null (whole fabric)
+    patched = client.patch(
+        f"/api/v1/users/{created['id']}",
+        json={"allowed_system": None},
+        headers=ADMIN,
+    )
+    assert patched.status_code == 200
+    assert patched.json()["allowed_system"] is None
+    assert len(client.get("/api/v1/devices", headers=headers).json()) == 4
+
+
+def test_dev_client_id_strict_single_device_lock_blocks_second_person(
+    client: TestClient,
+) -> None:
+    """Verify that browser-generated dev-* client IDs strictly enforce 1-link = 1-device."""
+    res = client.post(
+        "/api/v1/users",
+        json={"username": "timofey-link", "role": "admin", "expires_in_minutes": 60},
+        headers=ADMIN,
+    )
+    assert res.status_code == 201
+    created = res.json()
+    token = created["token"]
+    assert created["expires_at"] is not None
+    assert created["verification_code"] is not None
+    assert len(created["verification_code"]) == 6
+
+    # First person (Owner) opens the link from browser dev-owner111
+    first_login = client.get(
+        "/api/v1/auth/me",
+        headers={**_bearer(token), "X-Client-ID": "dev-owner111"},
+    )
+    assert first_login.status_code == 200
+
+    # Second person (Timofey) tries to open the exact same link from browser dev-timofey222
+    second_login = client.get(
+        "/api/v1/auth/me",
+        headers={**_bearer(token), "X-Client-ID": "dev-timofey222"},
+    )
+    assert second_login.status_code == 403
+
+
+def test_token_ttl_and_verification_code_generation(
+    client: TestClient,
+    session: Session,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    res = client.post(
+        "/api/v1/users",
+        json={"username": "temp-operator", "role": "operator", "expires_in_minutes": 15},
+        headers=ADMIN,
+    )
+    assert res.status_code == 201
+    data = res.json()
+    user_id = data["id"]
+    token = data["token"]
+
+    # Generate a fresh 6-digit Telegram verification code
+    vc_res = client.post(f"/api/v1/users/{user_id}/verify-code", headers=ADMIN)
+    assert vc_res.status_code == 200
+    new_code = vc_res.json()["verification_code"]
+    assert new_code is not None and len(new_code) == 6
+
+    # Simulate token expiration in DB
+    db_user = session.get_one(User, user_id)
+    db_user.expires_at = datetime.now(UTC) - timedelta(minutes=5)
+    session.commit()
+
+    expired_check = client.get("/api/v1/auth/me", headers=_bearer(token))
+    assert expired_check.status_code == 403
+
+    # Switch token to forever (expires_in_minutes = 0)
+    forever_res = client.patch(
+        f"/api/v1/users/{user_id}",
+        json={"expires_in_minutes": 0},
+        headers=ADMIN,
+    )
+    assert forever_res.status_code == 200
+    assert forever_res.json()["expires_at"] is None
+    assert client.get("/api/v1/auth/me", headers=_bearer(token)).status_code == 200
+

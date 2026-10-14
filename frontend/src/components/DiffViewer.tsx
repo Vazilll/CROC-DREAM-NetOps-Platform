@@ -527,7 +527,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
                   title="Переключить между Monaco Editor и мгновенным текстовым режимом"
                 >
                   <Zap className={`w-3.5 h-3.5 ${viewEngine === 'plain' ? 'text-amber-500' : 'text-zinc-400'}`} />
-                  <span>{viewEngine === 'plain' ? '⚡ Быстрый вид' : 'Monaco'}</span>
+                  <span>{viewEngine === 'plain' ? 'Быстрый вид' : 'Monaco'}</span>
                 </button>
 
                 {activeDeviceDiff && (

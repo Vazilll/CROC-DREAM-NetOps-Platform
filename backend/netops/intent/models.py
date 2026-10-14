@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from enum import StrEnum
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from itertools import combinations
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -15,10 +15,11 @@ from pydantic import (
     StringConstraints,
     ValidationInfo,
     field_validator,
+    model_validator,
 )
 from pydantic_core import PydanticCustomError
 
-from netops.enums import DeviceRole, Platform
+from netops.enums import DeviceRole, DeviceStatus, Platform
 
 _LABEL = r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
 
@@ -26,7 +27,8 @@ Hostname = Annotated[str, StringConstraints(max_length=253, pattern=rf"^{_LABEL}
 Asn = Annotated[int, Field(ge=1, le=4_294_967_295, description="Номер AS (2 или 4 байта)")]
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[\w.\-]+$")]
 InterfaceName = Annotated[
-    str, StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z][\w./:\-]*$")
+    str,
+    StringConstraints(min_length=1, max_length=64, pattern=r"^[A-Za-z][\w./:\-]*(?: [\w./:\-]+)?$"),
 ]
 Description = Annotated[str, StringConstraints(max_length=240, strip_whitespace=True)]
 
@@ -49,6 +51,8 @@ class InterfaceIntent(IntentModel):
         default=None, description="Адрес с маской, например 10.10.0.1/31"
     )
     mtu: int = Field(default=1500, ge=68, le=9216)
+    # Входящий ACL на интерфейсе: имя из блока acls этого же устройства.
+    acl_in: Identifier | None = None
 
     @field_validator("ipv4_address", mode="before")
     @classmethod
@@ -156,12 +160,15 @@ class AclRule(IntentModel):
     sequence: int = Field(ge=1, le=4_294_967_295)
     action: AclAction
     protocol: AclProtocol
-    source: AclEndpoint
-    destination: AclEndpoint
+    source: AclEndpoint = "any"
+    destination: AclEndpoint = "any"
+    src_port: str | int | None = None
+    dst_port: str | int | None = None
 
 
 class AclIntent(IntentModel):
     name: Identifier
+    type: str | None = None
     rules: list[AclRule] = Field(min_length=1)
 
     @field_validator("rules")
@@ -202,25 +209,54 @@ class DeviceIntent(IntentModel):
         _ensure_unique((a.name for a in acls), "duplicate_acl", "ACL")
         return acls
 
+    # Опечатку в имени ACL лучше поймать здесь, чем получить патч, снимающий фильтр.
+    @model_validator(mode="after")
+    def _known_acl_bindings(self) -> Self:
+        declared = {acl.name for acl in self.acls}
+        for interface in self.interfaces:
+            if interface.acl_in is not None and interface.acl_in not in declared:
+                raise PydanticCustomError(
+                    "unknown_acl",
+                    "Interface {interface} references ACL {acl}, which is not declared",
+                    {"interface": interface.name, "acl": interface.acl_in},
+                )
+        return self
 
+
+# id и status есть в модели устройства из ТЗ. Статус в файле справочный: в базе его
+# выставляет Drift Engine.
 class InventoryDevice(IntentModel):
     model_config = ConfigDict(from_attributes=True)
 
+    id: int | str | None = None
     hostname: Hostname
     management_ip: IPv4Address
     management_port: int = Field(default=22, ge=1, le=65535)
     platform: Platform
     role: DeviceRole
     auth_profile: Identifier
+    status: DeviceStatus | None = None
 
 
 class Inventory(IntentModel):
     devices: list[InventoryDevice] = Field(default_factory=list)
 
+    @model_validator(mode="before")
+    @classmethod
+    def _no_credentials(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "auth_profiles" in data:
+            raise PydanticCustomError(
+                "credentials_in_inventory",
+                "Credentials must not be stored in inventory.yaml; "
+                "set them in NETOPS_AUTH_PROFILES and keep only auth_profile names here",
+            )
+        return data
+
     @field_validator("devices")
     @classmethod
     def _unique_devices(cls, devices: list[InventoryDevice]) -> list[InventoryDevice]:
         _ensure_unique((d.hostname.lower() for d in devices), "duplicate_hostname", "Hostname")
+        _ensure_unique((str(d.id) for d in devices if d.id is not None), "duplicate_id", "Id")
         _ensure_unique(
             (f"{d.management_ip}:{d.management_port}" for d in devices),
             "duplicate_management_endpoint",

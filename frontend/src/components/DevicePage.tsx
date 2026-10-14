@@ -893,31 +893,49 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </div>
 
             {/* Projected Outcome Card */}
-            {whatIfExtraLoad > 0 && (
-              <div className={`p-4 rounded-xl border flex items-start gap-3 animate-fade-in ${
-                whatIfExtraLoad < 40
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-              }`}>
-                {whatIfExtraLoad < 40 ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
-                ) : (
-                  <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-                )}
-                <div>
-                  <div className="text-xs font-semibold text-white">
-                    {whatIfExtraLoad < 40
-                      ? `Запас пропускной способности достаточен (Headroom: ~${65 - whatIfExtraLoad}%)`
-                      : `Критический риск исчерпания емкости буферов и сброса BFD-пакетов`}
+            {whatIfExtraLoad > 0 && (() => {
+              const baseVal = forecastData && forecastData.history.length > 0
+                ? forecastData.history[forecastData.history.length - 1]
+                : (device.sparkline && device.sparkline.length > 0 ? device.sparkline[device.sparkline.length - 1] : null);
+              const peakForecast = forecastData && forecastData.median.length > 0
+                ? Math.max(...forecastData.median)
+                : baseVal;
+              const threshold = forecastData ? forecastData.threshold : 85;
+              if (baseVal === null || peakForecast === null) {
+                return (
+                  <div className="p-4 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs text-zinc-400">
+                    Недостаточно данных телеметрии с {device.hostname} для расчета нагрузки (+{whatIfExtraLoad}%).
                   </div>
-                  <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
-                    {whatIfExtraLoad < 40
-                      ? `При увеличении нагрузки на ${whatIfExtraLoad}% узел ${device.hostname} удержит утилизацию портов в безопасной зоне до 68%. BGP пиринг и задержки пакетов останутся в SLA.`
-                      : `При росте нагрузки на ${whatIfExtraLoad}% утилизация аплинков достигнет 92%. Очереди Tail-Drop возрастут в 4.2 раза. Рекомендуется активировать альтернативные маршруты в BGP Intent до всплеска.`}
-                  </p>
+                );
+              }
+              const projectedNow = Math.min(100, +(baseVal + whatIfExtraLoad).toFixed(1));
+              const projectedPeak = Math.min(100, +(peakForecast + whatIfExtraLoad).toFixed(1));
+              const headroom = +(threshold - projectedPeak).toFixed(1);
+              const isSafe = projectedPeak < threshold;
+              return (
+                <div className={`p-4 rounded-xl border flex items-start gap-3 animate-fade-in ${
+                  isSafe
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                }`}>
+                  {isSafe ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <div className="text-xs font-semibold text-white">
+                      {isSafe
+                        ? `Запас до порога ${threshold}% достаточен (Headroom: ${headroom}%)`
+                        : `Прогнозируется превышение порога ${threshold}% (пик: ${projectedPeak}%)`}
+                    </div>
+                    <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                      Текущий замер: {baseVal}% → с добавкой +{whatIfExtraLoad}% составит {projectedNow}% (пик по прогнозу: {projectedPeak}% при пороге {threshold}%).
+                    </p>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
         </div>
       )}
@@ -1139,14 +1157,14 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
       {tab === 'AI Copilot' && (
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0c0e14] p-5 md:p-6 space-y-4 shadow-sm dark:shadow-none">
-            <div className="flex items-center gap-3 pb-3 border-b border-slate-100 dark:border-white/[0.06]">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500/20 via-purple-500/20 to-cyan-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shadow-xs">
-                <Sparkles className="w-5 h-5" />
+            <div className="flex items-center gap-3 pb-3 border-b border-[var(--border-subtle)]">
+              <div className="w-9 h-9 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)]">
+                <Sparkles className="w-4 h-4" />
               </div>
               <div>
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <h3 className="text-sm font-semibold text-[var(--text-primary)] flex items-center gap-2">
                   <span>Интеллектуальный ассистент узла</span>
-                  <span className="font-mono text-xs px-2 py-0.5 rounded bg-indigo-50 dark:bg-indigo-950/60 border border-indigo-200 dark:border-indigo-800 text-indigo-700 dark:text-indigo-300">
+                  <span className="font-mono text-xs px-2 py-0.5 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
                     {device.hostname}
                   </span>
                 </h3>
@@ -1166,21 +1184,18 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   onClick={() => handleAskCopilot(`Потянет ли этот узел дополнительную нагрузку +30%?`)}
                   className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
                 >
-                  <span className="text-amber-500 font-bold">💡</span>
                   <span>Потянет ли узел нагрузку +30%?</span>
                 </button>
                 <button
                   onClick={() => handleAskCopilot(`Как безопасно вывести узел ${device.hostname} на техобслуживание (Drain)?`)}
                   className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
                 >
-                  <span className="text-emerald-500 font-bold">🛡️</span>
                   <span>Сценарий вывода на техобслуживание (Drain)</span>
                 </button>
                 <button
                   onClick={() => handleAskCopilot(`Проанализируй связность BGP и проверь риск сплит-брейна.`)}
                   className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
                 >
-                  <span className="text-cyan-500 font-bold">🌐</span>
                   <span>Проверка BGP связности и сплит-брейна</span>
                 </button>
               </div>
@@ -1262,7 +1277,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <p className="text-xs text-zinc-300 leading-relaxed">{emergencyModal.description}</p>
 
             <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs">
-              ⚠️ Данное воздействие применяется немедленно в обход очередей верификации.
+              Данное воздействие применяется немедленно в обход очередей верификации.
             </div>
 
             <div>

@@ -1,1 +1,3 @@
-hostname {{ intent.hostname }}
+hostname {{ intent.hostname.split(".")[0] }}
+{# Без ip routing Arista не маршрутизирует: на стенде строка включена #}
+ip routing

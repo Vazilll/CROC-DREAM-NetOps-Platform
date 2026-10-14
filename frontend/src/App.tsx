@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useState, useCallback } from 'react';
-import { api, ROLE_TOKENS } from './api';
+import { api } from './api';
 import type { Device, JobSummary, UserRole } from './api';
 import { Header } from './components/Header';
 import type { AppTheme } from './components/Header';
@@ -51,7 +51,9 @@ function areDevicesEqual(a: Device[], b: Device[]): boolean {
       da.role !== db.role ||
       da.management_ip !== db.management_ip ||
       da.last_checked_at !== db.last_checked_at ||
-      da.updated_at !== db.updated_at
+      da.updated_at !== db.updated_at ||
+      da.sparkline?.length !== db.sparkline?.length ||
+      da.sparkline?.at(-1) !== db.sparkline?.at(-1)
     ) {
       return false;
     }
@@ -130,11 +132,6 @@ export function App() {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.className = theme === 'dark' ? 'theme-dark dark' : 'theme-light';
   }, [theme]);
-
-  // Sync token whenever role changes
-  useEffect(() => {
-    api.setToken(ROLE_TOKENS[userRole]);
-  }, [userRole]);
 
   // Global window keydown listener with priority Escape order, ?, and Ctrl+K
   useEffect(() => {
@@ -254,11 +251,25 @@ export function App() {
     return jobs.some((j) => j.status === 'RUNNING' || j.status === 'PENDING');
   }, [jobs]);
 
-  // Initial load on mount
+  // Initial load on mount (including personal token & device binding verification)
   useEffect(() => {
     let active = true;
     (async () => {
       try {
+        try {
+          const me = await api.getMe();
+          if (active && me.id !== null) {
+            setUserRole(me.role);
+            localStorage.setItem('netops_user_role', me.role);
+          }
+        } catch (authErr: any) {
+          if (active) {
+            showToast(authErr.message || 'Ошибка авторизации токена', 'error');
+            api.setRole('viewer');
+            setUserRole('viewer');
+          }
+        }
+
         const [devs, jbs] = await Promise.all([api.getDevices(), api.getJobs()]);
         if (!active) return;
         setDevices((prev) => (areDevicesEqual(prev, devs) ? prev : devs));
@@ -277,7 +288,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [showToast]);
 
   // Periodic polling & visibility-based updates
   useEffect(() => {
@@ -418,6 +429,7 @@ export function App() {
   }, [handleScanDrift]);
 
   const handleSwitchRole = useCallback((role: UserRole) => {
+    api.setRole(role);
     setUserRole(role);
   }, []);
 
@@ -449,7 +461,7 @@ export function App() {
   }, [locale, showToast, refreshAll, fetchDevices]);
 
   return (
-    <div className="min-h-screen bg-[var(--bg-main)] text-[var(--text-primary)] flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors">
+    <div className="min-h-dvh overflow-x-hidden bg-[var(--bg-main)] text-[var(--text-primary)] flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors">
       <Header
         userRole={userRole}
         setUserRole={handleSwitchRole}

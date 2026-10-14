@@ -21,6 +21,7 @@ class DeviceTarget:
     host: str
     port: int
     credentials: Credentials = field(repr=False)
+    proxy_jump: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +89,9 @@ class HealthSnapshot:
     bgp_sessions: Mapping[str, BgpSessionState] = field(default_factory=dict)
     interfaces: Mapping[str, InterfaceState] = field(default_factory=dict)
     ping_loss_percent: Mapping[str, float] = field(default_factory=dict)
+    cpu_pct: float | None = None
+    memory_pct: float | None = None
+    uplink_util_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

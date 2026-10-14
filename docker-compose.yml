@@ -80,6 +80,26 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
+  # Бот оповещает о дрейфе и упавших задачах и отвечает на команды (/status, /drift).
+  # Без NETOPS_TELEGRAM_BOT_TOKEN и NETOPS_TELEGRAM_CHAT_IDS просто простаивает.
+  telegram-bot:
+    <<: *backend
+    command: python -m netops.telemetry.bot
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports: ["${PROMETHEUS_PORT:-9090}:9090"]
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
   frontend:
     build: ./frontend
     ports: ["${FRONTEND_PORT:-5173}:80"]
@@ -87,3 +107,4 @@ services:
 
 volumes:
   postgres-data:
+  prometheus-data:

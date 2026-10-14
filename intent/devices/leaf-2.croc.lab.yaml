@@ -1,25 +1,73 @@
-hostname: leaf-2.croc.lab
+---
+hostname: "leaf-2.croc.lab"
+
 interfaces:
-  - name: Loopback0
-    description: Router ID
-    ipv4_address: 10.255.1.2/32
-  - name: GigabitEthernet5
-    description: Uplink to spine-1
-    ipv4_address: 10.0.2.1/31
-    mtu: 9000
-  - name: GigabitEthernet6
-    description: Uplink to spine-2
-    ipv4_address: 10.0.2.3/31
-    mtu: 9000
+  - name: "LoopBack0"
+    description: "Router-ID / BGP announce"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.255.0.2/32"
+    mtu: 1500
+
+  - name: "GE1/0/0"
+    description: "Uplink to spine1 GigabitEthernet3"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.3/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+
+  - name: "GE1/0/1"
+    description: "Uplink to spine2 Ethernet2"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.7/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+
+  - name: "GE1/0/9"
+    description: "Access to host-b"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.20.2.1/24"
+    mtu: 1500
+
 bgp:
-  asn: 65102
-  router_id: 10.255.1.2
+  asn: 65002
+  router_id: "10.255.0.2"
   neighbors:
-    - peer_ip: 10.0.2.0
+    - peer_ip: "10.10.0.2"
       remote_asn: 65000
-      description: spine-1
-      announced_prefixes: ["10.255.1.2/32"]
-    - peer_ip: 10.0.2.2
+      description: "spine1"
+      announced_prefixes:
+        - "10.255.0.2/32"
+        - "10.20.2.0/24"
+    - peer_ip: "10.10.0.6"
       remote_asn: 65000
-      description: spine-2
-      announced_prefixes: ["10.255.1.2/32"]
+      description: "spine2"
+      announced_prefixes:
+        - "10.255.0.2/32"
+        - "10.20.2.0/24"
+
+acls:
+  - name: "FABRIC-IN"
+    type: "extended"
+    rules:
+      - sequence: 10
+        action: "permit"
+        protocol: "icmp"
+      - sequence: 20
+        action: "permit"
+        protocol: "tcp"
+        dst_port: "bgp"
+      - sequence: 30
+        action: "permit"
+        protocol: "tcp"
+        src_port: "bgp"
+      - sequence: 40
+        action: "deny"
+        protocol: "tcp"
+        dst_port: "telnet"
+      - sequence: 50
+        action: "permit"
+        protocol: "ip"

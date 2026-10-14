@@ -48,6 +48,7 @@ export default defineConfig({
       },
       '/healthz': 'http://127.0.0.1:8001',
       '/readyz': 'http://127.0.0.1:8001',
+      '/metrics': 'http://127.0.0.1:8001',
     },
   },
   preview: {
@@ -61,6 +62,7 @@ export default defineConfig({
       },
       '/healthz': 'http://127.0.0.1:8001',
       '/readyz': 'http://127.0.0.1:8001',
+      '/metrics': 'http://127.0.0.1:8001',
     },
   },
 })

@@ -1,3 +1,9 @@
+{% set declared = intent.interfaces | map(attribute="name") | join(" ") | lower %}
+{% if intent.bgp and "loopback" not in declared %}
+interface Loopback0
+   description Router-ID
+   ip address {{ intent.bgp.router_id }}/32
+{% endif %}
 {% for iface in intent.interfaces %}
 interface {{ iface.name }}
 {% if iface.description %}
@@ -11,6 +17,11 @@ interface {{ iface.name }}
 {% endif %}
 {% if iface.ipv4_address %}
    ip address {{ iface.ipv4_address.with_prefixlen }}
+{% endif %}
+{% if not iface.name.lower().startswith("loopback") %}
+{% if iface.acl_in %}
+   ip access-group {{ iface.acl_in }} in
+{% endif %}
 {% endif %}
 {% if not iface.enabled %}
    shutdown

@@ -3,11 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 import jinja2
+import jinja2.sandbox
 
 from netops.errors import NetOpsError
 from netops.intent.models import DeviceIntent, InventoryDevice
 
-SECTIONS = ("base", "interfaces", "acls", "bgp", "vxlan")
+SECTIONS = ("base", "interfaces", "acls", "bgp")
 
 
 class RenderError(NetOpsError):
@@ -17,7 +18,7 @@ class RenderError(NetOpsError):
 class JinjaConfigRenderer:
     def __init__(self, templates_path: Path) -> None:
         self._root = templates_path
-        self._env = jinja2.Environment(
+        self._env = jinja2.sandbox.SandboxedEnvironment(
             loader=jinja2.FileSystemLoader(templates_path),
             undefined=jinja2.StrictUndefined,
             trim_blocks=True,

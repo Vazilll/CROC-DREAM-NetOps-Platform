@@ -196,7 +196,11 @@ class JobService:
         return [found[device_id] for device_id in ids]
 
     def _ensure_idle(self, device_ids: Iterable[int]) -> None:
-        ids = list(device_ids)
+        ids = sorted(set(device_ids))
+        if ids:
+            self._session.scalars(
+                select(Device.id).where(Device.id.in_(ids)).order_by(Device.id).with_for_update()
+            ).all()
         busy = self._session.execute(
             select(JobTarget.hostname, Job.id)
             .join(Job)

@@ -613,6 +613,118 @@ export interface FreezeStatus {
   frozen_by?: string;
 }
 
+/**
+ * RBAC User / Personal Invite account stored in PostgreSQL/SQLite (`users` table)
+ * with single-device binding state (`1 link = 1 device`) and optional target system restriction.
+ */
+export interface UserAccount {
+  id: number | null;
+  username: string;
+  role: 'viewer' | 'operator' | 'admin';
+  is_active: boolean;
+  active?: boolean;
+  allowed_system: string | null;
+  bound_client_id: string | null;
+  bound_ip: string | null;
+  bound_user_agent: string | null;
+  bound_at: string | null;
+  last_seen_at: string | null;
+  expires_at?: string | null;
+  telegram_chat_id?: string | null;
+  telegram_username?: string | null;
+  telegram_verified_at?: string | null;
+  verification_code?: string | null;
+  verification_expires_at?: string | null;
+  created_at: string | null;
+  updated_at?: string | null;
+}
+
+/**
+ * Newly minted or rotated invite link credentials (token is returned once).
+ */
+export interface UserInviteCreated extends UserAccount {
+  token: string;
+}
+
+/**
+ * Git Source of Truth (SoT) repository & GitHub synchronization state.
+ */
+export interface GitStatusInfo {
+  repo_path: string;
+  github_repo_url: string;
+  is_git_repo: boolean;
+  branch?: string;
+  commit_sha?: string;
+  commit_short?: string;
+  last_commit_message?: string;
+  last_commit_at?: string;
+  remote_url?: string;
+  working_tree_clean?: boolean;
+  modified_files?: string[];
+  webhook_configured: boolean;
+  auto_sync_on_push: boolean;
+}
+
+/**
+ * Unified external integrations & database connectivity status.
+ */
+export interface TelegramBindingInfo {
+  chat_id: number;
+  username: string;
+  tg_username?: string;
+  first_name?: string;
+  role: string;
+  token?: string;
+}
+
+export interface SecurityEventEntry {
+  timestamp: string;
+  type: string;
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  message: string;
+  username?: string | null;
+  client_id?: string | null;
+  client_ip?: string | null;
+  telegram_chat_id?: string | null;
+}
+
+export interface IntegrationsStatus {
+  sessions?: UserAccount[];
+  user_tokens?: Record<string, string>;
+  security_events?: SecurityEventEntry[];
+  access_registry?: Record<string, unknown>;
+  database: {
+    engine: 'postgresql' | 'sqlite';
+    status: string;
+    counts: {
+      devices: number;
+      jobs: number;
+      users: number;
+      bound_sessions: number;
+      metric_samples: number;
+    };
+  };
+  github_sot: GitStatusInfo;
+  netbox: {
+    configured: boolean;
+    url: string | null;
+    mode: string;
+  };
+  prometheus: {
+    configured: boolean;
+    url: string | null;
+    scrape_endpoint: string;
+    collector_interval_sec: number;
+  };
+  telegram: {
+    configured: boolean;
+    bot_token_set: boolean;
+    chat_ids: number[];
+    bindings?: TelegramBindingInfo[];
+    commands: string[];
+  };
+}
+
 // ============================================================================
 // API Client Implementation
 // ============================================================================
@@ -645,6 +757,9 @@ export class NetOpsApiClient {
    */
   setToken(token: string): void {
     this.token = token;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('netops_token', token);
+    }
   }
 
   /**
@@ -657,8 +772,26 @@ export class NetOpsApiClient {
   }
 
   /**
+   * Returns a persistent unique client device fingerprint stored in localStorage.
+   * Sent via `X-Client-ID` header to enforce `1 link = 1 device` session binding.
+   */
+  getClientId(): string {
+    if (typeof window === 'undefined') return 'ssr-client';
+    let clientId = localStorage.getItem('netops_client_id');
+    if (!clientId) {
+      const rand =
+        typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID().slice(0, 12)
+          : Math.random().toString(36).slice(2, 10) + '-' + Date.now().toString(36);
+      clientId = `dev-${rand}`;
+      localStorage.setItem('netops_client_id', clientId);
+    }
+    return clientId;
+  }
+
+  /**
    * Internal generic HTTP request dispatcher.
-   * Injects JSON headers, Bearer authorization, and standardizes error responses.
+   * Injects JSON headers, Bearer authorization, X-Client-ID device fingerprint, and standardizes error responses.
    *
    * @template T - Expected JSON response shape
    * @param endpoint - Relative endpoint path under `/api/v1`
@@ -670,6 +803,7 @@ export class NetOpsApiClient {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${this.token}`,
+      'X-Client-ID': this.getClientId(),
       ...((options.headers as Record<string, string>) || {}),
     };
 
@@ -691,6 +825,10 @@ export class NetOpsApiClient {
         message = JSON.stringify(err.detail);
       }
       throw new Error(message);
+    }
+
+    if (res.status === 204) {
+      return undefined as T;
     }
 
     return res.json();
@@ -1201,8 +1339,182 @@ export class NetOpsApiClient {
   }
 
   // --------------------------------------------------------------------------
-  // Session, Sharing & State Utilities
+  // Session, Sharing, Git SoT & Integrations Utilities
   // --------------------------------------------------------------------------
+
+  /**
+   * Returns current authenticated user profile and device binding status.
+   */
+  async getMe(): Promise<UserAccount> {
+    return this.request<UserAccount>('/users/me');
+  }
+
+  /**
+   * Lists all database-backed personal invite accounts and their device bindings.
+   */
+  async getUsers(): Promise<UserAccount[]> {
+    return this.request<UserAccount[]>('/users');
+  }
+
+  /**
+   * Creates a single personal invite token in the database.
+   */
+  async createUserInvite(
+    username: string,
+    role: 'viewer' | 'operator' | 'admin',
+    allowedSystem?: string | null,
+    expiresInMinutes?: number | null
+  ): Promise<UserInviteCreated> {
+    return this.request<UserInviteCreated>('/users', {
+      method: 'POST',
+      body: JSON.stringify({
+        username,
+        role,
+        allowed_system: allowedSystem || null,
+        expires_in_minutes: expiresInMinutes && expiresInMinutes > 0 ? expiresInMinutes : null,
+      }),
+    });
+  }
+
+  /**
+   * Generates a batch of N individual personal invite tokens at once (1 link = 1 device).
+   */
+  async createBatchInvites(
+    prefix: string,
+    role: 'viewer' | 'operator' | 'admin',
+    count: number,
+    allowedSystem?: string | null,
+    expiresInMinutes?: number | null
+  ): Promise<UserInviteCreated[]> {
+    return this.request<UserInviteCreated[]>('/users/batch', {
+      method: 'POST',
+      body: JSON.stringify({
+        prefix,
+        role,
+        count,
+        allowed_system: allowedSystem || null,
+        expires_in_minutes: expiresInMinutes && expiresInMinutes > 0 ? expiresInMinutes : null,
+      }),
+    });
+  }
+
+  /**
+   * Updates user role, active status (restrict/unrestrict), bound system scope, or token TTL.
+   */
+  async updateUserInvite(
+    userId: number,
+    patch: {
+      role?: 'viewer' | 'operator' | 'admin';
+      is_active?: boolean;
+      allowed_system?: string | null;
+      expires_in_minutes?: number | null;
+    }
+  ): Promise<UserAccount> {
+    return this.request<UserAccount>(`/users/${userId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    });
+  }
+
+  /**
+   * Generates a 6-digit verification code for linking a Telegram user to this participant and system.
+   */
+  async generateUserVerifyCode(userId: number): Promise<UserAccount> {
+    return this.request<UserAccount>(`/users/${userId}/verify-code`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Rotates a user's personal token and resets its device binding.
+   */
+  async rotateUserToken(userId: number): Promise<UserInviteCreated> {
+    return this.request<UserInviteCreated>(`/users/${userId}/token`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Unbinds the client device from a personal invite token so it can be used on another device.
+   */
+  async unbindUserDevice(userId: number): Promise<UserAccount> {
+    return this.request<UserAccount>(`/users/${userId}/unbind`, {
+      method: 'POST',
+    });
+  }
+
+  /**
+   * Revokes and deletes a personal invite token from the database.
+   */
+  async deleteUserInvite(userId: number): Promise<void> {
+    return this.request<void>(`/users/${userId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  /**
+   * Retrieves Git Source of Truth (SoT) repository status and GitHub webhook configuration.
+   */
+  async getGitStatus(): Promise<GitStatusInfo> {
+    return this.request<GitStatusInfo>('/git/status');
+  }
+
+  /**
+   * Pulls latest changes from Git SoT remote (if configured) and syncs inventory.yaml into the database.
+   */
+  async syncGitSot(): Promise<{
+    status: string;
+    pull_output: string;
+    sync: { created: string[]; updated: string[]; unchanged: string[] };
+    git: GitStatusInfo;
+  }> {
+    return this.request('/git/sync', { method: 'POST' });
+  }
+
+  /**
+   * Retrieves unified connectivity & metrics status for PostgreSQL/SQLite, GitHub SoT, NetBox, Prometheus, and Telegram Bot.
+   */
+  async getIntegrationsStatus(): Promise<IntegrationsStatus> {
+    return this.request<IntegrationsStatus>('/system/integrations');
+  }
+
+  /**
+   * Dispatches an executive fabric health & compliance report to Telegram Bot chats and returns a preview.
+   */
+  async sendTelegramSummary(customNote?: string): Promise<{
+    status: string;
+    sent: boolean;
+    chat_ids: number[];
+    message_preview: string;
+    hint?: string;
+  }> {
+    return this.request('/system/telegram/test', {
+      method: 'POST',
+      body: JSON.stringify({ custom_note: customNote || null }),
+    });
+  }
+
+  /**
+   * Builds a direct share URL for any personal or preset token.
+   * Defaults to public stand address (`http://5.228.243.54:5173`) when opened on localhost
+   * so links shared with external teammates (e.g. Timofey / jury) work out-of-the-box.
+   */
+  buildInviteUrl(token: string, baseOverride?: string): string {
+    if (baseOverride) {
+      return `${baseOverride.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
+    }
+    if (typeof window !== 'undefined') {
+      const savedBase = localStorage.getItem('netops_share_base_url');
+      if (savedBase) {
+        return `${savedBase.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
+      }
+      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+        return `http://5.228.243.54:5173/?token=${encodeURIComponent(token)}`;
+      }
+      return `${window.location.origin}${window.location.pathname}?token=${encodeURIComponent(token)}`;
+    }
+    return `http://5.228.243.54:5173/?token=${encodeURIComponent(token)}`;
+  }
 
   /**
    * Generates a sharable URL pre-authenticated with the specified role token.
@@ -1212,9 +1524,7 @@ export class NetOpsApiClient {
    * @returns Formatted URL string with embedded `?token=` parameter
    */
   getShareUrl(role: 'admin' | 'viewer' = 'viewer'): string {
-    const base = typeof window !== 'undefined' ? window.location.origin + window.location.pathname : 'http://localhost:5173';
-    const token = role === 'admin' ? 'dev-admin-token' : 'dev-jury-token';
-    return `${base}?token=${token}`;
+    return this.buildInviteUrl(role === 'admin' ? 'dev-admin-token' : 'dev-jury-token');
   }
 
   /**

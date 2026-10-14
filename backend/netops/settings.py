@@ -14,6 +14,8 @@ from netops.enums import UserRole
 class ApiPrincipal(BaseModel):
     username: str = Field(min_length=1, max_length=64)
     role: UserRole
+    allowed_system: str | None = Field(default=None, exclude=True)
+
 
 
 class AuthProfile(BaseModel):
@@ -36,6 +38,7 @@ class Settings(BaseSettings):
     intent_repo_path: Path = Path("intent")
     inventory_file: str = "inventory.yaml"
     templates_path: Path = Path("templates")
+    diff_filters_path: Path | None = None
     normalization_rules_path: Path | None = None
 
     # "offline" emulates the lab with running-configs stored as files; the
@@ -49,13 +52,21 @@ class Settings(BaseSettings):
     post_check_interval_seconds: float = Field(default=10.0, ge=0)
 
     drift_scan_interval_seconds: int = Field(default=900, ge=60)
+    metrics_interval_seconds: int = Field(default=60, ge=10)
+    metrics_retention_days: int = Field(default=7, ge=1)
     job_timeout_seconds: int = Field(default=3600, ge=60)
 
     # {"<токен>": {"username": "alice", "role": "admin"}}
     api_tokens: dict[str, ApiPrincipal] = Field(default_factory=dict)
     # {"lab": {"username": "admin", "password": "admin"}}
     auth_profiles: dict[str, AuthProfile] = Field(
-        default_factory=lambda: {"lab": AuthProfile(username="admin", password=SecretStr("admin"))}
+        default_factory=lambda: {
+            "lab": AuthProfile(username="admin", password=SecretStr("admin")),
+            "spine1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
+            "spine2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
+            "leaf1_auth": AuthProfile(username="admin", password=SecretStr("Huawei@123")),
+            "leaf2_auth": AuthProfile(username="admin", password=SecretStr("Huawei@123")),
+        }
     )
 
     # LLM Risk Assistant settings (Multi-provider cascade: Ollama -> Groq -> Gemini -> MiMo -> Heuristic)
@@ -105,7 +116,10 @@ class Settings(BaseSettings):
     # Telegram Incident Alerting & Broadcast
     telegram_bot_token: SecretStr | None = None
     telegram_chat_id: str | None = None
+    telegram_chat_ids: list[int] = Field(default_factory=list)
 
+    # GitHub / Git SoT repository metadata
+    github_repo_url: str = "https://github.com/Vazilll/CROC-DREAM-NetOps-Platform"
 
     # Browser origins allowed to call the API (the Vite dev server by default).
     cors_origins: list[str] = Field(
@@ -136,6 +150,33 @@ class Settings(BaseSettings):
                 f"Post-check retries take {window:g}s, more than half of the "
                 f"{self.commit_confirm_timeout_seconds}s commit-confirm timer"
             )
+        if self.telegram_chat_id and not self.telegram_chat_ids:
+            try:
+                self.telegram_chat_ids = [int(self.telegram_chat_id.strip())]
+            except ValueError:
+                pass
+        elif self.telegram_chat_ids and not self.telegram_chat_id:
+            self.telegram_chat_id = str(self.telegram_chat_ids[0])
+        if (
+            self.network_driver == "scrapli"
+            and self.inventory_file == "inventory.yaml"
+            and (self.intent_repo_path / "inventory.live.yaml").is_file()
+        ):
+            self.inventory_file = "inventory.live.yaml"
+        custom_auth = self.offline_lab_path / "custom_auth_profiles.json"
+        if custom_auth.is_file():
+            import json  # noqa: PLC0415
+
+            try:
+                raw_profiles = json.loads(custom_auth.read_text(encoding="utf-8"))
+                for prof_name, creds in raw_profiles.items():
+                    if isinstance(creds, dict) and "username" in creds and "password" in creds:
+                        self.auth_profiles[prof_name] = AuthProfile(
+                            username=str(creds["username"]),
+                            password=SecretStr(str(creds["password"])),
+                        )
+            except Exception:
+                pass
         return self
 
     def authenticate(self, token: str) -> ApiPrincipal | None:

@@ -45,7 +45,8 @@ def test_multi_vendor_rendering_and_diff() -> None:
         cfg_file = lab_dir / f"{dev.hostname}.cfg"
         if cfg_file.exists():
             running = cfg_file.read_text(encoding="utf-8")
-            diff = diff_engine.compare(dev.platform, running, rendered)
+            norm_running = normalizer.normalize(dev.platform, running)
+            diff = diff_engine.compare(dev.platform, norm_running, norm)
             assert diff is not None
             assert diff.in_sync is True
             platforms_tested.add(dev.platform)

@@ -18,12 +18,10 @@ import { api } from '../api';
 import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../api';
 import { translations, type Locale } from '../i18n';
 import { TopologyMap } from './TopologyMap';
-import { BentoCard } from './ui';
+import { BentoCard, Sparkline } from './ui';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
 import { AddDeviceModal } from './AddDeviceModal';
 import { DeviceDrawer } from './DeviceDrawer';
-
-const DEFAULT_DASHBOARD_SPARKLINE = [20, 25, 30, 22, 28, 35, 40, 38];
 
 interface DashboardProps {
   devices: Device[];
@@ -38,10 +36,10 @@ interface DashboardProps {
 }
 
 const JOB_COLOR: Record<string, { text: string; bg: string; border: string }> = {
-  SUCCESS: { text: 'text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-  FAILED: { text: 'text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
-  RUNNING: { text: 'text-cyan-400 animate-pulse', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
-  PENDING: { text: 'text-zinc-400', bg: 'bg-white/[0.04]', border: 'border-white/[0.08]' },
+  SUCCESS: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
+  FAILED: { text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
+  RUNNING: { text: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
+  PENDING: { text: 'text-[var(--text-secondary)]', bg: 'bg-[var(--bg-subtle)]', border: 'border-[var(--border-subtle)]' },
 };
 
 const DashboardComponent: React.FC<DashboardProps> = ({
@@ -62,7 +60,6 @@ const DashboardComponent: React.FC<DashboardProps> = ({
   const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [drawerDeviceId, setDrawerDeviceId] = useState<number | null>(null);
-
 
   useEffect(() => {
     if (devices.length > 0) {
@@ -120,115 +117,108 @@ const DashboardComponent: React.FC<DashboardProps> = ({
     return Object.entries(acc);
   }, [devices]);
 
-  // If there are no devices in the system, show the clean matte Onboarding & Connection prompt!
   if (devices.length === 0) {
     return (
       <div className="max-w-4xl mx-auto py-8 sm:py-14 space-y-8 animate-fade-in select-none">
-        {/* Onboarding Header */}
         <div className="text-center space-y-2.5">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-white/[0.04] border border-white/[0.08] text-zinc-300">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
             Инициализация сетевой фабрики
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">
+          <h1 className="text-2xl sm:text-3xl font-semibold text-[var(--text-primary)] tracking-tight">
             Подключение сетевой инфраструктуры
           </h1>
-          <p className="text-xs sm:text-sm text-zinc-400 max-w-xl mx-auto leading-relaxed">
+          <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-xl mx-auto leading-relaxed">
             Холст создан и ожидает регистрации сетевых узлов. Выберите способ подключения к оборудованию стенда:
           </p>
         </div>
 
-        {/* 3 Matte Connection Pathways */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Pathway 1: Live SSH Probe */}
           <div
             onClick={() => setAddModalOpen(true)}
-            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-white/[0.2] bg-[#0c0e15] hover:bg-white/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
           >
             <div>
-              <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] text-zinc-200 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-                <Plus className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
+                <Plus className="w-5 h-5" />
               </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-medium px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-medium px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
                 Живой стенд (SSH)
               </span>
-              <h3 className="text-base font-bold text-white group-hover:text-zinc-100 transition-colors mt-2">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
                 SSH Probe по портам
               </h3>
-              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
                 Прямое подключение к портам 2211, 2212, 2221, 2222 стенда. Scrapli автоматически определит Arista cEOS, Cisco IOS-XE, снимет реальный конфиг и нагрузку CPU.
               </p>
             </div>
-            <div className="mt-6 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs text-emerald-400 font-medium">
+            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
               <span>Открыть мастер подключения</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </div>
 
-          {/* Pathway 2: Containerlab YAML Import */}
           <div
             onClick={() => {
               if (onSyncInventory) onSyncInventory();
             }}
-            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-white/[0.2] bg-[#0c0e15] hover:bg-white/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
           >
             <div>
-              <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] text-zinc-200 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-                <Layers className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
+                <Layers className="w-5 h-5" />
               </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-medium px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">
-                Правки Тимофея
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-secondary)] font-medium px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
+                Containerlab
               </span>
-              <h3 className="text-base font-bold text-white group-hover:text-zinc-100 transition-colors mt-2">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
                 Импорт fabric.clab.yaml
               </h3>
-              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
                 Синхронизация схемы Containerlab: Arista cEOS Spine-1/2 и Cisco IOS-XE Leaf-1/2 с закрытыми портами telnet и сложными паролями.
               </p>
             </div>
-            <div className="mt-6 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs text-cyan-400 font-medium">
+            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
               <span>Синхронизировать стенд</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </div>
 
-          {/* Pathway 3: GitOps Intent SoT */}
           <div
             onClick={() => {
               if (onSyncInventory) onSyncInventory();
             }}
-            className="group relative p-6 rounded-2xl border border-white/[0.08] hover:border-white/[0.2] bg-[#0c0e15] hover:bg-white/[0.02] transition-all cursor-pointer flex flex-col justify-between shadow-xl"
+            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
           >
             <div>
-              <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] text-zinc-200 flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
-                <Server className="w-6 h-6" />
+              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
+                <Server className="w-5 h-5" />
               </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-medium px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-secondary)] font-medium px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
                 GitOps SoT
               </span>
-              <h3 className="text-base font-bold text-white group-hover:text-zinc-100 transition-colors mt-2">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
                 Загрузить intent/devices
               </h3>
-              <p className="text-xs text-zinc-400 mt-2 leading-relaxed">
+              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
                 Декларативное развертывание топологии из структурированных YAML файлов Git с валидацией IPAM /31 и BGP ASN по RFC 7938.
               </p>
             </div>
-            <div className="mt-6 pt-3 border-t border-white/[0.06] flex items-center justify-between text-xs text-amber-400 font-medium">
+            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
               <span>Применить эталон</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
             </div>
           </div>
         </div>
 
-        {/* Presentation Slide link */}
-        <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] flex items-center justify-between text-xs text-zinc-400">
+        <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-secondary)]">
           <div className="flex items-center gap-2.5">
-            <Presentation className="w-4 h-4 text-zinc-300" />
+            <Presentation className="w-4 h-4 text-[var(--text-muted)]" />
             <span>Презентация и сценарий выступления перед жюри КРОК / МТУСИ</span>
           </div>
           <button
             onClick={() => onOpenTab('slides')}
-            className="text-zinc-200 hover:text-white font-medium flex items-center gap-1 cursor-pointer"
+            className="text-[var(--text-primary)] hover:underline font-medium flex items-center gap-1 cursor-pointer"
           >
             <span>Слайды проекта</span>
             <ArrowRight className="w-3.5 h-3.5" />
@@ -249,23 +239,23 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-3 max-w-[1920px] mx-auto select-none">
-      {/* 1. Health KPI Strip — scannable in < 0.5s */}
+      {/* 1. Health KPI Strip (Geist / Linear High-Density Metrics) */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
         <button
           onClick={() => onOpenTab('devices')}
-          className="text-left rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3.5 py-2.5 hover:border-cyan-500/30 transition-colors cursor-pointer flex items-center justify-between"
+          className="text-left rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between"
         >
           <div>
-            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-              <Server className="w-3.5 h-3.5 text-zinc-500" />
+            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+              <Server className="w-3.5 h-3.5 text-[var(--text-muted)]" />
               <span>{t.cardDevices}</span>
             </div>
-            <div className="text-2xl font-semibold font-mono mt-0.5 text-[var(--text-primary)] tracking-tight">
+            <div className="text-2xl font-semibold font-mono tabular-nums mt-0.5 text-[var(--text-primary)] tracking-tight">
               {devices.length}
             </div>
           </div>
-          <div className="text-right">
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-black/5 dark:bg-white/[0.05] text-[var(--text-muted)]">
+          <div className="text-right shrink-0">
+            <span className="inline-block whitespace-nowrap text-[10px] font-mono tabular-nums px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
               {healthPercent}% {t.cardDevicesNormal}
             </span>
           </div>
@@ -273,98 +263,99 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
         <button
           onClick={() => onOpenTab('drift')}
-          className="text-left rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] px-3.5 py-2.5 hover:border-emerald-500/30 transition-colors cursor-pointer flex items-center justify-between"
+          className="text-left rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between"
         >
           <div>
-            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-400" />
+            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
               <span>{t.cardInSync}</span>
             </div>
-            <div className="text-2xl font-semibold font-mono mt-0.5 text-emerald-400 tracking-tight">
+            <div className="text-2xl font-semibold font-mono tabular-nums mt-0.5 text-[var(--text-primary)] tracking-tight">
               {inSyncCount}
             </div>
           </div>
-          <ShieldCheck className="w-5 h-5 text-emerald-500/40" />
+          <ShieldCheck className="w-4 h-4 text-[var(--text-muted)]" />
         </button>
 
         <button
           onClick={() => onOpenTab('drift')}
           className={`text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between ${
             driftCount > 0
-              ? 'border-amber-500/30 bg-amber-500/[0.03] hover:border-amber-500/50'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-amber-500/30'
+              ? 'border-amber-500/35 bg-amber-500/[0.04] hover:border-amber-500/50'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]'
           }`}
         >
           <div>
-            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${driftCount > 0 ? 'bg-amber-400 animate-pulse' : 'bg-zinc-500'}`} />
+            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${driftCount > 0 ? 'bg-amber-400' : 'bg-zinc-500'}`} />
               <span>{t.cardDrift}</span>
             </div>
-            <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${driftCount > 0 ? 'text-amber-400' : 'text-zinc-400'}`}>
+            <div className={`text-2xl font-semibold font-mono tabular-nums mt-0.5 tracking-tight ${driftCount > 0 ? 'text-amber-500 dark:text-amber-400' : 'text-[var(--text-primary)]'}`}>
               {driftCount}
             </div>
           </div>
-          <AlertTriangle className={`w-5 h-5 ${driftCount > 0 ? 'text-amber-400/60' : 'text-zinc-600'}`} />
+          <AlertTriangle className={`w-4 h-4 ${driftCount > 0 ? 'text-amber-400' : 'text-[var(--text-muted)]'}`} />
         </button>
 
         <button
           onClick={() => onOpenTab('devices')}
           className={`text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between ${
             unreachableCount > 0
-              ? 'border-rose-500/30 bg-rose-500/[0.03] hover:border-rose-500/50'
-              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-rose-500/30'
+              ? 'border-rose-500/35 bg-rose-500/[0.04] hover:border-rose-500/50'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]'
           }`}
         >
           <div>
-            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${unreachableCount > 0 ? 'bg-rose-400' : 'bg-zinc-500'}`} />
+            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${unreachableCount > 0 ? 'bg-rose-400' : 'bg-zinc-500'}`} />
               <span>{t.cardUnreachable}</span>
             </div>
-            <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${unreachableCount > 0 ? 'text-rose-400' : 'text-zinc-400'}`}>
+            <div className={`text-2xl font-semibold font-mono tabular-nums mt-0.5 tracking-tight ${unreachableCount > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-[var(--text-primary)]'}`}>
               {unreachableCount}
             </div>
           </div>
-          <AlertTriangle className={`w-5 h-5 ${unreachableCount > 0 ? 'text-rose-400/60' : 'text-zinc-600'}`} />
+          <AlertTriangle className={`w-4 h-4 ${unreachableCount > 0 ? 'text-rose-400' : 'text-[var(--text-muted)]'}`} />
         </button>
 
         <button
           onClick={() => onOpenTab('diff')}
           className={`col-span-2 sm:col-span-1 lg:col-span-1 text-left rounded-lg border px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between ${
             aiAnomalies.length > 0
-              ? 'border-rose-500/40 bg-rose-500/[0.06] hover:border-rose-500/70 shadow-[0_0_15px_rgba(244,63,94,0.15)] animate-pulse'
-              : 'border-cyan-500/20 bg-cyan-500/[0.02] hover:border-cyan-500/40'
+              ? 'border-rose-500/40 bg-rose-500/[0.05] hover:border-rose-500/60'
+              : 'border-[var(--border-subtle)] bg-[var(--bg-card)] hover:border-[var(--border-hover)]'
           }`}
           title="Защитный барьер телеметрии TimesFM 3.0"
         >
           <div>
-            <div className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
-              <span className={`w-2 h-2 rounded-full ${aiAnomalies.length > 0 ? 'bg-rose-500 animate-ping' : 'bg-cyan-400'}`} />
+            <div className="text-[11px] text-[var(--text-secondary)] font-medium flex items-center gap-1.5">
+              <span className={`w-1.5 h-1.5 rounded-full ${aiAnomalies.length > 0 ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}`} />
               <span>{t.cardAiGuard}</span>
             </div>
-            <div className={`text-2xl font-semibold font-mono mt-0.5 tracking-tight ${aiAnomalies.length > 0 ? 'text-rose-400' : 'text-cyan-400'}`}>
+            <div className={`text-2xl font-semibold font-mono tabular-nums mt-0.5 tracking-tight ${aiAnomalies.length > 0 ? 'text-rose-500 dark:text-rose-400' : 'text-[var(--text-primary)]'}`}>
               {aiAnomalies.length > 0 ? `${aiAnomalies.length} ${t.radarAnomCount}` : 'ACTIVE'}
             </div>
           </div>
           <div className="text-right">
-            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${aiAnomalies.length > 0 ? 'bg-rose-500/20 text-rose-300' : 'bg-cyan-500/10 text-cyan-300'}`}>
+            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${aiAnomalies.length > 0 ? 'bg-rose-500/15 text-rose-400 border-rose-500/25' : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)]'}`}>
               {aiAnomalies.length > 0 ? 'Rollback' : 'Shield OK'}
             </span>
           </div>
         </button>
       </div>
 
-
-      {/* 2. Device Fleet & Live Load Matrix (Device Grid with real load sparklines) */}
+      {/* 2. Device Fleet & Live Load Matrix (SVG Area Sparklines) */}
       <BentoCard
         title={locale === 'en' ? 'Fabric Devices & Operational Load' : 'Сетевые узлы фабрики и операционная нагрузка'}
-        icon={<Server className="w-3.5 h-3.5 text-zinc-400" />}
+        icon={<Server className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
         indicator="bg-emerald-400"
         right={
           <div className="flex items-center gap-2">
-            <span className="font-mono text-[11px] text-zinc-400">{devices.length} {locale === 'en' ? 'nodes' : 'узлов'}</span>
+            <span className="font-mono text-[11px] text-[var(--text-muted)] tabular-nums">
+              {devices.length} {locale === 'en' ? 'nodes' : 'узлов'}
+            </span>
             <button
               onClick={() => onOpenTab('devices')}
-              className="text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors text-xs"
+              className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer transition-colors text-xs"
             >
               <span>{t.allDevices}</span>
               <ExternalLink className="w-3 h-3" />
@@ -372,25 +363,26 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           </div>
         }
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5">
           {devices.map((device) => {
-            const currentLoad = device.sparkline && device.sparkline.length > 0
-              ? device.sparkline[device.sparkline.length - 1]
-              : 0;
+            const currentLoad =
+              device.sparkline && device.sparkline.length > 0
+                ? device.sparkline[device.sparkline.length - 1]
+                : 0;
             const isHigh = currentLoad > 80;
-            const isMedium = currentLoad > 50;
+            const isMedium = currentLoad > 55;
 
             return (
               <div
                 key={device.id}
                 onClick={() => setDrawerDeviceId(device.id)}
-                className="group relative rounded-xl border border-white/[0.08] hover:border-white/[0.2] bg-[#090b10] hover:bg-white/[0.02] p-3 transition-all cursor-pointer flex flex-col justify-between"
+                className="group relative rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-main)]/60 hover:bg-[var(--bg-elevated)]/40 p-3 transition-colors cursor-pointer flex flex-col justify-between"
               >
                 <div>
                   <div className="flex items-center justify-between gap-1.5">
                     <div className="flex items-center gap-2 min-w-0">
                       <span
-                        className={`w-2 h-2 rounded-full shrink-0 ${
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
                           device.status === 'IN_SYNC'
                             ? 'bg-emerald-400'
                             : device.status === 'DRIFT_DETECTED'
@@ -398,58 +390,66 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                             : 'bg-rose-400'
                         }`}
                       />
-                      <span className="font-bold text-xs text-white truncate tracking-tight group-hover:text-cyan-200 transition-colors">
+                      <span className="font-semibold text-xs text-[var(--text-primary)] truncate tracking-tight">
                         {device.hostname}
                       </span>
                     </div>
-                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-white/[0.05] text-zinc-300 border border-white/[0.05] uppercase shrink-0">
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)] uppercase shrink-0">
                       {device.platform.replace('_', '-')}
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 mt-1">
+                  <div className="flex items-center justify-between text-[11px] font-mono tabular-nums text-[var(--text-muted)] mt-1">
                     <span>{device.management_ip}:{device.management_port}</span>
-                    <span className="uppercase text-[10px] px-1 rounded bg-white/[0.03] text-zinc-400">
+                    <span className="uppercase text-[10px] px-1 rounded bg-[var(--bg-subtle)] text-[var(--text-secondary)]">
                       {device.role}
                     </span>
                   </div>
                 </div>
 
-                <div className="mt-3 pt-2 border-t border-white/[0.06]">
-                  <div className="flex items-center justify-between text-[10px] font-mono mb-1.5">
-                    <span className="text-zinc-400">Нагрузка (CPU/Трафик):</span>
+                <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
+                  <div className="flex items-center justify-between text-[10px] font-mono tabular-nums mb-1.5">
+                    <span className="text-[var(--text-muted)]">CPU / Трафик:</span>
                     <span
-                      className={`font-semibold ${
-                        isHigh ? 'text-rose-400' : isMedium ? 'text-amber-400' : 'text-emerald-400'
+                      className={`font-medium ${
+                        !device.sparkline || device.sparkline.length === 0
+                          ? 'text-[var(--text-muted)]'
+                          : isHigh
+                          ? 'text-rose-500 dark:text-rose-400'
+                          : isMedium
+                          ? 'text-amber-500 dark:text-amber-400'
+                          : 'text-[var(--text-primary)]'
                       }`}
                     >
-                      {currentLoad}%
+                      {device.sparkline && device.sparkline.length > 0 ? `${Math.round(currentLoad)}%` : 'Нет данных'}
                     </span>
                   </div>
 
-                  <div className="h-8 w-full flex items-end gap-0.5">
-                    {(device.sparkline && device.sparkline.length > 0 ? device.sparkline : DEFAULT_DASHBOARD_SPARKLINE).map((val, idx) => (
-                      <div
-                        key={idx}
-                        style={{ height: `${Math.max(12, val)}%` }}
-                        className={`flex-1 rounded-xs transition-all ${
-                          val > 80
-                            ? 'bg-rose-500/70'
-                            : val > 50
-                            ? 'bg-amber-500/60'
-                            : 'bg-emerald-500/50'
-                        }`}
-                        title={`Замер: ${val}%`}
+                  {device.sparkline && device.sparkline.length > 0 ? (
+                    <div className="h-7 w-full flex items-center">
+                      <Sparkline
+                        points={device.sparkline}
+                        width={180}
+                        height={26}
+                        fullWidth
+                        showValue={false}
                       />
-                    ))}
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="h-7 w-full flex items-center justify-center rounded border border-dashed border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-muted)]">
+                      Ожидание опроса метрик
+                    </div>
+                  )}
                 </div>
 
-                <div className="mt-2.5 pt-2 border-t border-white/[0.04] flex items-center justify-between text-[11px] text-zinc-400">
-                  <span className="text-[10px] font-mono text-zinc-500">
-                    Статус: <strong className={device.oper_status === 'UP' ? 'text-emerald-400' : 'text-amber-400'}>{device.oper_status || 'UP'}</strong>
+                <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-[10px] font-mono">
+                  <span className="text-[var(--text-muted)]">
+                    Oper:{' '}
+                    <strong className={device.oper_status === 'UP' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
+                      {device.oper_status || 'UP'}
+                    </strong>
                   </span>
-                  <span className="text-[10px] font-mono text-cyan-400 group-hover:underline flex items-center gap-0.5">
+                  <span className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] flex items-center gap-0.5">
                     Инспектор →
                   </span>
                 </div>
@@ -459,17 +459,17 @@ const DashboardComponent: React.FC<DashboardProps> = ({
         </div>
       </BentoCard>
 
-      {/* 3. Bento Grid Central Arena (strictly fits 1080p display) */}
+      {/* 3. Bento Grid Central Arena */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
         {/* Left Column (7 cols on XL): CLOS Fabric Topology & Platform distribution */}
         <div className="xl:col-span-7 space-y-3">
           <BentoCard
             title={t.topologyTitle}
-            indicator="bg-cyan-400"
+            indicator="bg-zinc-400"
             right={
               <button
                 onClick={() => onOpenTab('devices')}
-                className="text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer transition-colors"
               >
                 <span>{t.allDevices}</span>
                 <ExternalLink className="w-3 h-3" />
@@ -487,12 +487,12 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
           {/* Compact Platform & Role Inventory Strip */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <BentoCard title={t.platformsTitle} icon={<Cpu className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
+            <BentoCard title={t.platformsTitle} icon={<Cpu className="w-3.5 h-3.5 text-[var(--text-muted)]" />} indicator="bg-zinc-500">
               <div className="space-y-1.5">
                 {platformsCount.map(([p, count]) => (
                   <div key={p} className="flex items-center justify-between text-[11px]">
-                    <span className="text-zinc-300 truncate">{PLATFORM_NAMES[p] ?? p}</span>
-                    <span className="font-mono text-zinc-400 bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.04]">
+                    <span className="text-[var(--text-secondary)] truncate">{PLATFORM_NAMES[p] ?? p}</span>
+                    <span className="font-mono tabular-nums text-[var(--text-primary)] bg-[var(--bg-elevated)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)]">
                       {count}
                     </span>
                   </div>
@@ -500,12 +500,12 @@ const DashboardComponent: React.FC<DashboardProps> = ({
               </div>
             </BentoCard>
 
-            <BentoCard title={t.rolesTitle} icon={<Layers className="w-3.5 h-3.5 text-zinc-400" />} indicator="bg-zinc-400">
+            <BentoCard title={t.rolesTitle} icon={<Layers className="w-3.5 h-3.5 text-[var(--text-muted)]" />} indicator="bg-zinc-500">
               <div className="space-y-1.5">
                 {rolesCount.map(([r, count]) => (
                   <div key={r} className="flex items-center justify-between text-[11px]">
-                    <span className="text-zinc-300 truncate">{ROLE_NAMES[r] ?? r}</span>
-                    <span className="font-mono text-zinc-400 bg-white/[0.04] px-1.5 py-0.5 rounded border border-white/[0.04]">
+                    <span className="text-[var(--text-secondary)] truncate">{ROLE_NAMES[r] ?? r}</span>
+                    <span className="font-mono tabular-nums text-[var(--text-primary)] bg-[var(--bg-elevated)] px-1.5 py-0.5 rounded border border-[var(--border-subtle)]">
                       {count}
                     </span>
                   </div>
@@ -517,12 +517,11 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
         {/* Right Column (5 cols on XL): TimesFM 6h Risk Radar & Recent Jobs */}
         <div className="xl:col-span-5 space-y-3">
-          {/* TimesFM Risk Radar with 1-Click Action Buttons */}
           <BentoCard
             title={t.riskRadarTitle}
             indicator={alerts.length > 0 ? 'bg-amber-400' : 'bg-emerald-400'}
             right={
-              <span className="font-mono text-[10px] text-zinc-400">
+              <span className="font-mono text-[10px] text-[var(--text-muted)] tabular-nums">
                 {alerts.length > 0 ? `${alerts.length} ${t.radarAnomCount}` : (locale === 'en' ? '0 risks' : '0 рисков')}
               </span>
             }
@@ -531,33 +530,32 @@ const DashboardComponent: React.FC<DashboardProps> = ({
               {alerts.map((a) => (
                 <div
                   key={`${a.device_id}-${a.metric}`}
-                  className="rounded-lg border border-amber-500/20 bg-amber-500/[0.04] p-2.5 flex flex-col gap-2 hover:border-amber-500/40 transition-colors"
+                  className="rounded-lg border border-amber-500/25 bg-amber-500/[0.03] p-2.5 flex flex-col gap-2 hover:border-amber-500/40 transition-colors"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-center gap-2 min-w-0">
-                      <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                       <div className="min-w-0">
-                        <div className="font-semibold text-white text-xs truncate">
+                        <div className="font-semibold text-[var(--text-primary)] text-xs truncate">
                           {a.hostname}
                         </div>
-                        <div className="text-[11px] text-zinc-400 truncate">
+                        <div className="text-[11px] text-[var(--text-secondary)] truncate">
                           {a.label}
                         </div>
                       </div>
                     </div>
-                    <span className="font-mono text-[11px] text-amber-300 bg-amber-500/15 px-2 py-0.5 rounded border border-amber-500/25 shrink-0">
+                    <span className="font-mono tabular-nums text-[11px] text-amber-600 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 shrink-0">
                       &gt;{a.threshold}% через ~{a.breach_in_minutes}м
                     </span>
                   </div>
 
-                  {/* 1-Click Action Ergonomics (Fitts's Law) */}
-                  <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-white/[0.06]">
+                  <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
                     <button
                       onClick={() => onOpenDevice(a.device_id)}
-                      className="px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-zinc-200 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                      className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
                       title="Открыть карточку устройства и прогноз"
                     >
-                      <ExternalLink className="w-3 h-3 text-cyan-400" />
+                      <ExternalLink className="w-3 h-3 text-[var(--text-secondary)]" />
                       <span>{t.openBtn}</span>
                     </button>
 
@@ -566,20 +564,20 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                         if (onOpenDiff) onOpenDiff();
                         else onOpenTab('diff');
                       }}
-                      className="px-2 py-1 rounded bg-white/[0.05] hover:bg-white/[0.1] text-zinc-200 hover:text-white text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
+                      className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
                       title="Сверить конфигурации в DiffViewer"
                     >
-                      <GitCompare className="w-3 h-3 text-amber-400" />
+                      <GitCompare className="w-3 h-3 text-[var(--text-secondary)]" />
                       <span>{t.diffBtn}</span>
                     </button>
 
                     <button
                       onClick={(e) => handleAlertDryRun(a.device_id, e)}
                       disabled={dryRunRunning === a.device_id}
-                      className="px-2 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 hover:text-emerald-200 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50"
+                      className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer disabled:opacity-50"
                       title="Запустить предиктивный Dry-run"
                     >
-                      <Play className="w-3 h-3 text-emerald-400" />
+                      <Play className="w-3 h-3 fill-current" />
                       <span>
                         {dryRunSuccess === a.device_id
                           ? (locale === 'en' ? 'Launched!' : 'Запущен!')
@@ -593,12 +591,12 @@ const DashboardComponent: React.FC<DashboardProps> = ({
               ))}
 
               {alerts.length === 0 && (
-                <div className="py-6 text-center text-xs text-zinc-400 flex flex-col items-center justify-center gap-1.5">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                  <span className="text-zinc-300 font-medium">
+                <div className="py-6 text-center text-xs text-[var(--text-secondary)] flex flex-col items-center justify-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[var(--text-primary)] font-medium">
                     {locale === 'en' ? 'Normal state' : 'Штатный режим'}
                   </span>
-                  <span className="text-zinc-500 text-[11px]">
+                  <span className="text-[var(--text-muted)] text-[11px]">
                     {locale === 'en' ? 'No metric threshold breaches forecasted within 6h' : 'Пробоев порогов в ближайшие 6 часов не прогнозируется'}
                   </span>
                 </div>
@@ -606,22 +604,21 @@ const DashboardComponent: React.FC<DashboardProps> = ({
             </div>
           </BentoCard>
 
-          {/* Recent Automation Jobs */}
           <BentoCard
             title={t.automationJobsTitle}
-            icon={<Clock className="w-3.5 h-3.5 text-zinc-400" />}
-            indicator="bg-zinc-400"
+            icon={<Clock className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
+            indicator="bg-zinc-500"
             right={
               <button
                 onClick={() => onOpenTab('jobs')}
-                className="text-zinc-400 hover:text-white flex items-center gap-1 cursor-pointer transition-colors"
+                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer transition-colors"
               >
                 <span>{t.auditLogBtn}</span>
                 <ExternalLink className="w-3 h-3" />
               </button>
             }
           >
-            <div className="space-y-1.5">
+            <div className="space-y-1">
               {jobs.slice(0, 5).map((j) => {
                 const s = JOB_COLOR[j.status] ?? JOB_COLOR.PENDING;
                 return (
@@ -631,13 +628,13 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                       if (onOpenDiff) onOpenDiff(j.id);
                       else onOpenTab('jobs');
                     }}
-                    className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-white/[0.04] transition-colors cursor-pointer border border-transparent hover:border-white/[0.06] text-xs"
+                    className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border-subtle)] text-xs"
                   >
                     <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-zinc-200 truncate">{j.type}</span>
+                      <span className="font-mono text-[var(--text-primary)] truncate">{j.type}</span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-zinc-500 text-[11px] font-mono">
+                      <span className="text-[var(--text-muted)] text-[11px] font-mono tabular-nums">
                         {new Date(j.created_at).toLocaleTimeString(locale === 'en' ? 'en-US' : 'ru-RU', {
                           hour: '2-digit',
                           minute: '2-digit',
@@ -654,7 +651,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
               })}
 
               {jobs.length === 0 && (
-                <div className="py-4 text-center text-xs text-zinc-500">{t.noRunsYet}</div>
+                <div className="py-4 text-center text-xs text-[var(--text-muted)]">{t.noRunsYet}</div>
               )}
             </div>
           </BentoCard>

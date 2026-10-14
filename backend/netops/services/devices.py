@@ -71,7 +71,13 @@ class DeviceService:
 
     def _enrich_device(self, device: Device, latest_drift: DriftRecord | None = None) -> Device:
         role_str = str(device.role.value if hasattr(device.role, "value") else device.role)
-        sparkline = metric_series(device.hostname, role_str, "uplink_util_pct", points=24)
+        sparkline = metric_series(
+            device.hostname, role_str, "uplink_util_pct", points=24, allow_synthetic_offline=True
+        )
+        if not sparkline:
+            sparkline = metric_series(
+                device.hostname, role_str, "cpu_pct", points=24, allow_synthetic_offline=True
+            )
         oper_status = self._derive_oper_status(device, sparkline, latest_drift)
         state_timeline = self._build_state_timeline(oper_status, sparkline)
         device.oper_status = oper_status

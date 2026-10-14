@@ -161,6 +161,11 @@ def test_extract_copilot_action_without_tag() -> None:
     assert clean == text
     assert action is None
 
+    hallucinated = "Откат невозможен.\nACTION: rollback|Откатить|1"
+    clean_h, action_h = extract_copilot_action(hallucinated)
+    assert clean_h == hallucinated
+    assert action_h is None
+
 
 def test_generate_fallback_action_remediates_drift() -> None:
     class DummyDevice:
@@ -198,3 +203,38 @@ def test_huawei_display_cpu_is_parsed() -> None:
 
     out = "cpu0         3%       0%       0%       0%   0% 2026-10-06 22:19:50\ncpu1         1%       0%       0%       0%   0% 2026-10-06 22:19:50\n"
     assert parse_huawei_cpu(out) == 2.0
+
+
+def test_offline_and_online_mode_separation() -> None:
+    from netops.services.ai_guard import AiTelemetryGuard
+    from netops.services.forecast import clear_forecast_cache
+    from netops.services.telemetry import synthetic_metric_series
+
+    clear_live_metrics("node-test.lab")
+    clear_forecast_cache()
+
+    # 1. Offline mode: synthetic metrics are generated and marked simulated=True
+    s_offline = Settings(_env_file=None, network_driver="offline", forecast_url="")  # type: ignore[call-arg]
+    synth = synthetic_metric_series("node-test.lab", "spine", "cpu_pct", points=12)
+    assert len(synth) == 12
+    fc_offline = build_forecast(s_offline, 1, "node-test.lab", "spine", "cpu_pct", 12)
+    assert fc_offline.simulated is True
+
+    # 2. Online (scrapli) mode with no measurements: no fake metrics, AI Guard waits for SSH poll
+    clear_forecast_cache()
+    s_online = Settings(_env_file=None, network_driver="scrapli", forecast_url="")  # type: ignore[call-arg]
+    fc_online = build_forecast(s_online, 1, "node-test.lab", "spine", "cpu_pct", 12)
+    assert fc_online.history == []
+    assert fc_online.median == []
+
+    class DummyOnlineDev:
+        id = 1
+        hostname = "node-test.lab"
+        role = "spine"
+
+    verdict = AiTelemetryGuard(s_online).verify_execution(DummyOnlineDev(), metric="cpu_pct")
+    assert verdict.healthy is True
+    assert verdict.observed_value == 0.0
+    assert verdict.expected_range == (0.0, 0.0)
+    assert "Нет данных телеметрии" in verdict.message
+

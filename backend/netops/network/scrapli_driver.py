@@ -37,84 +37,175 @@ class _ScrapliResponse:
 class _ParamikoConnAdapter:
     """Transparent SSH adapter for environments where native Scrapli transport is unavailable."""
 
-    def __init__(self, target: DeviceTarget, timeout: int = 15) -> None:
+    def __init__(
+        self, target: DeviceTarget, timeout: int = 15, proxy_jump: str | None = None
+    ) -> None:
         self.target = target
         self.timeout = timeout
+        self.proxy_jump = proxy_jump
         self.client = None
+        self._jump_client = None
         self.shell = None
 
-    def __enter__(self):
-        import time  # noqa: PLC0415
-        import paramiko  # noqa: PLC0415
+    def _open_jump_channel(self, paramiko_mod, jump_spec: str, dest_host: str, dest_port: int):
+        import os  # noqa: PLC0415
 
-        self.client = paramiko.SSHClient()
-        self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        password = getattr(self.target.credentials, "password", "")
-        username = self.target.credentials.username
+        user = os.getenv("NETOPS_CLAB_USER", "crocdream")
+        host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
+        port = int(os.getenv("NETOPS_CLAB_PORT", "221"))
+        if jump_spec and jump_spec != "auto":
+            spec = jump_spec.strip()
+            if "@" in spec:
+                user, spec = spec.split("@", 1)
+            if ":" in spec:
+                h_part, p_part = spec.rsplit(":", 1)
+                host = h_part
+                if p_part.isdigit():
+                    port = int(p_part)
+            else:
+                host = spec
 
+        jump = paramiko_mod.SSHClient()
+        jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
+        key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
+        key_file = key_path if os.path.isfile(key_path) else None
+        jump.connect(
+            host,
+            port=port,
+            username=user,
+            key_filename=key_file,
+            look_for_keys=True,
+            allow_agent=True,
+            timeout=min(self.timeout, 10),
+        )
+        self._jump_client = jump
+        transport = jump.get_transport()
+        target_ip = "127.0.0.1" if dest_host == host else dest_host
+        return transport.open_channel("direct-tcpip", (target_ip, dest_port), ("127.0.0.1", 0))
+
+    def _connect_with_sock(self, paramiko_mod, username: str, password: str, sock=None) -> None:
         try:
             self.client.connect(
                 self.target.host,
                 port=self.target.port,
                 username=username,
                 password=password,
+                sock=sock,
                 look_for_keys=False,
                 allow_agent=False,
                 timeout=min(self.timeout, 10),
                 banner_timeout=6,
                 auth_timeout=10,
             )
-        except paramiko.ssh_exception.AuthenticationException:
-            # Fallback to keyboard-interactive authentication (e.g. Cisco IOS-XE)
+        except paramiko_mod.ssh_exception.AuthenticationException:
             transport = self.client.get_transport()
-            if transport is None:
-                transport = paramiko.Transport((self.target.host, self.target.port))
+            if transport is None or not transport.is_active():
+                if sock is not None:
+                    raise
+                transport = paramiko_mod.Transport((self.target.host, self.target.port))
                 transport.start_client(timeout=min(self.timeout, 10))
+                self.client._transport = transport
             transport.auth_interactive(
                 username,
                 lambda title, instructions, prompt_list: [password for _ in prompt_list],
             )
 
-        self.shell = self.client.invoke_shell()
-        time.sleep(0.8)
-        if self.shell.recv_ready():
-            _ = self.shell.recv(8192)
+    def __enter__(self):
+        import os  # noqa: PLC0415
+        import time  # noqa: PLC0415
 
-        if self.target.platform == Platform.ARISTA_EOS:
-            self.shell.send("enable\nterminal length 0\n")
-        elif self.target.platform == Platform.CISCO_IOSXE:
-            self.shell.send("enable\nterminal length 0\n")
-        elif self.target.platform == Platform.HUAWEI_VRP:
-            self.shell.send("screen-length 0 temporary\n")
+        import paramiko  # noqa: PLC0415
 
-        time.sleep(0.5)
-        if self.shell.recv_ready():
-            _ = self.shell.recv(8192)
-        return self
+        self.client = paramiko.SSHClient()
+        if os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes"):
+            self.client.load_system_host_keys()
+            self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            # ponytail: AutoAddPolicy for Containerlab; set NETOPS_SSH_STRICT_HOST_KEY=true in prod
+            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        password = getattr(self.target.credentials, "password", "")
+        username = self.target.credentials.username
+
+        try:
+            sock = None
+            if self.proxy_jump:
+                sock = self._open_jump_channel(
+                    paramiko, self.proxy_jump, self.target.host, self.target.port
+                )
+            try:
+                self._connect_with_sock(paramiko, username, password, sock=sock)
+            except paramiko.ssh_exception.SSHException as exc:
+                clab_host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
+                if (
+                    sock is None
+                    and self.target.host == clab_host
+                    and ("protocol banner" in str(exc).lower() or "no existing session" in str(exc).lower())
+                ):
+                    sock = self._open_jump_channel(
+                        paramiko, "auto", self.target.host, self.target.port
+                    )
+                    self._connect_with_sock(paramiko, username, password, sock=sock)
+                else:
+                    raise
+
+            self.shell = self.client.invoke_shell()
+            time.sleep(0.8)
+            while self.shell.recv_ready():
+                _ = self.shell.recv(8192)
+
+            if self.target.platform in (Platform.ARISTA_EOS, Platform.CISCO_IOSXE):
+                self.shell.send("enable\nterminal length 0\n")
+            elif self.target.platform == Platform.HUAWEI_VRP:
+                self.shell.send("screen-length 0 temporary\n")
+
+            init_deadline = time.time() + 4.0
+            init_buf = ""
+            while time.time() < init_deadline:
+                if self.shell.recv_ready():
+                    init_buf += self.shell.recv(8192).decode("utf-8", errors="ignore")
+                    time.sleep(0.1)
+                elif ("length 0" in init_buf) and init_buf.rstrip().endswith(("#", ">", "]")):
+                    break
+                else:
+                    time.sleep(0.15)
+            return self
+        except Exception:
+            self.client.close()
+            if self._jump_client:
+                self._jump_client.close()
+            raise
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
         if self.client:
             self.client.close()
+        if self._jump_client:
+            self._jump_client.close()
 
     def send_command(self, cmd: str) -> _ScrapliResponse:
         import time  # noqa: PLC0415
 
         if self.shell is None:
             raise RuntimeError("SSH shell session is not initialized")
+        while self.shell.recv_ready():
+            _ = self.shell.recv(16384)
         self.shell.send(f"{cmd}\n")
-        time.sleep(0.8)
+        time.sleep(0.2)
         output = ""
+        cmd_prefix = cmd.strip()[:16]
         deadline = time.time() + self.timeout
         while time.time() < deadline:
             if self.shell.recv_ready():
-                output += self.shell.recv(8192).decode("utf-8", errors="ignore")
-                time.sleep(0.1)
-            elif output:
-                time.sleep(0.3)
+                output += self.shell.recv(16384).decode("utf-8", errors="ignore")
+                time.sleep(0.08)
+            elif output and (not cmd_prefix or cmd_prefix in output):
+                stripped = output.rstrip()
+                if stripped.endswith(("#", ">", "]")):
+                    break
+                time.sleep(0.2)
                 if not self.shell.recv_ready():
                     break
             else:
-                time.sleep(0.2)
+                time.sleep(0.15)
         return _ScrapliResponse(output)
 
     def send_configs(self, lines: Sequence[str]) -> _ScrapliResponse:
@@ -125,28 +216,28 @@ class _ParamikoConnAdapter:
 
         if self.target.platform == Platform.HUAWEI_VRP:
             self.shell.send("system-view\n")
-            time.sleep(0.3)
+            time.sleep(0.2)
             for line in lines:
                 self.shell.send(f"{line}\n")
-                time.sleep(0.1)
-            self.shell.send("return\n")
+                time.sleep(0.08)
+            self.shell.send("commit\nreturn\n")
         elif self.target.platform == Platform.ARISTA_EOS:
             for line in lines:
                 self.shell.send(f"{line}\n")
-                time.sleep(0.1)
+                time.sleep(0.08)
         else:
             self.shell.send("configure terminal\n")
-            time.sleep(0.3)
+            time.sleep(0.2)
             for line in lines:
                 self.shell.send(f"{line}\n")
-                time.sleep(0.1)
+                time.sleep(0.08)
             self.shell.send("end\n")
 
-        time.sleep(1.0)
+        time.sleep(0.5)
         output = ""
         while self.shell.recv_ready():
-            output += self.shell.recv(8192).decode("utf-8", errors="ignore")
-            time.sleep(0.1)
+            output += self.shell.recv(16384).decode("utf-8", errors="ignore")
+            time.sleep(0.08)
         return _ScrapliResponse(output)
 
 
@@ -158,7 +249,9 @@ class ScrapliNetworkDriver:
         self.timeout_socket = timeout_socket
 
     def _get_connection(self, target: DeviceTarget):
-        return _ParamikoConnAdapter(target, timeout=self.timeout_socket)
+        return _ParamikoConnAdapter(
+            target, timeout=self.timeout_socket, proxy_jump=target.proxy_jump
+        )
 
     def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
         results: dict[str, FetchResult] = {}
@@ -209,7 +302,7 @@ class ScrapliNetworkDriver:
         lines = [
             line.strip()
             for line in plan.remediation.splitlines()
-            if line.strip() and not line.startswith("!")
+            if line.strip() and not line.startswith(("!", "#"))
         ]
         if not lines:
             return
@@ -217,10 +310,12 @@ class ScrapliNetworkDriver:
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_configs(lines)
+                conn.send_command(f"commit confirmed {confirm_timeout}")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure terminal")
+                session_name = "NETOPS_DEPLOY"
+                conn.send_command(f"configure session {session_name}")
                 conn.send_configs(lines)
-                conn.send_command("end")
+                conn.send_command(f"commit timer {confirm_timeout}")
             elif target.platform == Platform.HUAWEI_VRP:
                 conn.send_configs(lines)
                 conn.send_command("commit")
@@ -228,11 +323,14 @@ class ScrapliNetworkDriver:
     def confirm(self, target: DeviceTarget) -> None:
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
+                conn.send_command("commit")
                 conn.send_command("write memory")
             elif target.platform == Platform.ARISTA_EOS:
+                conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command("commit")
                 conn.send_command("write memory")
             elif target.platform == Platform.HUAWEI_VRP:
-                conn.send_command("save")
+                conn.send_command("save\ny")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
         with self._get_connection(target) as conn:
@@ -247,7 +345,7 @@ class ScrapliNetworkDriver:
             rollback_lines = [
                 line.strip()
                 for line in plan.rollback.splitlines()
-                if line.strip() and not line.startswith("!")
+                if line.strip() and not line.startswith(("!", "#"))
             ]
             if rollback_lines:
                 conn.send_configs(rollback_lines)
@@ -280,9 +378,13 @@ class ScrapliNetworkDriver:
                 int_out = conn.send_command("display ip interface brief").result
                 for line in int_out.splitlines():
                     parts = line.split()
-                    if len(parts) >= 3 and parts[0].startswith(("GE", "Loop", "Gigabit")):
-                        status = "up" if "up" in parts[1].lower() else "down"
-                        proto = "up" if "up" in parts[2].lower() else "down"
+                    if (
+                        len(parts) >= 4
+                        and parts[0].startswith(("GE", "Loop", "Gigabit"))
+                        and parts[1].lower() != "unassigned"
+                    ):
+                        status = "up" if "up" in parts[2].lower() else "down"
+                        proto = "up" if "up" in parts[3].lower() else "down"
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
             else:
                 bgp_out = conn.send_command("show ip bgp summary").result
@@ -290,7 +392,7 @@ class ScrapliNetworkDriver:
                 for line in bgp_out.splitlines():
                     parts = line.strip().split()
                     peer_ip = next((p for p in parts if ip_pattern.match(p)), None)
-                    if not peer_ip or len(parts) < 8:
+                    if not peer_ip or len(parts) < 4 or "identifier" in line.lower():
                         continue
                     last = parts[-1]
                     if last.isdigit():
@@ -315,6 +417,12 @@ class ScrapliNetworkDriver:
                         proto = "up" if "up" in parts[3].lower() else "down"
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
 
+            cli_metrics = collect_metrics_from_cli(
+                target.hostname,
+                target.platform.value,
+                lambda c: conn.send_command(c).result,
+            )
+
             if expected:
                 for peer in expected.bgp_peers:
                     if target.platform == Platform.CISCO_IOSXE:
@@ -331,4 +439,7 @@ class ScrapliNetworkDriver:
             bgp_sessions=bgp_sessions,
             interfaces=interfaces,
             ping_loss_percent=ping_losses,
+            cpu_pct=cli_metrics.get("cpu_pct"),
+            memory_pct=cli_metrics.get("memory_pct"),
+            uplink_util_pct=cli_metrics.get("uplink_util_pct"),
         )

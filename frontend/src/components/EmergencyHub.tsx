@@ -19,13 +19,11 @@ import {
 import { api } from '../api';
 import type { EmergencyAuditLog } from '../api';
 
-const DEVICES = [
-  { hostname: 'spine-1.croc.lab', platform: 'arista_eos', label: 'Spine-1 (Arista cEOS)' },
-  { hostname: 'spine-2.croc.lab', platform: 'arista_eos', label: 'Spine-2 (Arista cEOS)' },
-  { hostname: 'leaf-1.croc.lab', platform: 'cisco_iosxe', label: 'Leaf-1 (Cisco 8000V)' },
-  { hostname: 'leaf-2.croc.lab', platform: 'cisco_iosxe', label: 'Leaf-2 (Cisco 8000V)' },
-  { hostname: 'leaf-3.croc.lab', platform: 'huawei_vrp', label: 'Leaf-3 (Huawei CE12800)' },
-  { hostname: 'leaf-4.croc.lab', platform: 'huawei_vrp', label: 'Leaf-4 (Huawei CE12800)' },
+const DEFAULT_DEVICES = [
+  { hostname: 'spine-1.croc.lab', platform: 'cisco_iosxe', label: 'spine-1.croc.lab (cisco_iosxe)' },
+  { hostname: 'spine-2.croc.lab', platform: 'arista_eos', label: 'spine-2.croc.lab (arista_eos)' },
+  { hostname: 'leaf-1.croc.lab', platform: 'huawei_vrp', label: 'leaf-1.croc.lab (huawei_vrp)' },
+  { hostname: 'leaf-2.croc.lab', platform: 'huawei_vrp', label: 'leaf-2.croc.lab (huawei_vrp)' },
 ];
 
 const PRESETS: Record<string, string[]> = {
@@ -40,7 +38,8 @@ interface EmergencyHubProps {
 }
 
 export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitchRole }) => {
-  const [selectedDevice, setSelectedDevice] = useState<string>(DEVICES[0].hostname);
+  const [devices, setDevices] = useState<Array<{ hostname: string; platform: string; label: string }>>(DEFAULT_DEVICES);
+  const [selectedDevice, setSelectedDevice] = useState<string>(DEFAULT_DEVICES[0].hostname);
   const [command, setCommand] = useState<string>('show ip bgp summary');
   const [cliOutput, setCliOutput] = useState<string>('// Готов к приему команд оператора...');
   const [isExecutingCmd, setIsExecutingCmd] = useState<boolean>(false);
@@ -77,6 +76,20 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   useEffect(() => {
     let active = true;
     api
+      .getDevices()
+      .then((list) => {
+        if (active && list.length > 0) {
+          const mapped = list.map((d) => ({
+            hostname: d.hostname,
+            platform: d.platform,
+            label: `${d.hostname} (${d.platform})`,
+          }));
+          setDevices(mapped);
+          setSelectedDevice((prev) => (mapped.some((m) => m.hostname === prev) ? prev : mapped[0].hostname));
+        }
+      })
+      .catch(() => {});
+    api
       .getEmergencyAudit()
       .then((logs) => {
         if (active) setAuditLogs([...logs].reverse());
@@ -92,7 +105,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     };
   }, []);
 
-  const activeDeviceObj = DEVICES.find((d) => d.hostname === selectedDevice) || DEVICES[0];
+  const activeDeviceObj = devices.find((d) => d.hostname === selectedDevice) || devices[0];
   const activePresets = PRESETS[activeDeviceObj.platform] || PRESETS.arista_eos;
 
   const handleRunCommand = async (cmdToRun = command) => {
@@ -149,7 +162,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   const handleHardReset = async () => {
     setIsHardResetting(true);
     setResetModal(null);
-    setResetLog('Передеплой Containerlab топологии на хосте 5.228.243.54 (reconfigure)...');
+    setResetLog('Передеплой топологии стенда (reconfigure)...');
     try {
       const res = await api.hardResetFabric();
       setResetLog(`[ХАРД-СБРОС ЗАВЕРШЕН]: ${res.message}\n\nЛог:\n${res.details}`);
@@ -195,7 +208,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-3 sm:p-6 animate-fade-in text-[var(--text-primary)]">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl border border-amber-500/30 bg-gradient-to-r from-amber-500/[0.08] via-amber-500/[0.02] to-transparent">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-lg border border-amber-500/25 bg-amber-500/[0.04]">
         <div className="flex items-center gap-3.5">
           <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 dark:text-amber-400">
             <ShieldAlert className="w-6 h-6" />
@@ -259,14 +272,14 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
               value={selectedDevice}
               onChange={(e) => {
                 setSelectedDevice(e.target.value);
-                const dev = DEVICES.find((d) => d.hostname === e.target.value);
+                const dev = devices.find((d) => d.hostname === e.target.value);
                 if (dev && PRESETS[dev.platform]) {
                   setCommand(PRESETS[dev.platform][0]);
                 }
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-mono bg-white/[0.05] border border-white/10 text-white focus:outline-none focus:border-cyan-500"
             >
-              {DEVICES.map((d) => (
+              {devices.map((d) => (
                 <option key={d.hostname} value={d.hostname} className="bg-slate-900 text-white">
                   {d.label}
                 </option>
@@ -404,7 +417,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
               <button
                 onClick={handleApplyPatch}
                 disabled={isApplyingPatch || !patchText.trim()}
-                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl font-semibold text-xs text-black bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 disabled:opacity-50 transition-all cursor-pointer shadow-lg shadow-amber-500/20"
+                className="w-full flex items-center justify-center gap-2 py-2.5 rounded-md font-semibold text-xs text-black bg-amber-500 hover:bg-amber-400 disabled:opacity-50 transition-all cursor-pointer"
               >
                 {isApplyingPatch ? (
                   <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
@@ -532,7 +545,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
                 <p className="text-xs text-slate-400">
                   {resetModal === 'soft'
                     ? 'Перенакат золотого эталона Git SoT'
-                    : 'Передеплой всех 6 контейнеров на сервере'}
+                    : `Передеплой всех узлов (${devices.length}) на стенде`}
                 </p>
               </div>
             </div>
@@ -540,11 +553,11 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
             <p className="text-xs text-slate-300 leading-relaxed">
               {resetModal === 'soft' ? (
                 <>
-                  Будет выполнен прогон NetOps pipeline по всем 6 узлам фабрики. Все несанкционированные команды будут устранены, а недостающие маршруты и интерфейсы восстановлены (~5 секунд).
+                  Будет выполнен прогон NetOps pipeline по всем узлам фабрики ({devices.length}). Все несанкционированные команды будут устранены, а недостающие маршруты и интерфейсы восстановлены.
                 </>
               ) : (
                 <>
-                  Внимание: будет вызвана команда <code className="text-red-300 font-mono">containerlab deploy --reconfigure</code> на сервере 5.228.243.54. Сетевые сессии перезапустятся.
+                  Внимание: будет выполнен полный передеплой топологии стенда к базовому состоянию. Сетевые сессии перезапустятся.
                 </>
               )}
             </p>

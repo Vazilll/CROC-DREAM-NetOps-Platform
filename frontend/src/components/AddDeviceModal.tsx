@@ -126,13 +126,19 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
       // Sanitize hostname to valid RFC label (only letters, digits, and hyphens)
       const finalHostname = rawHostname.replace(/[^A-Za-z0-9.-]/g, '-').toLowerCase();
 
+      const profileKey = customCreds
+        ? `${finalHostname.split('.')[0].replace(/[^a-z0-9_]/g, '_')}_auth`
+        : authProfile;
+
       const newDev = await api.createDevice({
         hostname: finalHostname,
         management_ip: cleanIp,
         management_port: cleanPort,
         platform,
         role,
-        auth_profile: customCreds ? 'custom_ssh' : authProfile,
+        auth_profile: profileKey,
+        username: customCreds ? username : undefined,
+        password: customCreds ? password : undefined,
         management_mode: 'MONITORING_ONLY',
         proxy_jump: proxyJump.trim() || null,
         hardware_specs: probeResult
@@ -142,9 +148,10 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               disk_gb: probeResult.disk_gb,
               os_version: probeResult.os_version,
               interfaces: probeResult.interfaces,
+              lldp_neighbors: probeResult.lldp_neighbors,
             })
           : null,
-      });
+      } as any);
 
       onSuccess(newDev);
       handleClose();
@@ -166,18 +173,18 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-xl animate-fade-in">
-      <div className="bg-[#08090c] border border-white/[0.08] rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl shadow-cyan-950/20 flex flex-col max-h-[92vh]">
+      <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/[0.06] bg-gradient-to-b from-white/[0.02] to-transparent shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] shrink-0">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500/20 to-indigo-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
-              <Server className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)]">
+              <Server className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-white tracking-tight">
+              <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
                 Добавление устройства / сервера
               </h2>
-              <p className="text-xs text-zinc-400">
+              <p className="text-xs text-[var(--text-secondary)]">
                 Шаг {step} из 2 · SSH Probe &amp; Безопасный онбординг (Safe-First)
               </p>
             </div>
@@ -212,17 +219,55 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                         <Zap className="w-3.5 h-3.5 text-cyan-400" />
                         Быстрый выбор узлов стенда (5.228.243.54):
                       </span>
-                      <span className="text-[10px] text-zinc-500 font-mono">admin / admin</span>
+                      <span className="text-[10px] text-zinc-500 font-mono">Live Containerlab</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {[
-                        { label: 'spine-1 (:2211 Arista)', port: 2211, role: 'spine' as DeviceRole },
-                        { label: 'spine-2 (:2212 Arista)', port: 2212, role: 'spine' as DeviceRole },
-                        { label: 'leaf-1 (:2221 Cisco)', port: 2221, role: 'leaf' as DeviceRole },
-                        { label: 'leaf-2 (:2222 Cisco)', port: 2222, role: 'leaf' as DeviceRole },
-                        { label: 'leaf-3 (:2231 Huawei)', port: 2231, role: 'leaf' as DeviceRole },
-                        { label: 'leaf-4 (:2232 Huawei)', port: 2232, role: 'leaf' as DeviceRole },
-                        { label: 'Host (:22 Debian)', port: 22, role: 'server' as DeviceRole },
+                        {
+                          label: 'spine-1 (:2211 Cisco)',
+                          port: 2211,
+                          role: 'spine' as DeviceRole,
+                          platform: 'cisco_iosxe' as Platform,
+                          user: 'admin',
+                          pass: 'F5ga6jfkig1',
+                          jump: '',
+                        },
+                        {
+                          label: 'spine-2 (:2212 Arista)',
+                          port: 2212,
+                          role: 'spine' as DeviceRole,
+                          platform: 'arista_eos' as Platform,
+                          user: 'admin',
+                          pass: 'F5ga6jfkig2',
+                          jump: '',
+                        },
+                        {
+                          label: 'leaf-1 (:2221 Huawei)',
+                          port: 2221,
+                          role: 'leaf' as DeviceRole,
+                          platform: 'huawei_vrp' as Platform,
+                          user: 'admin',
+                          pass: 'admin@123',
+                          jump: 'crocdream@5.228.243.54:221',
+                        },
+                        {
+                          label: 'leaf-2 (:2222 Huawei)',
+                          port: 2222,
+                          role: 'leaf' as DeviceRole,
+                          platform: 'huawei_vrp' as Platform,
+                          user: 'admin',
+                          pass: 'admin@123',
+                          jump: 'crocdream@5.228.243.54:221',
+                        },
+                        {
+                          label: 'Host (:221 Debian)',
+                          port: 221,
+                          role: 'server' as DeviceRole,
+                          platform: 'linux_server' as Platform,
+                          user: 'crocdream',
+                          pass: '',
+                          jump: '',
+                        },
                       ].map((item) => (
                         <button
                           key={item.port}
@@ -231,9 +276,11 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                             setIp('5.228.243.54');
                             setPort(item.port);
                             setCustomCreds(true);
-                            setUsername('admin');
-                            setPassword('admin');
+                            setUsername(item.user);
+                            setPassword(item.pass);
+                            setProxyJump(item.jump);
                             setRole(item.role);
+                            setPlatform(item.platform);
                           }}
                           className="px-2.5 py-1 rounded bg-white/[0.04] hover:bg-cyan-500/20 hover:text-cyan-300 border border-white/[0.08] hover:border-cyan-500/40 text-[11px] font-mono text-zinc-300 transition-all cursor-pointer"
                         >
@@ -252,7 +299,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                         type="text"
                         value={ip}
                         onChange={(e) => handleIpChange(e.target.value)}
-                        placeholder="например, 5.228.243.54 или 10.0.10.15"
+                        placeholder="например, 127.0.0.1 или 10.0.10.15"
                         className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none transition-colors"
                       />
                     </div>
@@ -508,7 +555,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                 <button
                   onClick={handleProbe}
                   disabled={probing || !ip.trim()}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-500 to-indigo-600 text-white hover:from-cyan-400 hover:to-indigo-500 transition-all disabled:opacity-40 shadow-lg shadow-cyan-500/20 cursor-pointer"
+                  className="flex items-center gap-2 px-4 py-2 rounded-md text-xs font-medium bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 transition-all disabled:opacity-40 cursor-pointer"
                 >
                   {probing ? (
                     <>

@@ -37,35 +37,47 @@ export const Sidebar: React.FC<SidebarProps> = ({
   ];
 
   return (
-    <aside className="hidden lg:block w-56 shrink-0 border-r border-white/[0.08] bg-[#090a0f]/90 sticky top-14 h-[calc(100vh-3.5rem)] overflow-y-auto py-4 transition-colors select-none">
-      {groups.map((g) => (
-        <div key={g.title} className="mb-4">
-          <div className="px-5 mb-1 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 font-mono">
-            {g.title}
+    <aside className="hidden lg:flex flex-col justify-between w-56 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-main)] sticky top-13 h-[calc(100vh-3.25rem)] overflow-y-auto py-3.5 px-2.5 transition-colors select-none">
+      <nav className="space-y-5" aria-label="Primary Navigation">
+        {groups.map((g) => (
+          <div key={g.title}>
+            <div className="px-2.5 mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[var(--text-muted)] font-mono">
+              {g.title}
+            </div>
+            <div className="space-y-0.5">
+              {g.tabs.map(({ id, labelKey, Icon }) => {
+                const isActive = activeTab === id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setActiveTab(id)}
+                    className={`w-full flex items-center gap-2.5 px-2.5 py-1.5 rounded-md text-[13px] cursor-pointer transition-colors ${
+                      isActive
+                        ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] font-medium border border-[var(--border-subtle)]'
+                        : 'border border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-subtle)]'
+                    }`}
+                  >
+                    <Icon
+                      className={`w-3.5 h-3.5 shrink-0 transition-colors ${
+                        isActive ? 'text-[var(--text-primary)]' : 'text-[var(--text-muted)]'
+                      }`}
+                    />
+                    <span className="truncate">{t[labelKey]}</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-          {g.tabs.map(({ id, labelKey, Icon }) => {
-            const isActive = activeTab === id;
-            return (
-              <button
-                key={id}
-                onClick={() => setActiveTab(id)}
-                className={`w-full flex items-center gap-2.5 px-5 py-2 text-[13px] border-l-2 cursor-pointer transition-all ${
-                  isActive
-                    ? 'border-cyan-400 bg-white/[0.05] text-white font-semibold shadow-inner'
-                    : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.03]'
-                }`}
-              >
-                <Icon
-                  className={`w-4 h-4 transition-colors ${
-                    isActive ? 'text-cyan-400' : 'text-zinc-500'
-                  }`}
-                />
-                <span>{t[labelKey]}</span>
-              </button>
-            );
-          })}
-        </div>
-      ))}
+        ))}
+      </nav>
+
+      {/* Bottom Keyboard Hint Strip */}
+      <div className="pt-3 mt-4 border-t border-[var(--border-subtle)] px-2.5 flex items-center justify-between text-[11px] text-[var(--text-muted)] font-mono">
+        <span>Command Palette</span>
+        <kbd className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-secondary)]">
+          Ctrl+K
+        </kbd>
+      </div>
     </aside>
   );
 };

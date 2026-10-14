@@ -15,7 +15,7 @@ from tests.integration.helpers import append_to_running_config
 OPERATOR = auth(UserRole.OPERATOR)
 VIEWER = auth(UserRole.VIEWER)
 
-ROGUE_USER = "username rogue privilege 15 secret 0 hacked\n"
+ROGUE_LOOPBACK = "interface Loopback99\n"
 
 
 def _scan(client: TestClient, body: dict[str, object] | None = None) -> uuid.UUID:
@@ -37,7 +37,7 @@ def test_scan_classifies_every_device(
     run_job: RunJob,
     session: Session,
 ) -> None:
-    append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
+    append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
     (lab_path / "spine-2.croc.lab.cfg").unlink()
 
     job_id = _scan(client)
@@ -54,9 +54,9 @@ def test_scan_classifies_every_device(
 
     report = _report(client)
     assert report["leaf-2.croc.lab"]["status"] == "DRIFT_DETECTED"
-    assert report["leaf-2.croc.lab"]["unauthorized_lines"] == [ROGUE_USER.strip()]
+    assert report["leaf-2.croc.lab"]["unauthorized_lines"] == [ROGUE_LOOPBACK.strip()]
     assert report["leaf-2.croc.lab"]["missing_lines"] == []
-    assert "no username rogue" in str(report["leaf-2.croc.lab"]["remediation_patch"])
+    assert "no interface Loopback99" in str(report["leaf-2.croc.lab"]["remediation_patch"])
     assert report["spine-2.croc.lab"]["status"] == "UNREACHABLE"
     assert "unreachable" in str(report["spine-2.croc.lab"]["error"])
     assert report["leaf-1.croc.lab"]["job_id"] == str(job_id)
@@ -122,7 +122,7 @@ class TestRemediation:
         run_job: RunJob,
         session: Session,
     ) -> None:
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
         run_job(_scan(client))
         device_id = devices["leaf-2.croc.lab"].id
 
@@ -133,7 +133,7 @@ class TestRemediation:
         job_id = uuid.UUID(response.json()["job_id"])
         assert run_job(job_id) is JobStatus.SUCCESS
 
-        assert "rogue" not in (lab_path / "leaf-2.croc.lab.cfg").read_text()
+        assert "Loopback99" not in (lab_path / "leaf-2.croc.lab.cfg").read_text()
         assert session.get_one(Device, device_id).status is DeviceStatus.IN_SYNC
         assert _report(client)["leaf-2.croc.lab"]["status"] == "IN_SYNC"
 
@@ -168,7 +168,7 @@ class TestRemediation:
         session: Session,
     ) -> None:
         config = (lab_path / "leaf-2.croc.lab.cfg").read_text()
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
         run_job(_scan(client))
         (lab_path / "leaf-2.croc.lab.cfg").write_text(config)
 
@@ -190,11 +190,14 @@ class TestRemediation:
         run_job: RunJob,
         dispatcher: RecordingDispatcher,
     ) -> None:
-        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_USER)
+        append_to_running_config(lab_path, "leaf-2.croc.lab", ROGUE_LOOPBACK)
         run_job(_scan(client))
         body = {"device_id": devices["leaf-2.croc.lab"].id}
         assert (
             client.post("/api/v1/drift/remediate", json=body, headers=OPERATOR).status_code == 202
+        )
+        assert (
+            client.post("/api/v1/drift/remediate", json=body, headers=OPERATOR).status_code == 409
         )
         assert len(dispatcher.job_ids) == 2
 

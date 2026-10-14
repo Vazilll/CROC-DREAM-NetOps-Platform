@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Play, X, GitBranch, CheckCircle2, AlertTriangle, Server, Network } from 'lucide-react';
-import type { Device } from '../api';
+import { api, type Device } from '../api';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
 import { translations, type Locale } from '../i18n';
 
@@ -22,11 +22,37 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
   deviceIds,
   devices,
   locale = 'ru',
-  gitBranch = 'git_main',
-  gitCommit = 'origin/main:HEAD (f48c2a1)',
+  gitBranch,
+  gitCommit,
 }) => {
   const t = translations[locale];
   const [submitting, setSubmitting] = useState(false);
+  const [liveGitBranch, setLiveGitBranch] = useState<string>(gitBranch || 'git_main');
+  const [liveGitCommit, setLiveGitCommit] = useState<string>(gitCommit || 'HEAD');
+
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    api
+      .getIntegrationsStatus()
+      .then((res) => {
+        if (!active || !res.github_sot) return;
+        if (!gitBranch && res.github_sot.branch) {
+          setLiveGitBranch(res.github_sot.branch);
+        }
+        if (!gitCommit && res.github_sot.commit_short) {
+          setLiveGitCommit(
+            `origin/${res.github_sot.branch || 'main'}:${res.github_sot.commit_short}${
+              res.github_sot.last_commit_message ? ` — ${res.github_sot.last_commit_message}` : ''
+            }`
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [open, gitBranch, gitCommit]);
 
   // Target devices in scope
   const targetDevices = useMemo(() => {
@@ -37,6 +63,8 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
   // Blast radius calculation
   const blastRadius = useMemo(() => {
     const total = devices.length || 1;
+    const totalLeaves = devices.filter((d) => d.role === 'leaf').length || 2;
+    const totalSpines = devices.filter((d) => d.role === 'spine').length || 2;
     const count = targetDevices.length;
     const spines = targetDevices.filter((d) => d.role === 'spine').length;
     const leaves = targetDevices.filter((d) => d.role === 'leaf' || d.role === 'border' || d.role === 'border_firewall').length;
@@ -56,8 +84,13 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
       levelColor = 'text-amber-400 bg-amber-500/10 border-amber-500/20';
     }
 
-    const estimatedLinks = spines * 4 + leaves * 2;
-    const estimatedPeers = spines * 4 + leaves * 2;
+    const totalFabricLinks = totalSpines * totalLeaves;
+    const touchedLinks = Math.min(
+      totalFabricLinks,
+      spines * totalLeaves + leaves * totalSpines - spines * leaves
+    );
+    const estimatedLinks = touchedLinks;
+    const estimatedPeers = touchedLinks;
 
     return {
       level,
@@ -69,7 +102,7 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
       estimatedLinks,
       estimatedPeers,
     };
-  }, [targetDevices, devices.length, t.radiusHigh, t.radiusMedium, t.radiusLow]);
+  }, [targetDevices, devices, t.radiusHigh, t.radiusMedium, t.radiusLow]);
 
   const handleExecute = React.useCallback(async () => {
     if (submitting || targetDevices.length === 0) return;
@@ -138,8 +171,8 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
               <GitBranch className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <div className="text-[11px] text-zinc-400">Источник эталона (Git SoT)</div>
-                <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{gitBranch}</div>
-                <div className="text-[10px] text-zinc-500 font-mono truncate">{gitCommit}</div>
+                <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{liveGitBranch}</div>
+                <div className="text-[10px] text-zinc-500 font-mono truncate">{liveGitCommit}</div>
               </div>
             </div>
 
