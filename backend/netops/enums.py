@@ -10,6 +10,13 @@ class Platform(StrEnum):
     ELTEX_ESR = "eltex_esr"
 
 
+# Новое устройство добавляется как MONITORING_ONLY: дрейф считаем, но менять конфиг нельзя,
+# пока админ не переведёт его в MANAGED.
+class ManagementMode(StrEnum):
+    MONITORING_ONLY = "MONITORING_ONLY"
+    MANAGED = "MANAGED"
+
+
 class DeviceRole(StrEnum):
     SPINE = "spine"
     LEAF = "leaf"

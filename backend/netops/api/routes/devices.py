@@ -1,21 +1,27 @@
 from __future__ import annotations
 
+import logging
+import socket
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Response, status
 
 from netops.api.deps import Admin, ContainerDep, DeviceServiceDep, Viewer
-from netops.enums import DeviceRole, DeviceStatus, Platform
+from netops.enums import DeviceRole, DeviceStatus, ManagementMode, Platform
 from netops.intent import IntentValidationError
 from netops.models import Device
 from netops.schemas.devices import (
     DeviceCreate,
     DeviceDetail,
+    DeviceProbeRequest,
+    DeviceProbeResult,
     DeviceRead,
     DeviceUpdate,
     InventorySyncResult,
 )
 from netops.schemas.intent import IntentIssueRead
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["devices"])
 
@@ -73,6 +79,67 @@ def update_device(
 def delete_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Response:
     service.delete(device_id)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# Проверяем только то, что действительно видно: открыт ли SSH-порт и что отвечает баннером.
+# Платформу подсказываем, если она в баннере названа; угадывать по номеру порта нельзя.
+@router.post(
+    "/devices/probe",
+    response_model=DeviceProbeResult,
+    summary="Проверка доступности устройства по SSH",
+)
+def probe_device(request: DeviceProbeRequest, _: Admin) -> DeviceProbeResult:
+    banner = _ssh_banner(request.management_ip, request.management_port)
+    if banner is None:
+        return DeviceProbeResult(
+            reachable=False,
+            message=(
+                f"{request.management_ip}:{request.management_port} не отвечает. "
+                "Проверьте адрес, порт и доступ по сети."
+            ),
+        )
+    return DeviceProbeResult(
+        reachable=True,
+        message=f"SSH-порт открыт{', баннер: ' + banner if banner else ''}",
+        banner=banner or None,
+        detected_platform=_platform_from_banner(banner),
+        os_version=banner or None,
+    )
+
+
+def _ssh_banner(host: str, port: int, timeout: float = 2.5) -> str | None:
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(1.5)
+            try:
+                return sock.recv(256).decode("utf-8", errors="ignore").strip()
+            except OSError:
+                return ""
+    except OSError as exc:
+        logger.info("Проверка %s:%s не прошла: %s", host, port, exc)
+        return None
+
+
+_BANNER_PLATFORMS = (
+    ("cisco", Platform.CISCO_IOSXE),
+    ("arista", Platform.ARISTA_EOS),
+    ("huawei", Platform.HUAWEI_VRP),
+    ("eltex", Platform.ELTEX_ESR),
+)
+
+
+def _platform_from_banner(banner: str) -> Platform | None:
+    lowered = banner.lower()
+    return next((platform for mark, platform in _BANNER_PLATFORMS if mark in lowered), None)
+
+
+@router.post(
+    "/devices/{device_id}/promote",
+    response_model=DeviceRead,
+    summary="Разрешить изменения конфигурации на устройстве",
+)
+def promote_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Device:
+    return service.set_management_mode(device_id, ManagementMode.MANAGED)
 
 
 @router.post(

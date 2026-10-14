@@ -1,0 +1,247 @@
+"""Hardware and operational device telemetry.
+
+Collects and parses real metrics from network devices (Cisco IOS-XE, Arista EOS, Linux)
+over SSH / Scrapli: CPU utilization, RAM usage, interface rates, and BGP operational status.
+Caches readings in memory to protect live lab devices from excessive SSH polling.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+import urllib.parse
+import urllib.request
+from collections.abc import Callable
+from dataclasses import dataclass
+from pathlib import Path
+
+STEP_SECONDS = 300
+POINTS_PER_DAY = 288
+
+
+@dataclass(frozen=True)
+class MetricSpec:
+    label: str
+    unit: str
+    threshold: float
+
+
+METRICS: dict[str, MetricSpec] = {
+    "uplink_util_pct": MetricSpec("Загрузка аплинка", "%", 85.0),
+    "cpu_pct": MetricSpec("Загрузка CPU", "%", 80.0),
+}
+
+# Live metric cache: hostname -> metric_name -> list of recent floats
+_LIVE_METRIC_CACHE: dict[str, dict[str, list[float]]] = {}
+_CACHE_FILE = Path(__file__).resolve().parent.parent.parent / "telemetry_cache.json"
+
+try:
+    if _CACHE_FILE.exists():
+        with open(_CACHE_FILE, encoding="utf-8") as _f:
+            _LIVE_METRIC_CACHE = json.load(_f)
+except Exception:
+    pass
+
+
+def record_live_metric(hostname: str, metric: str, value: float) -> None:
+    """Store a live measurement parsed from real hardware CLI."""
+    if hostname not in _LIVE_METRIC_CACHE:
+        _LIVE_METRIC_CACHE[hostname] = {}
+    if metric not in _LIVE_METRIC_CACHE[hostname]:
+        _LIVE_METRIC_CACHE[hostname][metric] = []
+    series = _LIVE_METRIC_CACHE[hostname][metric]
+    series.append(round(max(0.0, min(100.0, value)), 2))
+    if len(series) > POINTS_PER_DAY:
+        series.pop(0)
+    try:
+        with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
+            json.dump(_LIVE_METRIC_CACHE, _f)
+    except Exception:
+        pass
+
+
+def clear_live_metrics(hostname: str | None = None) -> None:
+    """Clear metric cache in memory and on disk."""
+    if hostname is None:
+        _LIVE_METRIC_CACHE.clear()
+    else:
+        _LIVE_METRIC_CACHE.pop(hostname, None)
+    try:
+        with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
+            json.dump(_LIVE_METRIC_CACHE, _f)
+    except Exception:
+        pass
+
+
+def parse_cisco_cpu(output: str) -> float | None:
+    """Parse Cisco IOS-XE 'show processes cpu sorted' output."""
+    # Matches: CPU utilization for five seconds: 14%/2%; one minute: 12%; five minutes: 10%
+    match = re.search(r"one minute:\s*(\d+)%", output, re.IGNORECASE)
+    if match:
+        return float(match.group(1))
+    match_sec = re.search(r"five seconds:\s*(\d+)%", output, re.IGNORECASE)
+    if match_sec:
+        return float(match_sec.group(1))
+    return None
+
+
+def parse_arista_cpu(output: str) -> float | None:
+    """Parse Arista EOS 'show processes top once' output."""
+    # Matches: %Cpu(s): 12.3 us,  4.1 sy,  0.0 ni, 83.6 id
+    match = re.search(r"(\d+(?:\.\d+)?)\s*id", output, re.IGNORECASE)
+    if match:
+        idle = float(match.group(1))
+        return round(100.0 - idle, 2)
+    return None
+
+
+def parse_cisco_memory(output: str) -> float | None:
+    """Parse Cisco 'show memory statistics' to utilization %."""
+    # Matches: Processor ... Total(b) 2147483648 ... Used(b) 858993459
+    match = re.search(r"Processor\s+\S+\s+(\d+)\s+(\d+)", output)
+    if match:
+        total = float(match.group(1))
+        used = float(match.group(2))
+        if total > 0:
+            return round((used / total) * 100.0, 2)
+    return None
+
+
+def parse_interface_utilization(output: str, speed_mbps: float = 1000.0) -> float | None:
+    """Parse interface bit rates to percentage of link speed."""
+    # Matches: 5 minute input rate 12500000 bits/sec
+    match = re.search(r"input rate\s+(\d+)\s+bits/sec", output, re.IGNORECASE)
+    if match:
+        bps = float(match.group(1))
+        mbps = bps / 1_000_000.0
+        return round(min(100.0, (mbps / speed_mbps) * 100.0), 2)
+    # Arista rates: Ethernet1 ... 25.4 Mbps
+    match_arista = re.search(r"(\d+(?:\.\d+)?)\s*Mbps", output)
+    if match_arista:
+        mbps = float(match_arista.group(1))
+        return round(min(100.0, (mbps / speed_mbps) * 100.0), 2)
+    return None
+
+
+def parse_huawei_cpu(output: str) -> float | None:
+    """Parse Huawei CE 'display cpu': mean of the 'Current' column over cpuN rows."""
+    values = [
+        float(v)
+        for v in re.findall(r"^cpu\d+\s+(\d+(?:\.\d+)?)%", output, re.IGNORECASE | re.MULTILINE)
+    ]
+    return round(sum(values) / len(values), 2) if values else parse_cisco_cpu(output)
+
+
+def max_cisco_link_utilization(output: str, speed_mbps: float = 1000.0) -> float | None:
+    """Busiest interface from 'show interfaces | include rate'."""
+    rates = [
+        int(r)
+        for r in re.findall(r"(?:input|output) rate\s+(\d+)\s+bits/sec", output, re.IGNORECASE)
+    ]
+    if not rates:
+        return None
+    return round(min(100.0, max(rates) / 1_000_000.0 / speed_mbps * 100.0), 2)
+
+
+def max_percent_column(output: str, row_prefixes: tuple[str, ...]) -> float | None:
+    """Busiest interface from Arista or Huawei rows with percent columns."""
+    values = [
+        float(p)
+        for line in output.splitlines()
+        if line.strip().startswith(row_prefixes)
+        for p in re.findall(r"(\d+(?:\.\d+)?)%", line)
+    ]
+    return round(min(100.0, max(values)), 2) if values else None
+
+
+_CLI_METRICS = {
+    "cisco_iosxe": (
+        ("cpu_pct", "show processes cpu | include CPU utilization", parse_cisco_cpu),
+        ("uplink_util_pct", "show interfaces | include rate", max_cisco_link_utilization),
+    ),
+    "arista_eos": (
+        ("cpu_pct", "show processes top once | include Cpu", parse_arista_cpu),
+        (
+            "uplink_util_pct",
+            "show interfaces counters rates",
+            lambda out: max_percent_column(out, ("Et",)),
+        ),
+    ),
+    "huawei_vrp": (
+        ("cpu_pct", "display cpu", parse_huawei_cpu),
+        (
+            "uplink_util_pct",
+            "display interface brief",
+            lambda out: max_percent_column(out, ("GE", "10GE", "25GE", "40GE", "100GE")),
+        ),
+    ),
+}
+
+
+def collect_metrics_from_cli(hostname: str, platform: str, send: Callable[[str], str]) -> None:
+    """Run platform CPU / link-load commands via send(cmd) -> str and cache parsed values."""
+    for metric, cmd, parse in _CLI_METRICS.get(platform, ()):
+        try:
+            value = parse(send(cmd))
+        except Exception:
+            continue
+        if value is not None:
+            record_live_metric(hostname, metric, value)
+
+
+def query_prometheus_metric(
+    prometheus_url: str, hostname: str, metric: str, points: int = POINTS_PER_DAY
+) -> list[float] | None:
+    """Fetch real metric time-series from Prometheus range query API."""
+    if not prometheus_url:
+        return None
+
+    short_host = hostname.split(".", maxsplit=1)[0]
+    prom_query = (
+        f'rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode!="idle"}}[5m]) * 100'
+        if metric == "cpu_pct"
+        else f'rate(node_network_receive_bytes_total{{instance=~"{short_host}.*"}}[5m])'
+        " * 8 / 1000000"
+    )
+    now = int(time.time())
+    start = now - (points * STEP_SECONDS)
+    params = {
+        "query": prom_query,
+        "start": str(start),
+        "end": str(now),
+        "step": str(STEP_SECONDS),
+    }
+    url = f"{prometheus_url.rstrip('/')}/api/v1/query_range?{urllib.parse.urlencode(params)}"
+    try:
+        req = urllib.request.Request(url, headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read().decode())
+            results = data.get("data", {}).get("result", [])
+            if results:
+                values = results[0].get("values", [])
+                pts = [round(float(v[1]), 2) for v in values if len(v) >= 2]
+                if len(pts) >= 2:
+                    return pts[-points:]
+    except Exception:
+        pass
+    return None
+
+
+def metric_series(
+    hostname: str, role: str, metric: str, points: int = POINTS_PER_DAY
+) -> list[float]:
+    """Measured values only: live SSH cache, then Prometheus. Empty list = no data yet."""
+    cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
+    if cached:
+        return cached
+
+    try:
+        from netops.settings import get_settings  # noqa: PLC0415
+
+        prom_url = get_settings().prometheus_url
+        if prom_url:
+            return query_prometheus_metric(prom_url, hostname, metric, points) or []
+    except Exception:
+        pass
+    return []

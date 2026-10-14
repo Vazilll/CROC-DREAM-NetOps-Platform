@@ -15,6 +15,7 @@ interfaces:
     mode: "l3"
     ipv4_address: "10.10.0.0/31"
     mtu: 1500
+    acl_in: "FABRIC-IN"
 
   - name: "GigabitEthernet3"
     description: "Downlink to leaf2 GigabitEthernet0/0/1"
@@ -22,6 +23,7 @@ interfaces:
     mode: "l3"
     ipv4_address: "10.10.0.2/31"
     mtu: 1500
+    acl_in: "FABRIC-IN"
 
 bgp:
   asn: 65000

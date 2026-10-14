@@ -95,6 +95,15 @@ jobs:
           cache-from: type=gha,scope=backend
           cache-to: type=gha,mode=max,scope=backend
 
+      - name: Сборка образа фронтенда
+        uses: docker/build-push-action@v7
+        with:
+          context: frontend
+          tags: netops-frontend:latest
+          load: true
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+
       # Стенд на файлах из фикстур тестов: данные в intent/ и templates/ меняются по ходу работы
       # (у Huawei пока нет шаблонов), их проверяет test_repo_data. В running-config только hostname,
       # поэтому dry-run находит изменения на каждом устройстве. Скан по расписанию раз в минуту,

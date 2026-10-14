@@ -8,7 +8,7 @@ from typing import Protocol
 from sqlalchemy import exists, select
 from sqlalchemy.orm import Session, selectinload
 
-from netops.enums import DeviceStatus, IntentSource, JobStatus, JobType
+from netops.enums import DeviceStatus, IntentSource, JobStatus, JobType, ManagementMode
 from netops.errors import ConflictError, NotFoundError, ServiceUnavailableError
 from netops.models import Device, Job, JobLog, JobTarget
 from netops.pipeline.recorder import JobRecorder
@@ -112,6 +112,9 @@ class JobService:
         if previous is not None:
             raise ConflictError(f"Dry-run {dry_run_id} is already deployed by job {previous.id}")
 
+        self._ensure_managed(
+            [target.device for target in parent.targets if target.device is not None]
+        )
         changed = [target for target in parent.targets if target.has_changes]
         if not changed:
             raise ConflictError(f"Dry-run {dry_run_id} has no changes to deploy")
@@ -163,6 +166,7 @@ class JobService:
                 f"Device {device.hostname} is {device.status}; "
                 "only drifted devices can be remediated"
             )
+        self._ensure_managed([device])
         self._ensure_idle([device.id])
         job = Job(
             type=JobType.DRIFT_REMEDIATE,
@@ -194,6 +198,18 @@ class JobService:
         if missing:
             raise NotFoundError(f"Unknown device id(s): {', '.join(map(str, missing))}")
         return [found[device_id] for device_id in ids]
+
+    # На устройстве в режиме наблюдения дрейф считаем, но конфиг не меняем.
+    def _ensure_managed(self, devices: Iterable[Device]) -> None:
+        watched = [
+            device.hostname
+            for device in devices
+            if device.management_mode is ManagementMode.MONITORING_ONLY
+        ]
+        if watched:
+            raise ConflictError(
+                "Устройства в режиме наблюдения, изменения запрещены: " + ", ".join(watched)
+            )
 
     def _ensure_idle(self, device_ids: Iterable[int]) -> None:
         ids = list(device_ids)

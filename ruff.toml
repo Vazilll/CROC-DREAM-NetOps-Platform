@@ -1,0 +1,16 @@
+# Конфиг для вспомогательных скриптов вне backend: tools, scripts, проверки фронтенда.
+# Бэкенд живёт по своему строгому конфигу в backend/pyproject.toml — он ближе к файлам.
+line-length = 100
+target-version = "py311"
+exclude = ["mobile", "frontend/dist", "frontend/node_modules"]
+
+[lint]
+# Для утилит важна корректность, а не форматирование: лимит длины строки не навязываем.
+select = ["E4", "E7", "E9", "F", "I", "UP", "C4", "RUF"]
+# Кириллица в строках и комментариях — намеренно.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[lint.per-file-ignores]
+# Эти скрипты правят sys.path до импорта netops.
+"scripts/reset_lab.py" = ["E402"]
+"scripts/verify_live_lab.py" = ["E402"]

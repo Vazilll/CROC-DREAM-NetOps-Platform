@@ -15,6 +15,7 @@ interfaces:
     mode: "l3"
     ipv4_address: "10.10.0.1/31"
     mtu: 1500
+    acl_in: "FABRIC-IN"
 
   - name: "GE1/0/1"
     description: "Uplink to spine2 Ethernet1"
@@ -22,6 +23,7 @@ interfaces:
     mode: "l3"
     ipv4_address: "10.10.0.5/31"
     mtu: 1500
+    acl_in: "FABRIC-IN"
 
   - name: "GE1/0/9"
     description: "Access to host-a"

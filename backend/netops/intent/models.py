@@ -4,7 +4,7 @@ from collections.abc import Iterable
 from enum import StrEnum
 from ipaddress import IPv4Address, IPv4Interface, IPv4Network
 from itertools import combinations
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -51,6 +51,8 @@ class InterfaceIntent(IntentModel):
         default=None, description="Адрес с маской, например 10.10.0.1/31"
     )
     mtu: int = Field(default=1500, ge=68, le=9216)
+    # Входящий ACL на интерфейсе: имя из блока acls этого же устройства.
+    acl_in: Identifier | None = None
 
     @field_validator("ipv4_address", mode="before")
     @classmethod
@@ -206,6 +208,19 @@ class DeviceIntent(IntentModel):
     def _unique_acl_names(cls, acls: list[AclIntent]) -> list[AclIntent]:
         _ensure_unique((a.name for a in acls), "duplicate_acl", "ACL")
         return acls
+
+    # Опечатку в имени ACL лучше поймать здесь, чем получить патч, снимающий фильтр.
+    @model_validator(mode="after")
+    def _known_acl_bindings(self) -> Self:
+        declared = {acl.name for acl in self.acls}
+        for interface in self.interfaces:
+            if interface.acl_in is not None and interface.acl_in not in declared:
+                raise PydanticCustomError(
+                    "unknown_acl",
+                    "Interface {interface} references ACL {acl}, which is not declared",
+                    {"interface": interface.name, "acl": interface.acl_in},
+                )
+        return self
 
 
 # id и status есть в модели устройства из ТЗ. Статус в файле справочный: в базе его

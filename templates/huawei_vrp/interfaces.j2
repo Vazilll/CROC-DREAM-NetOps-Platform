@@ -9,6 +9,9 @@ interface {{ iface.name }}
 {% if iface.ipv4_address %}
  ip address {{ iface.ipv4_address.ip }} {{ iface.ipv4_address.netmask }}
 {% endif %}
+{% if iface.acl_in %}
+ traffic-filter inbound acl name {{ iface.acl_in }}
+{% endif %}
 {% if not iface.name.lower().startswith("loopback") %}
 {% if iface.enabled %}
  undo shutdown

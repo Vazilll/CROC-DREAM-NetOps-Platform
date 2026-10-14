@@ -1,21 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   Activity,
-  CheckCircle2,
-  AlertTriangle,
-  Clock,
-  RotateCw,
   Terminal,
   Play,
   Server,
+  RefreshCw,
+  FileDown,
 } from 'lucide-react';
 import { api } from '../api';
-import type { JobDetail, JobSummary, JobStatus } from '../api';
+import type { JobDetail, JobSummary } from '../api';
+import { translations, type Locale } from '../i18n';
+import { JobStatusBadge } from './ui';
 
 interface JobsViewProps {
   jobs: JobSummary[];
-  loading: boolean;
   selectedJobId: string | null;
+  locale?: Locale;
   onSelectJob: (jobId: string) => void;
   onDeploy: (jobId: string) => void;
   onOpenDiff: (jobId: string) => void;
@@ -24,14 +24,18 @@ interface JobsViewProps {
 
 export const JobsView: React.FC<JobsViewProps> = ({
   jobs,
-  loading,
   selectedJobId,
+  locale = 'ru',
   onSelectJob,
   onDeploy,
   onOpenDiff,
   onRefresh,
 }) => {
+  const t = translations[locale];
   const [activeJobDetail, setActiveJobDetail] = useState<JobDetail | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [logFilter, setLogFilter] = useState<'ALL' | 'INFO' | 'WARNING' | 'ERROR'>('ALL');
+  const logContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!selectedJobId) return;
@@ -61,202 +65,199 @@ export const JobsView: React.FC<JobsViewProps> = ({
     };
   }, [selectedJobId]);
 
-  const getStatusBadge = (status: JobStatus) => {
-    switch (status) {
-      case 'SUCCESS':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
-            <CheckCircle2 className="w-3 h-3" />
-            <span>SUCCESS</span>
-          </span>
-        );
-      case 'FAILED':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/30">
-            <AlertTriangle className="w-3 h-3" />
-            <span>FAILED</span>
-          </span>
-        );
-      case 'RUNNING':
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 animate-pulse">
-            <RotateCw className="w-3 h-3 animate-spin" />
-            <span>RUNNING</span>
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700">
-            <Clock className="w-3 h-3" />
-            <span>PENDING</span>
-          </span>
-        );
+  useEffect(() => {
+    if (autoScroll && logContainerRef.current) {
+      logContainerRef.current.scrollTop = logContainerRef.current.scrollHeight;
     }
-  };
+  }, [activeJobDetail?.logs, autoScroll]);
 
   const getLogStepColor = (step: string) => {
     switch (step) {
       case 'preflight':
-        return 'text-cyan-400 bg-cyan-950/40 border-cyan-800/40';
+        return 'text-cyan-700 dark:text-cyan-300 bg-cyan-500/10 border-cyan-500/30';
       case 'render':
-        return 'text-purple-400 bg-purple-950/40 border-purple-800/40';
+        return 'text-purple-700 dark:text-purple-300 bg-purple-500/10 border-purple-500/30';
       case 'diff':
-        return 'text-indigo-400 bg-indigo-950/40 border-indigo-800/40';
+        return 'text-indigo-700 dark:text-indigo-300 bg-indigo-500/10 border-indigo-500/30';
       case 'apply':
-        return 'text-amber-400 bg-amber-950/40 border-amber-800/40';
+        return 'text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/30';
       case 'post_check':
-        return 'text-emerald-400 bg-emerald-950/40 border-emerald-800/40';
+        return 'text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 border-emerald-500/30';
       case 'rollback':
-        return 'text-rose-400 bg-rose-950/40 border-rose-800/40';
+        return 'text-rose-700 dark:text-rose-300 bg-rose-500/10 border-rose-500/30';
+      case 'collect':
+        return 'text-sky-700 dark:text-sky-300 bg-sky-500/10 border-sky-500/30';
+      case 'job':
       default:
-        return 'text-slate-400 bg-slate-900 border-slate-800';
+        return 'text-slate-600 dark:text-zinc-400 bg-slate-200/60 dark:bg-zinc-800/60 border-slate-300 dark:border-white/[0.08]';
     }
+  };
+
+  const filteredLogs = activeJobDetail?.logs.filter((log) => {
+    if (logFilter === 'ALL') return true;
+    return log.level === logFilter;
+  }) || [];
+
+  const handleExportAuditReport = () => {
+    if (!activeJobDetail) return;
+    const targetsText = activeJobDetail.targets
+      .map((t) => `- **${t.hostname}**: ${t.status}`)
+      .join('\n');
+    const logsText = activeJobDetail.logs
+      .map((l) => `[${new Date(l.created_at).toISOString()}] [${l.level}] [${l.step}] ${l.hostname ? `[${l.hostname}] ` : ''}${l.message}`)
+      .join('\n');
+
+    const content = `# CROC DREAM NetOps Platform — Audit & Compliance Report
+**Job ID**: ${activeJobDetail.id}
+**Type**: ${activeJobDetail.type}
+**Status**: ${activeJobDetail.status}
+**Author**: ${activeJobDetail.created_by}
+**Timestamp**: ${new Date(activeJobDetail.created_at).toISOString()}
+**Source**: ${activeJobDetail.intent_source || 'git_main'}
+
+---
+
+## Target Devices (${activeJobDetail.targets.length})
+${targetsText || 'None'}
+
+---
+
+## Execution Logs (${activeJobDetail.logs.length} entries)
+\`\`\`
+${logsText || 'No logs recorded.'}
+\`\`\`
+
+---
+*Generated by CROC DREAM NetOps Platform • Continuous Compliance Verification System*
+`;
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `NetOps_Audit_${activeJobDetail.type}_${activeJobDetail.id.slice(0, 8)}.md`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-      {/* Left Column: Job History */}
-      <div className="lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+      <div className="bento-card lg:col-span-4 p-4 rounded-2xl border border-[var(--border-subtle)] space-y-4 shadow-sm">
+        <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
           <div className="flex items-center space-x-2">
-            <Activity className="w-4 h-4 text-indigo-400" />
-            <h2 className="text-sm font-bold text-white">История задач</h2>
+            <Activity className="w-4 h-4 text-cyan-400" />
+            <h3 className="text-xs font-mono font-bold uppercase tracking-wider text-[var(--text-primary)]">
+              {t.jobsHistoryTitle} ({jobs.length})
+            </h3>
           </div>
           <button
             onClick={onRefresh}
-            className="p-1 rounded-lg text-slate-400 hover:text-slate-200 hover:bg-slate-800 transition"
-            title="Обновить список"
+            className="p-1 rounded-lg bg-black/5 dark:bg-zinc-900 hover:bg-black/10 dark:hover:bg-zinc-800 text-[var(--text-muted)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] transition cursor-pointer"
+            title={t.refresh}
           >
-            <RotateCw className="w-3.5 h-3.5" />
+            <RefreshCw className="w-3.5 h-3.5" />
           </button>
         </div>
 
-        <div className="space-y-2.5 max-h-[75vh] overflow-y-auto pr-1">
-          {jobs.map((job) => {
-            const isSelected = job.id === selectedJobId;
-            return (
-              <div
-                key={job.id}
-                onClick={() => onSelectJob(job.id)}
-                className={`p-3 rounded-xl border text-xs cursor-pointer transition space-y-2 ${
-                  isSelected
-                    ? 'bg-indigo-950/30 border-indigo-500/50 shadow-sm'
-                    : 'bg-slate-950/40 border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-mono font-bold text-slate-200">{job.type}</span>
-                  {getStatusBadge(job.status)}
-                </div>
-
-                <div className="flex items-center justify-between text-slate-400 text-[11px]">
-                  <span>Прогресс: {job.progress}%</span>
-                  <span className="font-mono text-slate-500">
-                    {new Date(job.created_at).toLocaleTimeString()}
-                  </span>
-                </div>
-
-                {/* Progress bar */}
-                <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full transition-all duration-300 ${
-                      job.status === 'FAILED'
-                        ? 'bg-rose-500'
-                        : job.status === 'SUCCESS'
-                        ? 'bg-emerald-500'
-                        : 'bg-indigo-500 animate-pulse'
-                    }`}
-                    style={{ width: `${job.progress}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-          {jobs.length === 0 && (
-            <div className="p-8 text-center text-slate-500 text-xs">
-              {loading ? 'Загрузка задач...' : 'Нет активных или завершенных задач.'}
+        <div className="space-y-2 max-h-[640px] overflow-y-auto pr-1">
+          {jobs.length === 0 ? (
+            <div className="p-8 text-center text-[var(--text-muted)] font-mono text-xs">
+              {t.noJobsYet}
             </div>
+          ) : (
+            jobs.map((j) => {
+              const isSelected = j.id === selectedJobId;
+              return (
+                <div
+                  key={j.id}
+                  onClick={() => onSelectJob(j.id)}
+                  className={`p-3 rounded-xl border text-xs font-mono transition cursor-pointer ${
+                    isSelected
+                      ? 'bg-cyan-500/10 border-cyan-500/40 shadow-sm'
+                      : 'bg-black/[0.03] dark:bg-zinc-950/40 border-[var(--border-subtle)] hover:border-cyan-500/30'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[var(--text-primary)] tracking-wide">{j.type}</span>
+                    <JobStatusBadge status={j.status} />
+                  </div>
+                  <div className="mt-1 flex items-center justify-between text-[11px] text-[var(--text-muted)]">
+                    <span className="truncate">{j.id.slice(0, 13)}...</span>
+                    <span>{new Date(j.created_at).toLocaleTimeString()}</span>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* Right Column: Live Job Execution & Logs */}
-      <div className="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6">
+      <div className="bento-card lg:col-span-8 p-4 rounded-2xl border border-[var(--border-subtle)] space-y-4 shadow-sm">
         {activeJobDetail ? (
           <>
-            {/* Job Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-[var(--border-subtle)]">
               <div>
-                <div className="flex items-center space-x-2.5">
-                  <h2 className="text-lg font-bold text-white font-mono">{activeJobDetail.type}</h2>
-                  {getStatusBadge(activeJobDetail.status)}
+                <div className="flex items-center space-x-2">
+                  <span className="text-sm font-bold font-mono text-[var(--text-primary)]">{activeJobDetail.type}</span>
+                  <span className="text-xs text-[var(--text-muted)] font-mono">#{activeJobDetail.id.slice(0, 8)}</span>
+                  <JobStatusBadge status={activeJobDetail.status} />
                 </div>
-                <div className="mt-1 flex items-center space-x-3 text-xs text-slate-400 font-mono">
-                  <span>ID: {activeJobDetail.id.slice(0, 8)}...</span>
-                  <span>•</span>
-                  <span>Инициатор: {activeJobDetail.created_by}</span>
-                  <span>•</span>
-                  <span>
-                    Старт:{' '}
-                    {activeJobDetail.started_at
-                      ? new Date(activeJobDetail.started_at).toLocaleTimeString()
-                      : '—'}
-                  </span>
+                <div className="text-[11px] font-mono text-[var(--text-muted)] mt-1">
+                  {t.startedAt}: {new Date(activeJobDetail.created_at).toLocaleString()} • {t.author}: {activeJobDetail.created_by}
                 </div>
               </div>
 
-              {/* Actions */}
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => onOpenDiff(activeJobDetail.id)}
-                  className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center space-x-1.5 border border-slate-700 transition"
+                  onClick={handleExportAuditReport}
+                  className="px-2.5 py-1.5 rounded-xl bg-black/5 dark:bg-zinc-900 hover:bg-black/10 dark:hover:bg-zinc-800 text-[var(--text-primary)] border border-[var(--border-subtle)] text-xs font-mono flex items-center gap-1.5 transition cursor-pointer"
+                  title={t.exportAuditReport}
                 >
-                  <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Посмотреть Diff</span>
+                  <FileDown className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">{t.exportAuditReport}</span>
                 </button>
 
-                {activeJobDetail.type === 'DRY_RUN' &&
-                  activeJobDetail.status === 'SUCCESS' && (
-                    <button
-                      onClick={() => onDeploy(activeJobDetail.id)}
-                      className="px-4 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium flex items-center space-x-1.5 transition shadow-lg shadow-indigo-600/20"
-                    >
-                      <Play className="w-3.5 h-3.5 fill-current" />
-                      <span>Применить (Deploy)</span>
-                    </button>
-                  )}
+                <button
+                  onClick={() => onOpenDiff(activeJobDetail.id)}
+                  className="px-3 py-1.5 rounded-xl bg-black/5 dark:bg-zinc-900 hover:bg-black/10 dark:hover:bg-zinc-800 text-[var(--text-primary)] border border-[var(--border-subtle)] text-xs font-mono transition cursor-pointer"
+                >
+                  {t.viewDiffBtn}
+                </button>
+
+                {activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
+                  <button
+                    onClick={() => onDeploy(activeJobDetail.id)}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  >
+                    <Play className="w-3 h-3 fill-current" />
+                    <span>{t.applyDeployBtn}</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Target Devices Status */}
-            <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2.5 flex items-center space-x-1.5">
-                <Server className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Целевые узлы ({activeJobDetail.targets.length})</span>
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="space-y-2">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400">
+                {t.targetDevicesTitle} ({activeJobDetail.targets.length})
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {activeJobDetail.targets.map((t) => (
                   <div
                     key={t.hostname}
-                    className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs"
+                    className="p-2.5 rounded-xl bg-black/[0.03] dark:bg-zinc-950/60 border border-[var(--border-subtle)] flex items-center justify-between text-xs font-mono"
                   >
-                    <div>
-                      <span className="font-mono font-bold text-slate-200 block">
-                        {t.hostname}
-                      </span>
-                      <span className="text-[11px] text-slate-500">
-                        {t.has_changes ? 'Патч изменений рассчитан' : 'Конфигурация совпадает'}
-                      </span>
+                    <div className="flex items-center space-x-2 truncate">
+                      <Server className="w-3.5 h-3.5 text-[var(--text-muted)] shrink-0" />
+                      <span className="text-[var(--text-primary)] truncate">{t.hostname}</span>
                     </div>
                     <span
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
+                      className={`text-[10px] px-1.5 py-0.5 rounded ${
                         t.status === 'SUCCESS'
                           ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : t.status === 'ROLLED_BACK'
-                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
                           : t.status === 'FAILED'
                           ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                          : 'bg-slate-800 text-slate-400'
+                          : t.status === 'PENDING'
+                          ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 animate-pulse'
+                          : 'bg-zinc-800 text-zinc-400'
                       }`}
                     >
                       {t.status}
@@ -266,62 +267,84 @@ export const JobsView: React.FC<JobsViewProps> = ({
               </div>
             </div>
 
-            {/* Live Step Logs */}
-            <div>
-              <div className="flex items-center justify-between mb-2.5">
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-1.5">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <div className="flex items-center space-x-2 text-[var(--text-muted)]">
                   <Terminal className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Журнал шагов пайплайна ({activeJobDetail.logs.length})</span>
-                </h3>
-                <span className="text-[11px] text-slate-500 font-mono">
-                  {activeJobDetail.status === 'RUNNING' && '● Потоковый опрос воркера'}
-                </span>
+                  <span>{t.liveTelemetryTitle}</span>
+                </div>
+                <div className="flex items-center space-x-3 text-[11px]">
+                  <div className="flex items-center space-x-1 bg-black/[0.03] dark:bg-zinc-950 p-0.5 rounded-lg border border-[var(--border-subtle)]">
+                    {(['ALL', 'INFO', 'WARNING', 'ERROR'] as const).map((lvl) => (
+                      <button
+                        key={lvl}
+                        onClick={() => setLogFilter(lvl)}
+                        className={`px-2 py-0.5 rounded text-[10px] transition cursor-pointer ${
+                          logFilter === lvl
+                            ? 'bg-slate-200 dark:bg-zinc-800 text-slate-900 dark:text-white font-bold'
+                            : 'text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        {lvl}
+                      </button>
+                    ))}
+                  </div>
+
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+                    <input
+                      type="checkbox"
+                      checked={autoScroll}
+                      onChange={(e) => setAutoScroll(e.target.checked)}
+                      className="rounded border-slate-300 dark:border-white/[0.2] text-cyan-500 focus:ring-0 accent-cyan-500"
+                    />
+                    <span>Auto-scroll</span>
+                  </label>
+                </div>
               </div>
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 font-mono text-[11px] max-h-96 overflow-y-auto space-y-1.5">
-                {activeJobDetail.logs.map((log) => (
-                  <div
-                    key={log.id}
-                    className="flex items-start space-x-2 py-0.5 text-slate-300 leading-relaxed"
-                  >
-                    <span className="text-slate-600 select-none">
-                      {new Date(log.created_at).toLocaleTimeString()}
-                    </span>
-                    <span
-                      className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${getLogStepColor(
-                        log.step
-                      )}`}
-                    >
-                      {log.step}
-                    </span>
-                    {log.hostname && (
-                      <span className="text-indigo-400 font-semibold">[{log.hostname}]</span>
-                    )}
-                    <span
-                      className={
-                        log.level === 'ERROR'
-                          ? 'text-rose-400 font-semibold'
-                          : log.level === 'WARNING'
-                          ? 'text-amber-400'
-                          : 'text-slate-300'
-                      }
-                    >
-                      {log.message}
-                    </span>
-                  </div>
-                ))}
-                {activeJobDetail.logs.length === 0 && (
-                  <div className="text-slate-600 text-center py-4">
-                    Ожидание логов выполнения...
-                  </div>
+              <div
+                ref={logContainerRef}
+                className="terminal-window h-[360px] p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-950 font-mono text-[11px] leading-relaxed text-slate-800 dark:text-zinc-300 overflow-y-auto space-y-1.5 border border-slate-200 dark:border-white/[0.06]"
+              >
+                {filteredLogs.length === 0 ? (
+                  <div className="text-zinc-600 italic">{t.emptyLogs}</div>
+                ) : (
+                  filteredLogs.map((log) => (
+                    <div key={log.id} className="flex items-start space-x-2 hover:bg-black/[0.02] dark:hover:bg-white/[0.02] py-0.5 px-1 rounded">
+                      <span className="text-slate-500 dark:text-zinc-500 shrink-0 font-mono">
+                        {new Date(log.created_at).toLocaleTimeString()}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] uppercase font-bold shrink-0 ${
+                          log.level === 'ERROR'
+                            ? 'bg-rose-500/15 text-rose-700 dark:text-rose-400 border border-rose-500/30'
+                            : log.level === 'WARNING'
+                            ? 'bg-amber-500/15 text-amber-700 dark:text-amber-400 border border-amber-500/30'
+                            : 'bg-slate-200/60 dark:bg-zinc-800/60 text-slate-700 dark:text-zinc-400 border border-slate-300 dark:border-white/[0.06]'
+                        }`}
+                      >
+                        {log.level}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.2 rounded text-[10px] border shrink-0 ${getLogStepColor(
+                          log.step
+                        )}`}
+                      >
+                        {log.step}
+                      </span>
+                      {log.hostname && (
+                        <span className="text-cyan-700 dark:text-cyan-400 font-semibold shrink-0">[{log.hostname}]</span>
+                      )}
+                      <span className="text-slate-800 dark:text-zinc-200 break-all">{log.message}</span>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
           </>
         ) : (
-          <div className="p-16 text-center text-slate-500 space-y-3">
-            <Activity className="w-10 h-10 mx-auto opacity-30 text-indigo-400" />
-            <p className="text-sm">Выберите задачу слева для просмотра хода выполнения и логов</p>
+          <div className="p-16 text-center text-zinc-500 font-mono text-xs">
+            {t.selectJobHint}
           </div>
         )}
       </div>
