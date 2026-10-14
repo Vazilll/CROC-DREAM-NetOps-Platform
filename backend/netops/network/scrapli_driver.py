@@ -51,7 +51,7 @@ class _ParamikoConnAdapter:
         import os  # noqa: PLC0415
 
         user = os.getenv("NETOPS_CLAB_USER", "crocdream")
-        host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
+        host = os.getenv("NETOPS_CLAB_HOST", "")
         port = int(os.getenv("NETOPS_CLAB_PORT", "221"))
         if jump_spec and jump_spec != "auto":
             spec = jump_spec.strip()
@@ -126,7 +126,7 @@ class _ParamikoConnAdapter:
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         password = getattr(self.target.credentials, "password", "")
         username = self.target.credentials.username
-        clab_host = os.getenv("NETOPS_CLAB_HOST", "5.228.243.54")
+        clab_host = os.getenv("NETOPS_CLAB_HOST", "")
 
         try:
             sock = None
@@ -135,7 +135,8 @@ class _ParamikoConnAdapter:
                     paramiko, self.proxy_jump, self.target.host, self.target.port
                 )
             elif (
-                self.target.host == clab_host
+                clab_host
+                and self.target.host == clab_host
                 and self.target.platform == Platform.HUAWEI_VRP
                 and "PYTEST_CURRENT_TEST" not in os.environ
             ):
@@ -150,6 +151,7 @@ class _ParamikoConnAdapter:
             except paramiko.ssh_exception.SSHException as exc:
                 if (
                     sock is None
+                    and clab_host
                     and self.target.host == clab_host
                     and ("protocol banner" in str(exc).lower() or "no existing session" in str(exc).lower())
                 ):

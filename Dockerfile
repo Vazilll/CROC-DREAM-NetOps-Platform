@@ -61,6 +61,7 @@ WORKDIR /app
 COPY intent ./intent
 COPY templates ./templates
 COPY lab ./lab
+RUN rm -rf /app/lab/running/* && mkdir -p /app/lab/running && echo "[]" > /app/lab/running/prometheus_targets.json
 COPY monitoring ./monitoring
 COPY scripts ./scripts
 

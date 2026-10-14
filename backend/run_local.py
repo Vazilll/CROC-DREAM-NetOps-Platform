@@ -58,7 +58,6 @@ os.environ.setdefault(
     '{"dev-owner-token": {"username": "owner", "role": "owner"}, "dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}, "dev-jury-token": {"username": "jury", "role": "viewer"}, "croc-admin-token": {"username": "admin", "role": "admin"}, "croc-demo-jury": {"username": "jury", "role": "viewer"}}',
 )
 if is_live:
-    os.environ.setdefault("NETOPS_CLAB_HOST", "5.228.243.54")
     os.environ.setdefault("NETOPS_CLAB_PORT", "221")
     os.environ.setdefault("NETOPS_CLAB_USER", "crocdream")
     os.environ.setdefault("NETOPS_CLAB_KEY_PATH", os.path.expanduser("~/.ssh/id_ed25519"))
@@ -165,17 +164,18 @@ def init_local_environment() -> None:
         logger.info("Fresh uninitialized database: waiting for Owner Matryoshka Bootstrap Wizard in Web UI")
 
     # Ensure initial running .cfg files exist for each device
-    try:
-        snapshot = intent_repo.load()
-        for dev in snapshot.inventory.devices:
-            cfg_file = lab_dir / f"{dev.hostname}.cfg"
-            if not cfg_file.exists():
-                intent = snapshot.intent_for(dev.hostname)
-                cfg = renderer.render(dev, intent)
-                cfg_file.write_text(cfg, encoding="utf-8")
-                logger.info("Generated initial running config: %s", cfg_file.name)
-    except Exception:
-        logger.exception("Failed to ensure running configs in %s", lab_dir)
+    if rt_overlay.get("bootstrap_completed") or "--offline" in sys.argv:
+        try:
+            snapshot = intent_repo.load()
+            for dev in snapshot.inventory.devices:
+                cfg_file = lab_dir / f"{dev.hostname}.cfg"
+                if not cfg_file.exists():
+                    intent = snapshot.intent_for(dev.hostname)
+                    cfg = renderer.render(dev, intent)
+                    cfg_file.write_text(cfg, encoding="utf-8")
+                    logger.info("Generated initial running config: %s", cfg_file.name)
+        except Exception:
+            logger.exception("Failed to ensure running configs in %s", lab_dir)
 
 
 def _start_beat(settings, session_factory, dispatcher) -> None:

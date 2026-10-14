@@ -299,7 +299,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   theme,
   setTheme,
 }) => {
-  const [phase, setPhase] = useState<'welcome' | 'wizard'>('wizard');
+  const [phase, setPhase] = useState<'welcome' | 'wizard'>('welcome');
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
 
@@ -346,7 +346,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [aiSavedMsg, setAiSavedMsg] = useState('');
 
   // Step 5: Server (Host & Password only on initial setup)
-  const [serverHost, setServerHost] = useState('5.228.243.54');
+  const [serverHost, setServerHost] = useState('');
   const [serverPort, setServerPort] = useState(221);
   const [serverUser, setServerUser] = useState('crocdream');
   const [serverPassword, setServerPassword] = useState('');
@@ -365,7 +365,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   if (isOpen !== prevIsOpen) {
     setPrevIsOpen(isOpen);
     if (isOpen) {
-      setPhase('wizard');
+      setPhase('welcome');
     }
   }
 
@@ -538,7 +538,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       if (exposureMode === 'local_only') {
         localStorage.setItem('netops_share_base_url', 'http://127.0.0.1:5173');
       } else {
-        localStorage.setItem('netops_share_base_url', `http://${serverHost}:5173`);
+        localStorage.setItem(
+          'netops_share_base_url',
+          serverHost ? `http://${serverHost}:5173` : window.location.origin
+        );
       }
       setOwnerToken(res.token);
       setBoundClientId(res.bound_client_id);
@@ -597,9 +600,18 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
   // Step 2 Action: Connect SSH Git SoT (auto-commit and sync always enabled)
   const handleConnectGithubSsh = async (advanceOnSuccess = false) => {
-    const targetUrl = githubRepoUrl.trim() || 'git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git';
-    if (!githubRepoUrl.trim()) {
-      setGithubRepoUrl(targetUrl);
+    const targetUrl = githubRepoUrl.trim();
+    if (!targetUrl) {
+      if (advanceOnSuccess) {
+        setWizardStep(3);
+        return;
+      }
+      setGithubSavedMsg(
+        locale === 'en'
+          ? 'Enter a GitHub repository URL (SSH or HTTPS)'
+          : 'Введите URL репозитория GitHub (SSH или HTTPS)'
+      );
+      return;
     }
     setSavingGithub(true);
     setGithubSavedMsg('');
@@ -753,6 +765,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
   // Step 5 Action: Server Connection (Host & Password only)
   const handleDiscoverServer = async () => {
+    if (!serverHost.trim()) {
+      setDiscoveryResult({
+        status: 'error',
+        message: 'Введите IP-адрес или хост сервера',
+      });
+      return;
+    }
     setDiscoveringServer(true);
     try {
       const res = await api.discoverAndAttachServer({
@@ -1057,7 +1076,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         >
                           <div className="text-xs font-semibold">{w.step1.publicTunnelTitle}</div>
                           <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                            {serverHost}:5173 {w.step1.publicTunnelDesc}
+                            {serverHost || window.location.hostname}:5173 {w.step1.publicTunnelDesc}
                           </div>
                         </button>
                       </div>
@@ -1532,7 +1551,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     type="text"
                     value={serverHost}
                     onChange={(e) => setServerHost(e.target.value)}
-                    placeholder="5.228.243.54"
+                    placeholder="IP или хост сервера (напр. 10.0.0.10)"
                     className={inputClass}
                   />
                 </div>

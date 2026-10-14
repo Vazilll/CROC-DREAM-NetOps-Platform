@@ -320,6 +320,16 @@ def _users_markup(session: Session, settings: Settings | None = None) -> dict[st
     return {"inline_keyboard": rows}
 
 
+def _public_host(settings: Settings | None = None) -> str:
+    import os  # noqa: PLC0415
+
+    return (
+        (settings.clab_host if settings and settings.clab_host else None)
+        or os.getenv("NETOPS_CLAB_HOST")
+        or "localhost"
+    )
+
+
 def _user_card_markup(
     session: Session, username: str, settings: Settings | None = None
 ) -> dict[str, Any]:
@@ -329,9 +339,10 @@ def _user_card_markup(
     if u is None:
         return _users_markup(session, settings)
     tok = ensure_user_token(session, u, settings)
+    host = _public_host(settings)
     rows: list[list[dict[str, str]]] = [
         [
-            {"text": "🌐 Открыть Web-панель", "url": f"http://5.228.243.54:5173/?token={tok}"},
+            {"text": "🌐 Открыть Web-панель", "url": f"http://{host}:5173/?token={tok}"},
             {"text": "🔗 Привязать TG", "url": f"https://t.me/Croc_Dream_bot?start={tok}"},
         ],
         [
@@ -879,8 +890,9 @@ def _answer_verify_or_start(
                 "telegram_verified_username": (from_user or {}).get("username") or user.username,
             }
         )
+    host = _public_host(settings)
     mode = (
-        "ONLINE (Scrapli SSH -> 5.228.243.54:2211..2222)"
+        f"ONLINE (Scrapli SSH -> {host}:2211..2222)"
         if (settings and settings.network_driver == "scrapli")
         else "OFFLINE (эмуляция стенда)"
     )
@@ -903,7 +915,7 @@ def _answer_verify_or_start(
         f"Привязанная система: {user.allowed_system or 'Вся фабрика CLOS'}\n"
         f"Привязанный токен: {token}\n"
         f"Срок действия токена: {ttl_str}\n"
-        f"Веб-панель (публичная): http://5.228.243.54:5173/?token={token}\n"
+        f"Веб-панель (публичная): http://{host}:5173/?token={token}\n"
         f"Веб-панель (локальная): http://127.0.0.1:5173/?token={token}\n\n"
         + _overview_text(session, settings)
     )
@@ -927,10 +939,11 @@ def _answer_recover(
     user.bound_user_agent = None
     user.bound_at = None
     session.commit()
+    host = _public_host(settings)
     return (
         f"🔓 Привязка старого ПК для {user.username} [{role_badge.upper()}] успешно сброшена!\n"
         f"Откройте пульт на новом устройстве по вашей персональной ссылке:\n"
-        f"• Публичная: http://5.228.243.54:5173/?token={token}\n"
+        f"• Публичная: http://{host}:5173/?token={token}\n"
         f"• Локальная: http://127.0.0.1:5173/?token={token}\n"
         f"• Резервный ключ: {token}"
     )
@@ -1258,6 +1271,7 @@ def _token_text(
         if user.bound_client_id
         else "свободно (ожидает вход)"
     )
+    host = _public_host(settings)
     return (
         f"Участник #{user.id}: {user.username}\n"
         f"• Статус: {state_icon} | Роль: {user.role.value.upper()}\n"
@@ -1266,7 +1280,7 @@ def _token_text(
         f"• Браузер/устройство: {dev_str}\n"
         f"• Telegram: {tg_str}\n\n"
         f"Персональный токен:\n{tok}\n\n"
-        f"Публичный вход (стенд): http://5.228.243.54:5173/?token={tok}\n"
+        f"Публичный вход (стенд): http://{host}:5173/?token={tok}\n"
         f"Локальный вход: http://127.0.0.1:5173/?token={tok}\n"
         f"Привязка TG: https://t.me/Croc_Dream_bot?start={tok}"
     )

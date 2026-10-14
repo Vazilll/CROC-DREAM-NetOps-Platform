@@ -5,7 +5,7 @@ import secrets
 import time
 from typing import Any
 
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, inspect, select
@@ -230,7 +230,7 @@ class GitCommitDiffRequest(BaseModel):
 
 class ServerDiscoverRequest(BaseModel):
     mode: str = "ssh"
-    host: str = "5.228.243.54"
+    host: str = ""
     port: int = 221
     username: str = "crocdream"
     password: str | None = None
@@ -660,6 +660,14 @@ def discover_and_attach_server(
     session: SessionDep,
     container: ContainerDep,
 ) -> dict[str, Any]:
+    if req.mode == "ssh" and not req.host.strip():
+        if container.settings.clab_host:
+            req.host = container.settings.clab_host
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Укажите IP/хост опорного сервера для режима SSH",
+            )
     return discover_server(req, session, container)
 
 

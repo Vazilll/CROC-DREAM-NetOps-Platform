@@ -371,7 +371,7 @@ def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
                 cur_if["ipv4_address"] = m_cidr.group(1)
             else:
                 m_mask = re.match(
-                    r"^ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)",
+                    r"^ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+|\d{1,2})\b",
                     line,
                     re.IGNORECASE,
                 )
@@ -386,6 +386,180 @@ def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
     if cur_if and cur_if.get("ipv4_address"):
         parsed_ifaces.append(cur_if)
     return parsed_ifaces
+
+
+def _parse_brownfield_intent_from_config(hostname: str, cfg: str) -> dict[str, Any] | None:
+    parsed_ifaces = _parse_running_interfaces(cfg)
+    m_asn = re.search(r"^(?:router\s+bgp|bgp)\s+(\d+)", cfg, re.IGNORECASE | re.MULTILINE)
+    if not parsed_ifaces or not m_asn:
+        return None
+
+    asn = int(m_asn.group(1))
+    m_rid = re.search(
+        r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE
+    )
+    router_id = m_rid.group(1) if m_rid else parsed_ifaces[0]["ipv4_address"].split("/")[0]
+
+    neighbors: list[dict[str, Any]] = []
+    seen_peers: set[str] = set()
+    for m_nb in re.finditer(
+        r"(?:neighbor|peer)\s+(\d+\.\d+\.\d+\.\d+)\s+(?:remote-as|as-number)\s+(\d+)",
+        cfg,
+        re.IGNORECASE,
+    ):
+        peer_ip = m_nb.group(1)
+        if peer_ip not in seen_peers:
+            seen_peers.add(peer_ip)
+            neighbors.append(
+                {
+                    "peer_ip": peer_ip,
+                    "remote_asn": int(m_nb.group(2)),
+                    "description": "fabric-peer",
+                    "announced_prefixes": [f"{router_id}/32"],
+                }
+            )
+    if not neighbors:
+        return None
+
+    return {
+        "hostname": hostname,
+        "interfaces": parsed_ifaces,
+        "bgp": {"asn": asn, "router_id": router_id, "neighbors": neighbors},
+        "acls": [],
+    }
+
+
+def discover_live_switch_via_ssh(
+    host: str,
+    port: int,
+    username: str,
+    password: str,
+    settings: Any,
+    default_hostname: str = "",
+    default_role: str = "",
+    candidate_passwords: list[str] | None = None,
+    passwords_by_platform: dict[str, str] | None = None,
+) -> dict[str, Any] | None:
+    """Probe TCP banner, connect via SSH, extract live identity, running-config, and brownfield intent."""
+    reachable, banner = _probe_tcp_banner(host, port)
+    if not reachable:
+        return None
+
+    profiles = load_platform_profiles(getattr(settings, "intent_repo_path", None))
+    detected_platform = detect_platform_from_banner(banner, profiles)
+    if detected_platform == Platform.LINUX_SERVER:
+        return None
+
+    plat_cfg = profiles.get(detected_platform.value) or {}
+    default_pw = str(plat_cfg.get("default_password") or "admin")
+    plat_pw = (passwords_by_platform or {}).get(detected_platform.value, "")
+    pw_candidates: list[str] = []
+    for pw in (plat_pw, password, *(candidate_passwords or []), default_pw, "admin"):
+        if pw and pw not in pw_candidates:
+            pw_candidates.append(pw)
+
+    fallback_host = default_hostname or f"node-{port}.croc.lab"
+    os_ver = banner or detected_platform.value
+    running_config = ""
+    used_pw = pw_candidates[0] if pw_candidates else "admin"
+    connected = False
+    cpu_cores: int | None = None
+    ram_gb: float | None = None
+    disk_gb: float | None = None
+    interfaces: list[str] = []
+    lldp_neighbors: list[dict[str, Any]] = []
+    hostname = fallback_host
+
+    for pw in pw_candidates:
+        target = DeviceTarget(
+            hostname=fallback_host,
+            platform=detected_platform,
+            host=host,
+            port=port,
+            credentials=Credentials(username or "admin", pw),
+        )
+        try:
+            with _ParamikoConnAdapter(target, timeout=8) as conn:
+                detected_platform, os_ver, cpu_cores, ram_gb, disk_gb = _parse_ssh_hardware_specs(
+                    conn, detected_platform, os_ver
+                )
+                hostname, interfaces, lldp_neighbors = _parse_ssh_topology(
+                    conn, detected_platform, fallback_host
+                )
+                plat_cfg = profiles.get(detected_platform.value) or plat_cfg
+                run_cmd = str(
+                    (plat_cfg.get("commands") or {}).get("running_config") or "show running-config"
+                )
+                running_config = conn.send_command(run_cmd).result
+                used_pw = pw
+                connected = True
+                break
+        except Exception:
+            continue
+
+    if not connected:
+        return None
+
+    role = "spine" if ("spine" in hostname.lower() or default_role == "spine") else "leaf"
+    short_stem = hostname.split(".")[0].replace("-", "")
+    auth_profile = f"{short_stem}_auth"
+    _persist_custom_auth(settings, auth_profile, username or "admin", used_pw)
+
+    if not _is_protected_repo_path(settings.offline_lab_path) and running_config.strip():
+        cfg_file = settings.offline_lab_path / f"{hostname}.cfg"
+        cfg_file.parent.mkdir(parents=True, exist_ok=True)
+        cfg_file.write_text(running_config, encoding="utf-8")
+
+    if not _is_protected_repo_path(settings.intent_repo_path):
+        devices_dir = settings.intent_repo_path / "devices"
+        devices_dir.mkdir(parents=True, exist_ok=True)
+        intent_file = devices_dir / f"{hostname}.yaml"
+        intent_data = _parse_brownfield_intent_from_config(hostname, running_config)
+        if intent_data is not None:
+            try:
+                DeviceIntent.model_validate(intent_data)
+            except Exception:
+                intent_data = None
+        if intent_data is None and not intent_file.is_file():
+            dummy_dev = Device(
+                id=port % 100,
+                hostname=hostname,
+                management_ip=host,
+                management_port=port,
+                platform=detected_platform,
+                role=DeviceRole.SPINE if role == "spine" else DeviceRole.LEAF,
+                auth_profile=auth_profile,
+            )
+            intent_data = _build_default_device_intent(dummy_dev)
+        if intent_data is not None:
+            intent_file.write_text(
+                yaml.safe_dump(intent_data, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+
+    return {
+        "hostname": hostname,
+        "platform": detected_platform.value,
+        "role": role,
+        "management_ip": host,
+        "management_port": port,
+        "endpoint": f"{host}:{port}",
+        "auth_profile": auth_profile,
+        "reachable": True,
+        "banner": banner,
+        "running_config": running_config,
+        "hardware_specs": {
+            "os_version": os_ver,
+            "cpu_cores": cpu_cores,
+            "ram_gb": ram_gb,
+            "disk_gb": disk_gb,
+            "interfaces": interfaces,
+            "lldp_neighbors": lldp_neighbors,
+        },
+    }
+
+
+discover_live_switch_Via_ssh = discover_live_switch_via_ssh
 
 
 def extract_brownfield_intent(
@@ -418,39 +592,7 @@ def extract_brownfield_intent(
     except Exception:
         return None
 
-    parsed_ifaces = _parse_running_interfaces(cfg)
-    m_asn = re.search(r"^(?:router\s+bgp|bgp)\s+(\d+)", cfg, re.IGNORECASE | re.MULTILINE)
-    if not parsed_ifaces or not m_asn:
-        return None
-
-    asn = int(m_asn.group(1))
-    m_rid = re.search(
-        r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE
-    )
-    router_id = m_rid.group(1) if m_rid else parsed_ifaces[0]["ipv4_address"].split("/")[0]
-
-    neighbors = [
-        {
-            "peer_ip": m_nb.group(1),
-            "remote_asn": int(m_nb.group(2)),
-            "description": "fabric-peer",
-            "announced_prefixes": [f"{router_id}/32"],
-        }
-        for m_nb in re.finditer(
-            r"(?:neighbor|peer)\s+(\d+\.\d+\.\d+\.\d+)\s+(?:remote-as|as-number)\s+(\d+)",
-            cfg,
-            re.IGNORECASE,
-        )
-    ]
-    if not neighbors:
-        return None
-
-    return {
-        "hostname": device.hostname,
-        "interfaces": parsed_ifaces,
-        "bgp": {"asn": asn, "router_id": router_id, "neighbors": neighbors},
-        "acls": [],
-    }
+    return _parse_brownfield_intent_from_config(device.hostname, cfg)
 
 
 def _build_default_device_intent(device: Device) -> dict[str, Any]:

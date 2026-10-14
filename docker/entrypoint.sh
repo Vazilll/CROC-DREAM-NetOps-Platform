@@ -5,6 +5,14 @@ echo "============================================================"
 echo "  CROC DREAM NetOps Platform — All-in-One Container Boot"
 echo "============================================================"
 
+mkdir -p /app/lab/running
+if [ ! -f /app/lab/running/prometheus_targets.json ]; then
+    echo "[]" > /app/lab/running/prometheus_targets.json
+fi
+if [ ! -d /app/.git ]; then
+    git init -b main /app && git config --global --add safe.directory /app
+fi
+
 # 1. Start PostgreSQL
 echo "[1/6] Starting internal PostgreSQL..."
 service postgresql start

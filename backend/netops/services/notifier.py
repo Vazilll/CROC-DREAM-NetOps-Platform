@@ -122,6 +122,13 @@ def _registry_files(settings: Settings | None = None) -> list[Path]:
 
 
 def load_access_registry(settings: Settings | None = None) -> dict[str, Any]:
+    import os  # noqa: PLC0415
+
+    clab_host = (
+        (settings.clab_host if settings and settings.clab_host else None)
+        or os.getenv("NETOPS_CLAB_HOST")
+        or "localhost"
+    )
     default_reg: dict[str, Any] = {
         "updated_at": None,
         "system_info": {},
@@ -129,7 +136,7 @@ def load_access_registry(settings: Settings | None = None) -> dict[str, Any]:
         "telegram_bindings": {},
         "systems": [
             {"id": "*", "label": "Вся фабрика CLOS (все узлы)"},
-            {"id": "online-ssh", "label": "Контур ONLINE SSH (Containerlab 5.228.243.54)"},
+            {"id": "online-ssh", "label": f"Контур ONLINE SSH (Containerlab {clab_host})"},
             {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
         ],
         "security_events": [],
@@ -189,10 +196,16 @@ def record_security_event(
 
 
 def sync_access_registry(session: Any, settings: Settings | None = None) -> dict[str, Any]:
+    import os  # noqa: PLC0415
     from datetime import datetime, timezone  # noqa: PLC0415
     from sqlalchemy import select  # noqa: PLC0415
     from netops.models import Device, User  # noqa: PLC0415
 
+    clab_host = (
+        (settings.clab_host if settings and settings.clab_host else None)
+        or os.getenv("NETOPS_CLAB_HOST")
+        or "localhost"
+    )
     reg = load_access_registry(settings)
     tokens = load_user_tokens(settings)
     tg_bindings = load_telegram_bindings(settings)
@@ -254,7 +267,7 @@ def sync_access_registry(session: Any, settings: Settings | None = None) -> dict
             }
             for d in devices
         ],
-        {"id": "online-ssh", "label": "Контур ONLINE SSH (Containerlab 5.228.243.54)"},
+        {"id": "online-ssh", "label": f"Контур ONLINE SSH (Containerlab {clab_host})"},
         {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
     ]
     reg["participants"] = participants

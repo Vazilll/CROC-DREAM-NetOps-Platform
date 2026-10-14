@@ -1692,8 +1692,6 @@ export class NetOpsApiClient {
 
   /**
    * Builds a direct share URL for any personal or preset token.
-   * Defaults to public stand address (`http://5.228.243.54:5173`) when opened on localhost
-   * so links shared with external teammates (e.g. Timofey / jury) work out-of-the-box.
    */
   buildInviteUrl(token: string, baseOverride?: string): string {
     if (baseOverride) {
@@ -1701,15 +1699,12 @@ export class NetOpsApiClient {
     }
     if (typeof window !== 'undefined') {
       const savedBase = localStorage.getItem('netops_share_base_url');
-      if (savedBase && !savedBase.includes('127.0.0.1') && !savedBase.includes('localhost')) {
+      if (savedBase) {
         return `${savedBase.replace(/\/$/, '')}/?token=${encodeURIComponent(token)}`;
-      }
-      if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-        return `http://5.228.243.54:5173/?token=${encodeURIComponent(token)}`;
       }
       return `${window.location.origin}${window.location.pathname}?token=${encodeURIComponent(token)}`;
     }
-    return `http://5.228.243.54:5173/?token=${encodeURIComponent(token)}`;
+    return `http://localhost:5173/?token=${encodeURIComponent(token)}`;
   }
 
   /**

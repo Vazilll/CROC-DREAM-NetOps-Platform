@@ -138,15 +138,14 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('token')) return;
+    const hasInviteToken = Boolean(new URLSearchParams(window.location.search).get('token'));
     api
       .getBootstrapStatus()
       .then((st) => {
         if (st && st.bootstrap_completed === false) {
           localStorage.removeItem('netops_onboarding_done');
           setWelcomeModalOpen(true);
-        } else if (st && st.bootstrap_completed && st.caller_is_bound_owner) {
+        } else if (!hasInviteToken && st && st.bootstrap_completed && st.caller_is_bound_owner) {
           localStorage.setItem('netops_onboarding_done', 'true');
           setWelcomeModalOpen(false);
         }

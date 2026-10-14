@@ -188,8 +188,8 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
 
     exp_mode = str(rt.get("exposure_mode") or "local_only")
     ws_enabled = True
-    c_host = settings.clab_host or "5.228.243.54"
-    if exp_mode == "public_tunnel":
+    c_host = settings.clab_host or ""
+    if exp_mode == "public_tunnel" and c_host:
         sync_public_tunnel(
             enable=True,
             host=c_host,
@@ -207,7 +207,7 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
             "mode": exp_mode,
             "public_tunnel_enabled": exp_mode == "public_tunnel",
             "local_url": "http://127.0.0.1:5173",
-            "public_url": f"http://{c_host}:5173" if exp_mode == "public_tunnel" else None,
+            "public_url": f"http://{c_host}:5173" if (exp_mode == "public_tunnel" and c_host) else None,
             "websocket_enabled": ws_enabled,
             "websocket_auth_scheme": "Ephemeral One-Time Ticket (POST /api/v1/ws/ticket -> wst_*, TTL 30s)",
         },
@@ -544,8 +544,9 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", repo_url)
         if m:
             owner_org, repo_name = m.group(1), m.group(2)
+            c_host_hook = settings.clab_host or "127.0.0.1"
             hook_target = (
-                req.webhook_public_url or "http://5.228.243.54:5173/api/v1/git/webhook"
+                req.webhook_public_url or f"http://{c_host_hook}:5173/api/v1/git/webhook"
             ).strip()
             api_url = f"https://api.github.com/repos/{owner_org}/{repo_name}/hooks"
             cfg_obj: dict[str, str] = {
@@ -606,16 +607,34 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
             pass
 
     saved = settings.save_runtime_overlay(updates)
+    if git_connect_info and git_connect_info.get("connected") and session is not None:
+        try:
+            if hasattr(container.intents, "_inventory_file"):
+                container.intents._inventory_file = settings.inventory_file
+            inventory = container.intents.load_inventory()
+            DeviceService(session).sync_inventory(inventory)
+        except Exception:
+            pass
     if session is not None and req.telegram_bot_token:
         _try_auto_bind_owner_from_telegram(session, settings)
         saved = settings.apply_runtime_overlay()
 
     exp_mode = str(saved.get("exposure_mode") or "local_only")
-    tunnel_state = sync_public_tunnel(
-        enable=(exp_mode == "public_tunnel"),
-        host=settings.clab_host or "5.228.243.54",
-        port=int(settings.clab_port or 221),
-        user=settings.clab_user or "crocdream",
+    c_host = settings.clab_host or ""
+    tunnel_state = (
+        sync_public_tunnel(
+            enable=(exp_mode == "public_tunnel"),
+            host=c_host,
+            port=int(settings.clab_port or 221),
+            user=settings.clab_user or "crocdream",
+        )
+        if c_host
+        else {
+            "active": False,
+            "mode": "local_only",
+            "public_url": None,
+            "local_url": "http://127.0.0.1:5173",
+        }
     )
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     if git_connect_info:
@@ -708,6 +727,7 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
     has_explicit_pwd = bool(req.password and str(req.password).strip())
 
     discovered_containers: list[dict[str, str]] = []
+    candidate_ports_set: set[int] = set()
     server_ssh_ok = False
     try:
         import paramiko  # noqa: PLC0415
@@ -732,14 +752,29 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         for line in stdout.read().decode("utf-8", errors="ignore").splitlines():
             parts = line.strip().split("|")
             if len(parts) >= 3:
+                ports_str = parts[3] if len(parts) > 3 else ""
                 discovered_containers.append(
                     {
                         "name": parts[0],
                         "image": parts[1],
                         "status": parts[2],
-                        "ports": parts[3] if len(parts) > 3 else "",
+                        "ports": ports_str,
                     }
                 )
+                for m_p in re.finditer(r":(\d+)->22/tcp", ports_str):
+                    p_val = int(m_p.group(1))
+                    if p_val != clean_port:
+                        candidate_ports_set.add(p_val)
+        try:
+            _, ss_out, _ = ssh.exec_command("ss -tlnH | awk '{print $4}'", timeout=3.0)
+            for sline in ss_out.read().decode("utf-8", errors="ignore").splitlines():
+                m_ss = re.search(r":(\d+)\s*$", sline.strip())
+                if m_ss:
+                    p_val = int(m_ss.group(1))
+                    if 2000 <= p_val <= 2999 and p_val != clean_port:
+                        candidate_ports_set.add(p_val)
+        except Exception:
+            pass
         ssh.close()
     except Exception as exc:
         if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -774,6 +809,127 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             "bootstrap_completed": True,
         }
     )
+
+    candidate_ports = sorted(candidate_ports_set)
+    live_switches: list[dict[str, Any]] = []
+    if candidate_ports and not os.environ.get("PYTEST_CURRENT_TEST"):
+        import yaml  # noqa: PLC0415
+        from netops.enums import SnapshotKind  # noqa: PLC0415
+        from netops.models import ConfigSnapshot  # noqa: PLC0415
+        from netops.services.discovery import discover_live_switch_via_ssh  # noqa: PLC0415
+
+        pw_by_plat = {
+            "cisco_iosxe": req.switch_password_cisco,
+            "arista_eos": req.switch_password_arista,
+            "huawei_vrp": req.switch_password_huawei,
+        }
+        cand_pws = [
+            req.switch_password_cisco,
+            req.switch_password_arista,
+            req.switch_password_huawei,
+            "admin",
+        ]
+
+        def _probe_live_port(p: int) -> dict[str, Any] | None:
+            return discover_live_switch_via_ssh(
+                host=clean_host,
+                port=p,
+                username="admin",
+                password=req.switch_password_cisco or "admin",
+                settings=settings,
+                candidate_passwords=cand_pws,
+                passwords_by_platform=pw_by_plat,
+            )
+
+        with ThreadPoolExecutor(max_workers=max(1, min(8, len(candidate_ports)))) as pool:
+            live_switches = [sw for sw in pool.map(_probe_live_port, candidate_ports) if sw]
+
+        if live_switches:
+            inv_live_path = settings.intent_repo_path / "inventory.live.yaml"
+            inv_live_data = {
+                "devices": [
+                    {
+                        "hostname": sw["hostname"],
+                        "management_ip": sw["management_ip"],
+                        "management_port": sw["management_port"],
+                        "platform": sw["platform"],
+                        "role": sw["role"],
+                        "auth_profile": sw["auth_profile"],
+                    }
+                    for sw in live_switches
+                ]
+            }
+            try:
+                inv_live_path.parent.mkdir(parents=True, exist_ok=True)
+                inv_live_path.write_text(
+                    yaml.safe_dump(inv_live_data, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8",
+                )
+                settings.inventory_file = "inventory.live.yaml"
+            except Exception:
+                pass
+
+            try:
+                prom_targets = [
+                    {
+                        "targets": [f"{clean_host}:{sw['management_port']}"],
+                        "labels": {"hostname": sw["hostname"], "platform": sw["platform"]},
+                    }
+                    for sw in live_switches
+                ]
+                prom_file = settings.offline_lab_path / "prometheus_targets.json"
+                prom_file.parent.mkdir(parents=True, exist_ok=True)
+                prom_file.write_text(
+                    json.dumps(prom_targets, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            except Exception:
+                pass
+
+            if hasattr(container.intents, "_inventory_file"):
+                container.intents._inventory_file = settings.inventory_file
+            inventory = container.intents.load_inventory()
+            sync_res = DeviceService(session).sync_inventory(inventory)
+            db_devices = list(DeviceService(session).list_devices(limit=100))
+            dev_by_host = {d.hostname: d for d in db_devices}
+            for sw in live_switches:
+                dev = dev_by_host.get(sw["hostname"])
+                if dev is not None:
+                    dev.status = DeviceStatus.IN_SYNC
+                    rcfg = (sw.get("running_config") or "").strip()
+                    if rcfg:
+                        session.add(
+                            ConfigSnapshot.capture(
+                                device_id=dev.id,
+                                kind=SnapshotKind.RUNNING,
+                                content=rcfg,
+                            )
+                        )
+            session.commit()
+            discovered_switches = [
+                {
+                    "hostname": sw["hostname"],
+                    "platform": sw["platform"],
+                    "role": sw["role"],
+                    "endpoint": sw["endpoint"],
+                    "reachable": True,
+                    "banner": sw.get("banner", ""),
+                }
+                for sw in live_switches
+            ]
+            return {
+                "status": "ok",
+                "mode": "scrapli",
+                "server_host": f"{clean_host}:{clean_port}",
+                "server_reachable": True,
+                "discovered_containers": discovered_containers,
+                "discovered_switches": discovered_switches,
+                "synced_total": len(sync_res.created)
+                + len(sync_res.updated)
+                + len(sync_res.unchanged),
+                "created": len(sync_res.created),
+                "updated": len(sync_res.updated),
+            }
+
     if hasattr(container.intents, "_inventory_file"):
         container.intents._inventory_file = settings.inventory_file
 
@@ -791,7 +947,7 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         )
         for d in db_devices
     ]
-    discovered_switches: list[dict[str, Any]] = []
+    discovered_switches = []
     if known_fabric_nodes:
         with ThreadPoolExecutor(max_workers=max(1, min(8, len(known_fabric_nodes)))) as pool:
             discovered_switches = list(pool.map(_probe_tcp_node, known_fabric_nodes))
@@ -802,7 +958,6 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         if dev.hostname in reachable_hosts:
             dev.status = DeviceStatus.IN_SYNC
     session.commit()
-
 
     return {
         "status": "ok",

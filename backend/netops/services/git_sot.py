@@ -133,15 +133,35 @@ def git_connect_remote(repo_path: Path, repo_url: str, branch: str = "main") -> 
             "branch": clean_branch,
             "commit_short": "pytest0",
             "branches": [clean_branch],
+            "synced_files": True,
             "message": "Подключено (pytest)",
         }
 
-    cwd = repo_path if repo_path.is_dir() else repo_path.parent
+    project_root = repo_path.parent if repo_path.name == "intent" else repo_path
+    cwd = project_root if project_root.is_dir() else (repo_path if repo_path.is_dir() else repo_path.parent)
     ssh_env = {
         **os.environ,
         "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=6",
     }
     try:
+        r_top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+        if r_top.returncode != 0:
+            subprocess.run(
+                ["git", "init", "-b", clean_branch],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+
         r_rem = subprocess.run(
             ["git", "remote", "set-url", "origin", clean_url],
             cwd=cwd,
@@ -184,6 +204,52 @@ def git_connect_remote(repo_path: Path, repo_url: str, branch: str = "main") -> 
                 first_sha = r_ls.stdout.strip().splitlines()[0].split()[0]
                 commit_short = first_sha[:7]
 
+            r_fetch = subprocess.run(
+                ["git", "fetch", "--depth=1", "origin", clean_branch],
+                cwd=project_root,
+                env=ssh_env,
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+            if r_fetch.returncode == 0:
+                r_pull = subprocess.run(
+                    ["git", "pull", "--ff-only", "origin", clean_branch],
+                    cwd=project_root,
+                    env=ssh_env,
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+                if r_pull.returncode != 0:
+                    r_co = subprocess.run(
+                        ["git", "checkout", "FETCH_HEAD", "--", "intent", "templates"],
+                        cwd=project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                        check=False,
+                    )
+                    if r_co.returncode != 0 and repo_path.is_dir():
+                        subprocess.run(
+                            ["git", "checkout", "FETCH_HEAD", "--", "."],
+                            cwd=repo_path,
+                            capture_output=True,
+                            text=True,
+                            timeout=5,
+                            check=False,
+                        )
+                    subprocess.run(
+                        ["git", "reset", "--mixed", "FETCH_HEAD"],
+                        cwd=project_root,
+                        capture_output=True,
+                        text=True,
+                        timeout=3,
+                        check=False,
+                    )
+
             invalidate_git_cache()
             return {
                 "connected": True,
@@ -191,6 +257,7 @@ def git_connect_remote(repo_path: Path, repo_url: str, branch: str = "main") -> 
                 "branch": clean_branch,
                 "commit_short": commit_short or "HEAD",
                 "branches": branches or [clean_branch],
+                "synced_files": True,
                 "message": f"SSH подключён: {clean_url} ({clean_branch}@{commit_short or 'HEAD'})",
             }
         err_msg = (r_ls.stderr or r_ls.stdout or "SSH connection failed").strip().splitlines()[-1]
@@ -200,6 +267,7 @@ def git_connect_remote(repo_path: Path, repo_url: str, branch: str = "main") -> 
             "branch": clean_branch,
             "commit_short": "HEAD",
             "branches": [clean_branch],
+            "synced_files": False,
             "message": f"Не удалось проверить удалённый репозиторий: {err_msg}",
         }
     except Exception as exc:
@@ -209,6 +277,7 @@ def git_connect_remote(repo_path: Path, repo_url: str, branch: str = "main") -> 
             "branch": clean_branch,
             "commit_short": "HEAD",
             "branches": [clean_branch],
+            "synced_files": False,
             "message": f"Ошибка SSH Git: {exc}",
         }
 
