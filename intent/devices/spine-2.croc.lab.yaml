@@ -2,35 +2,61 @@
 hostname: "spine-2.croc.lab"
 
 interfaces:
-  - name: "Ethernet1"
-    description: "Downlink to leaf-1.croc.lab"
+  - name: "Loopback0"
+    description: "Router-ID / BGP announce"
     enabled: true
     mode: "l3"
-    # REASON: Выделена P2P-подсеть /31 для линка spine2-leaf1: 10.0.1.4/31 (.4 — spine, .5 — leaf)
-    ipv4_address: "10.0.1.4/31"
+    ipv4_address: "10.255.0.12/32"
+    mtu: 1500
+
+  - name: "Ethernet1"
+    description: "Downlink to leaf1 GigabitEthernet0/0/2"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.4/31"
     mtu: 1500
 
   - name: "Ethernet2"
-    description: "Downlink to leaf-2.croc.lab"
+    description: "Downlink to leaf2 GigabitEthernet0/0/2"
     enabled: true
     mode: "l3"
-    # REASON: Выделена P2P-подсеть /31 для линка spine2-leaf2: 10.0.1.6/31 (.6 — spine, .7 — leaf)
-    ipv4_address: "10.0.1.6/31"
+    ipv4_address: "10.10.0.6/31"
     mtu: 1500
 
 bgp:
-  asn: 65000 # REASON: Общий ASN уровня Spine для балансировки трафика
-  router_id: "10.255.0.2" # REASON: Идентификатор router-id Spine2
+  asn: 65000
+  router_id: "10.255.0.12"
   neighbors:
-    - peer_ip: "10.0.1.5"
-      remote_asn: 65101 # REASON: Приватный ASN соседа leaf-1
-      description: "leaf-1.croc.lab"
+    - peer_ip: "10.10.0.5"
+      remote_asn: 65001
+      description: "leaf1"
       announced_prefixes:
-        - "10.255.0.2/32"
-    - peer_ip: "10.0.1.7"
-      remote_asn: 65102 # REASON: Приватный ASN соседа leaf-2
-      description: "leaf-2.croc.lab"
+        - "10.255.0.12/32"
+    - peer_ip: "10.10.0.7"
+      remote_asn: 65002
+      description: "leaf2"
       announced_prefixes:
-        - "10.255.0.2/32"
+        - "10.255.0.12/32"
 
-acls: []
+acls:
+  - name: "FABRIC-IN"
+    type: "extended"
+    rules:
+      - sequence: 10
+        action: "permit"
+        protocol: "icmp"
+      - sequence: 20
+        action: "permit"
+        protocol: "tcp"
+        dst_port: "bgp"
+      - sequence: 30
+        action: "permit"
+        protocol: "tcp"
+        src_port: "bgp"
+      - sequence: 40
+        action: "deny"
+        protocol: "tcp"
+        dst_port: "telnet"
+      - sequence: 50
+        action: "permit"
+        protocol: "ip"

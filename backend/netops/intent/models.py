@@ -158,12 +158,15 @@ class AclRule(IntentModel):
     sequence: int = Field(ge=1, le=4_294_967_295)
     action: AclAction
     protocol: AclProtocol
-    source: AclEndpoint
-    destination: AclEndpoint
+    source: AclEndpoint = "any"
+    destination: AclEndpoint = "any"
+    src_port: str | int | None = None
+    dst_port: str | int | None = None
 
 
 class AclIntent(IntentModel):
     name: Identifier
+    type: str | None = None
     rules: list[AclRule] = Field(min_length=1)
 
     @field_validator("rules")
