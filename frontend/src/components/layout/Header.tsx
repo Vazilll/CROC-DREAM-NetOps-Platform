@@ -16,7 +16,6 @@ export type AppTheme = 'dark' | 'light';
 
 interface HeaderProps {
   userRole: UserRole;
-  setUserRole: (role: UserRole) => void;
   apiHealthy: boolean;
   onToggleCopilot: () => void;
   copilotOpen: boolean;

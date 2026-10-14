@@ -1756,7 +1756,11 @@ export class NetOpsApiClient {
   }
 
   async getBootstrapStatus(): Promise<BootstrapStatusResponse> {
-    return this.request<BootstrapStatusResponse>('/system/bootstrap/status');
+    const res = await this.request<BootstrapStatusResponse>('/system/bootstrap/status');
+    if (typeof window !== 'undefined' && res?.exposure?.public_url) {
+      localStorage.setItem('netops_share_base_url', res.exposure.public_url);
+    }
+    return res;
   }
 
   async claimOwnerBootstrap(data: {

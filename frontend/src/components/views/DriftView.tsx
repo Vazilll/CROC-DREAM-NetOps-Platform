@@ -95,7 +95,7 @@ ${listText || 'Данные отсутствуют'}
   };
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-[2560px] mx-auto space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
         <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between">
           <div>
@@ -137,26 +137,19 @@ ${listText || 'Данные отсутствуют'}
           </div>
         </div>
 
-        <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-mono text-[var(--text-secondary)]">GitOps Continuous Audit</span>
-              <button
-                onClick={handleExportComplianceAct}
-                className="px-2 py-0.5 rounded text-[11px] font-mono text-[var(--text-primary)] bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] flex items-center gap-1 transition-colors cursor-pointer"
-                title={t.exportComplianceAct}
-              >
-                <FileDown className="w-3 h-3 text-[var(--text-secondary)]" />
-                <span>{locale === 'en' ? 'Export Act' : 'Акт (MD)'}</span>
-              </button>
-            </div>
-            <p className="mt-1 text-xs text-[var(--text-secondary)] leading-relaxed">
-              {locale === 'en'
-                ? 'Periodic background running-config polling to zero-out unauthorized changes.'
-                : 'Периодический опрос running-config нод для обнуления расхождений.'}
-            </p>
+        <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col justify-between gap-3">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-mono text-[var(--text-secondary)]">GitOps Continuous Audit</span>
+            <button
+              onClick={handleExportComplianceAct}
+              className="px-2 py-0.5 rounded text-[11px] font-mono text-[var(--text-primary)] bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+              title={t.exportComplianceAct}
+            >
+              <FileDown className="w-3 h-3 text-[var(--text-secondary)]" />
+              <span>{locale === 'en' ? 'Export Act' : 'Акт (MD)'}</span>
+            </button>
           </div>
-          <div className="flex items-center gap-2 mt-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={onScanDrift}
               className="flex-1 px-3 py-1.5 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-opacity cursor-pointer"

@@ -143,22 +143,6 @@ def parse_huawei_memory(output: str) -> float | None:
     return round(vals[0], 2) if vals else None
 
 
-def parse_interface_utilization(output: str, speed_mbps: float = 1000.0) -> float | None:
-    """Parse interface bit rates to percentage of link speed."""
-    # Matches: 5 minute input rate 12500000 bits/sec
-    match = re.search(r"input rate\s+(\d+)\s+bits/sec", output, re.IGNORECASE)
-    if match:
-        bps = float(match.group(1))
-        mbps = bps / 1_000_000.0
-        return round(min(100.0, (mbps / speed_mbps) * 100.0), 2)
-    # Arista rates: Ethernet1 ... 25.4 Mbps
-    match_arista = re.search(r"(\d+(?:\.\d+)?)\s*Mbps", output)
-    if match_arista:
-        mbps = float(match_arista.group(1))
-        return round(min(100.0, (mbps / speed_mbps) * 100.0), 2)
-    return None
-
-
 def parse_huawei_cpu(output: str) -> float | None:
     """Parse Huawei CE 'display cpu': mean of the 'Current' column over cpuN rows."""
     values = [float(v) for v in re.findall(r"^cpu\d+\s+(\d+(?:\.\d+)?)%", output, re.IGNORECASE | re.MULTILINE)]
@@ -293,7 +277,7 @@ def query_prometheus_metric(
         )
     else:
         queries = (
-            f'avg(netops_uplink_utilization_percent{{hostname="{hostname}"}})',
+            f'avg(netops_uplink_util_percent{{hostname="{hostname}"}} or netops_uplink_utilization_percent{{hostname="{hostname}"}})',
             (
                 f'clamp_max(clamp_min(sum(rate(ifInOctets{{hostname="{hostname}"}}[5m]) '
                 f'+ rate(ifOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1000 '

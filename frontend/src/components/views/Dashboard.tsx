@@ -11,8 +11,6 @@ import {
   Clock,
   ShieldCheck,
   Plus,
-  ArrowRight,
-  Presentation,
 } from 'lucide-react';
 import { api } from '../../api';
 import type { Device, ForecastAlert, JobSummary, UserRole } from '../../api';
@@ -115,109 +113,26 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
   if (devices.length === 0) {
     return (
-      <div className="max-w-4xl mx-auto py-8 sm:py-14 space-y-8 animate-fade-in select-none">
-        <div className="text-center space-y-2.5">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-mono bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            Инициализация сетевой фабрики
-          </div>
-          <h1 className="text-2xl sm:text-3xl font-semibold text-[var(--text-primary)] tracking-tight">
-            Подключение сетевой инфраструктуры
-          </h1>
-          <p className="text-xs sm:text-sm text-[var(--text-secondary)] max-w-xl mx-auto leading-relaxed">
-            Холст создан и ожидает регистрации сетевых узлов. Выберите способ подключения к оборудованию стенда:
-          </p>
-        </div>
+      <div className="w-full max-w-[2560px] mx-auto py-10 sm:py-16 space-y-5 animate-fade-in select-none text-center">
+        <h1 className="text-lg sm:text-xl font-semibold text-[var(--text-primary)] tracking-tight">
+          {locale === 'en' ? 'No active devices' : 'Нет подключенных устройств'}
+        </h1>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div
-            onClick={() => setAddModalOpen(true)}
-            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
-                <Plus className="w-5 h-5" />
-              </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-emerald-600 dark:text-emerald-400 font-medium px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
-                Живой стенд (SSH)
-              </span>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
-                SSH Probe по портам
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
-                Прямое подключение к портам 2211, 2212, 2221, 2222 стенда. Scrapli автоматически определит Arista cEOS, Cisco IOS-XE, снимет реальный конфиг и нагрузку CPU.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
-              <span>Открыть мастер подключения</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-          </div>
-
-          <div
-            onClick={() => {
-              if (onSyncInventory) onSyncInventory();
-            }}
-            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
-                <Layers className="w-5 h-5" />
-              </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-secondary)] font-medium px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
-                Containerlab
-              </span>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
-                Импорт fabric.clab.yaml
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
-                Синхронизация схемы Containerlab: Arista cEOS Spine-1/2 и Cisco IOS-XE Leaf-1/2 с закрытыми портами telnet и сложными паролями.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
-              <span>Синхронизировать стенд</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-          </div>
-
-          <div
-            onClick={() => {
-              if (onSyncInventory) onSyncInventory();
-            }}
-            className="group relative p-5 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex flex-col justify-between"
-          >
-            <div>
-              <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mb-4">
-                <Server className="w-5 h-5" />
-              </div>
-              <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-secondary)] font-medium px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
-                GitOps SoT
-              </span>
-              <h3 className="text-sm font-semibold text-[var(--text-primary)] mt-2.5">
-                Загрузить intent/devices
-              </h3>
-              <p className="text-xs text-[var(--text-secondary)] mt-1.5 leading-relaxed">
-                Декларативное развертывание топологии из структурированных YAML файлов Git с валидацией IPAM /31 и BGP ASN по RFC 7938.
-              </p>
-            </div>
-            <div className="mt-5 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-primary)] font-medium">
-              <span>Применить эталон</span>
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform" />
-            </div>
-          </div>
-        </div>
-
-        <div className="p-3.5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between text-xs text-[var(--text-secondary)]">
-          <div className="flex items-center gap-2.5">
-            <Presentation className="w-4 h-4 text-[var(--text-muted)]" />
-            <span>Презентация и сценарий выступления перед жюри КРОК / МТУСИ</span>
-          </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
           <button
-            onClick={() => onOpenTab('slides')}
-            className="text-[var(--text-primary)] hover:underline font-medium flex items-center gap-1 cursor-pointer"
+            onClick={() => setAddModalOpen(true)}
+            className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
           >
-            <span>Слайды проекта</span>
-            <ArrowRight className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{locale === 'en' ? 'Add Device (SSH)' : 'Добавить узел (SSH)'}</span>
+          </button>
+
+          <button
+            onClick={() => onSyncInventory && onSyncInventory()}
+            className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
+          >
+            <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+            <span>{locale === 'en' ? 'Sync Git SoT' : 'Синхронизировать Git SoT'}</span>
           </button>
         </div>
 
@@ -234,9 +149,9 @@ const DashboardComponent: React.FC<DashboardProps> = ({
   }
 
   return (
-    <div className="space-y-3 max-w-[1920px] mx-auto select-none">
+    <div className="w-full max-w-[2560px] mx-auto space-y-3 2xl:space-y-4 select-none">
       {/* 1. Health KPI Strip (Geist / Linear High-Density Metrics) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 2xl:gap-4">
         <button
           onClick={() => onOpenTab('devices')}
           className="text-left rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] px-3.5 py-2.5 transition-colors cursor-pointer flex items-center justify-between"
@@ -334,7 +249,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           </div>
         }
       >
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-6 gap-2.5 2xl:gap-3.5">
           {devices.map((device) => {
             const currentLoad =
               device.sparkline && device.sparkline.length > 0
@@ -431,7 +346,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
       </BentoCard>
 
       {/* 3. Bento Grid Central Arena */}
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 2xl:gap-4">
         {/* Left Column (7 cols on XL): CLOS Fabric Topology & Platform distribution */}
         <div className="xl:col-span-7 space-y-3">
           <BentoCard

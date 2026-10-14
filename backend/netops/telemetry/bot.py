@@ -777,7 +777,7 @@ class MetricsBot:
             "/unbind": lambda: _unbind_user_text(session, args),
             "/role": lambda: _set_user_role_text(session, args),
             "/collect": lambda: _collect_now_text(session, self._settings),
-            "/scan": lambda: _scan_now_text(session, self._sessions, self._settings),
+            "/scan": lambda: _scan_now_text(session, self._session_factory, self._settings),
             "/freeze": lambda: _freeze_text(args, self._settings),
             "/ai": lambda: _ai_copilot_text(session, args, settings=self._settings),
             "/ask": lambda: _ai_copilot_text(session, args, settings=self._settings),
@@ -1540,9 +1540,12 @@ def _ai_copilot_text(
 
     if anomalies:
         return "Обнаружены отклонения по прогнозу нагрузки:\n" + "\n".join(anomalies)
+    if not devices:
+        return "В фабрике пока нет подключенных устройств."
+    in_sync = sum(1 for d in devices if d.status is DeviceStatus.IN_SYNC)
     return (
-        "Фабрика работает штатно: все 4 маршрутизатора на связи, BGP-сессии и порты активны, "
-        "потерь пакетов и дрейфа конфигураций нет. Прогноз нагрузки в пределах нормы.\n\n"
+        f"Фабрика работает штатно: устройств в инвентаре — {len(devices)} (IN_SYNC: {in_sync}), "
+        "прогноз нагрузки в пределах нормы.\n\n"
         + "\n".join(summary_lines)
     )
 

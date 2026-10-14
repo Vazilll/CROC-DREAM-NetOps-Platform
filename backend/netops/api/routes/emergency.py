@@ -33,6 +33,13 @@ router = APIRouter(prefix="/emergency", tags=["emergency"])
 AUDIT_LOG_FILE = Path(__file__).resolve().parents[4] / "lab" / "running" / "emergency_audit.jsonl"
 
 
+def _audit_file(settings: Any = None) -> Path:
+    from netops.settings import get_settings  # noqa: PLC0415
+
+    eff = settings or get_settings()
+    return eff.offline_lab_path / "emergency_audit.jsonl"
+
+
 def record_audit(
     user: str,
     action: str,
@@ -41,9 +48,15 @@ def record_audit(
     reason: str,
     success: bool,
     output: str = "",
+    settings: Any = None,
 ) -> None:
     try:
-        AUDIT_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        from netops.services.discovery import _is_protected_repo_path  # noqa: PLC0415
+
+        audit_file = _audit_file(settings)
+        if _is_protected_repo_path(audit_file):
+            return
+        audit_file.parent.mkdir(parents=True, exist_ok=True)
         entry = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "user": user,
@@ -54,7 +67,7 @@ def record_audit(
             "success": success,
             "output_preview": output[:200] if output else "",
         }
-        with open(AUDIT_LOG_FILE, "a", encoding="utf-8") as f:
+        with open(audit_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as exc:
         logger.warning("Failed to record emergency audit log: %s", exc)
@@ -94,11 +107,12 @@ class ResetResponse(BaseModel):
 
 
 @router.get("/audit", response_model=list[dict[str, Any]], summary="Get emergency operations audit log")
-def get_emergency_audit(_: Viewer) -> list[dict[str, Any]]:
-    if not AUDIT_LOG_FILE.exists():
+def get_emergency_audit(_: Viewer, container: ContainerDep) -> list[dict[str, Any]]:
+    audit_file = _audit_file(container.settings)
+    if not audit_file.exists():
         return []
     records = []
-    with open(AUDIT_LOG_FILE, "r", encoding="utf-8") as f:
+    with open(audit_file, "r", encoding="utf-8") as f:
         for line in f:
             if line.strip():
                 try:
@@ -198,6 +212,7 @@ def execute_emergency_command(
             reason="Interactive CLI (Offline Simulation)",
             success=True,
             output=output,
+            settings=container.settings,
         )
         return {
             "status": "ok",
@@ -222,6 +237,7 @@ def execute_emergency_command(
                 reason="Interactive CLI",
                 success=not res.failed,
                 output=res.result,
+                settings=container.settings,
             )
             return {
                 "status": "ok",
@@ -239,6 +255,7 @@ def execute_emergency_command(
             reason="Interactive CLI",
             success=False,
             output=str(exc),
+            settings=container.settings,
         )
         logger.warning("Failed to execute emergency command on %s: %s", device_obj.hostname, exc)
         return {
@@ -312,6 +329,7 @@ def apply_emergency_patch(
             reason=req.reason,
             success=True,
             output="Applied to offline configuration store",
+            settings=container.settings,
         )
         return {
             "status": "ok",
@@ -333,6 +351,7 @@ def apply_emergency_patch(
                 reason=req.reason,
                 success=True,
                 output=res.result,
+                settings=container.settings,
             )
             return {
                 "status": "ok",
@@ -350,6 +369,7 @@ def apply_emergency_patch(
             reason=req.reason,
             success=False,
             output=str(exc),
+            settings=container.settings,
         )
         logger.exception("Failed to apply emergency patch on %s", device_obj.hostname)
         raise HTTPException(

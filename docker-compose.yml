@@ -102,6 +102,7 @@ services:
     ports: ["${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${OFFLINE_LAB:-./lab/running}:/app/lab/running:ro
       - prometheus-data:/prometheus
     restart: unless-stopped
     depends_on:

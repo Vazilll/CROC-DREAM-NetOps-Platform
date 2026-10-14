@@ -181,29 +181,29 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     },
     step3: {
       tgBotTitle: 'Telegram-бот',
-      tgLinkedStatus: 'Владелец автоподгружен:',
-      tgUnlinkedHint: 'Введите токен и зайдите в бота (/start) — вы автоматически подгрузитесь как Владелец',
-      connectTgBtn: 'Подключить токен',
-      botTokenLabel: 'Токен бота (@BotFather HTTP API)',
+      tgLinkedStatus: 'Владелец:',
+      tgUnlinkedHint: 'Откройте бота (/start) для привязки Владельца',
+      connectTgBtn: 'Подключить',
+      botTokenLabel: 'Токен бота (@BotFather)',
       botTokenPlaceholder: '8993240454:AAHnq-...',
       aiKeyLabel: 'Ключ ИИ (Groq / OpenAI)',
-      aiAlreadyConfigured: 'Уже подключён',
-      msgTelegramSaved: 'Токен бота подключён! Зайдите в бота (/start) для автоподгрузки Владельца.',
+      aiAlreadyConfigured: 'Подключён',
+      msgTelegramSaved: 'Токен бота сохранён.',
       errTelegramSave: 'Ошибка сохранения настроек Telegram',
     },
     step4: {
       sshLiveTitle: 'SSH-сервер (Live)',
-      sshLiveSub: 'Подключение к узлам Containerlab / КРОК',
+      sshLiveSub: 'Containerlab / КРОК',
       offlineDemoTitle: 'Демо-стенд (Offline)',
       offlineDemoSub: 'Локальная эмуляция CLOS-фабрики',
       hostLabel: 'Хост',
       portLabel: 'Порт',
       userLabel: 'Логин',
-      passwordPlaceholder: 'Пароль SSH (или пусто для SSH-ключа)',
+      passwordPlaceholder: 'Пароль SSH',
       discoveringBtn: 'Поиск...',
       discoverBtn: 'Подключить',
-      discoveredNodesCount: 'Найдено узлов:',
-      errServerUnreachable: 'Не удалось связаться с сервером',
+      discoveredNodesCount: 'Узлов:',
+      errServerUnreachable: 'Сервер недоступен',
       openConsoleBtn: 'Открыть пульт',
     },
   },
@@ -263,28 +263,28 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
     },
     step3: {
       tgBotTitle: 'Telegram Bot',
-      tgLinkedStatus: 'Owner auto-loaded:',
-      tgUnlinkedHint: 'Enter bot token and open the bot (/start) — you will be auto-loaded as Owner',
-      connectTgBtn: 'Connect Token',
-      botTokenLabel: 'Bot Token (@BotFather HTTP API)',
+      tgLinkedStatus: 'Owner:',
+      tgUnlinkedHint: 'Open the bot (/start) to link Owner',
+      connectTgBtn: 'Connect',
+      botTokenLabel: 'Bot Token (@BotFather)',
       botTokenPlaceholder: '8993240454:AAHnq-...',
       aiKeyLabel: 'AI API Key (Groq / OpenAI)',
-      aiAlreadyConfigured: 'Already configured',
-      msgTelegramSaved: 'Bot token saved! Open the bot (/start) to auto-load as Owner.',
+      aiAlreadyConfigured: 'Configured',
+      msgTelegramSaved: 'Bot token saved.',
       errTelegramSave: 'Failed to save Telegram settings',
     },
     step4: {
       sshLiveTitle: 'SSH Server (Live)',
-      sshLiveSub: 'Connect to live Containerlab / CROC switches',
+      sshLiveSub: 'Containerlab / CROC switches',
       offlineDemoTitle: 'Demo Lab (Offline)',
-      offlineDemoSub: 'Local deterministic CLOS fabric simulation',
+      offlineDemoSub: 'Local CLOS fabric simulation',
       hostLabel: 'Host',
       portLabel: 'Port',
       userLabel: 'User',
-      passwordPlaceholder: 'SSH password (or leave empty for SSH key)',
+      passwordPlaceholder: 'SSH password',
       discoveringBtn: 'Probing...',
       discoverBtn: 'Connect',
-      discoveredNodesCount: 'Discovered nodes:',
+      discoveredNodesCount: 'Nodes:',
       errServerUnreachable: 'Failed to reach remote server',
       openConsoleBtn: 'Launch Console',
     },
@@ -307,7 +307,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [clusterName, setClusterName] = useState('CROC-FABRIC-PROD-01');
   const [exposureMode, setExposureMode] = useState<'local_only' | 'public_tunnel'>('local_only');
   const [ownerToken, setOwnerToken] = useState('');
-  const [, setBoundClientId] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [recoverMode, setRecoverMode] = useState(false);
   const [recoveryKeyInput, setRecoveryKeyInput] = useState('');
@@ -335,13 +334,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [telegramSavedMsg, setTelegramSavedMsg] = useState('');
 
   // Step 4: AI Cluster Cascade
-  const [groqApiKey] = useState('');
-  const [geminiApiKey] = useState('');
   const [ollamaUrl, setOllamaUrl] = useState('');
   const [llmCascade, setLlmCascade] = useState<LlmCascadeConfig[]>([]);
   const [llmConfigRaw, setLlmConfigRaw] = useState('');
   const [showLlmPasteBox, setShowLlmPasteBox] = useState(true);
-  const [, setAiConfigured] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
   const [aiSavedMsg, setAiSavedMsg] = useState('');
 
@@ -391,12 +387,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       setTelegramLinked(Boolean(st.owner?.telegram_linked));
       setTelegramLinkedUser(st.owner?.telegram_username || '');
       setTelegramChatId(st.owner?.telegram_chat_id || '');
-      if (st.owner?.bound_client_id) setBoundClientId(st.owner.bound_client_id);
       if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
       if (st.server?.clab_host) setServerHost(st.server.clab_host);
       if (st.server?.clab_port) setServerPort(st.server.clab_port);
       if (st.server?.clab_user) setServerUser(st.server.clab_user);
-      if (st.ai?.groq_configured || st.ai?.gemini_configured) setAiConfigured(true);
       if (st.ai?.ollama_url) setOllamaUrl(st.ai.ollama_url);
       if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
         setLlmCascade(st.ai.cascade);
@@ -452,12 +446,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         setTelegramLinked(Boolean(st.owner?.telegram_linked));
         setTelegramLinkedUser(st.owner?.telegram_username || '');
         setTelegramChatId(st.owner?.telegram_chat_id || '');
-        if (st.owner?.bound_client_id) setBoundClientId(st.owner.bound_client_id);
         if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
         if (st.server?.clab_host) setServerHost(st.server.clab_host);
         if (st.server?.clab_port) setServerPort(st.server.clab_port);
         if (st.server?.clab_user) setServerUser(st.server.clab_user);
-        if (st.ai?.groq_configured || st.ai?.gemini_configured) setAiConfigured(true);
         if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
           setLlmCascade(st.ai.cascade);
         }
@@ -544,7 +536,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         );
       }
       setOwnerToken(res.token);
-      setBoundClientId(res.bound_client_id);
       api.setToken(res.token);
       localStorage.setItem('netops_user_role', 'owner');
       localStorage.setItem('netops_cluster_name', res.cluster_name);
@@ -581,9 +572,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       if (res.token) {
         setOwnerToken(res.token);
         api.setToken(res.token);
-      }
-      if (res.bound_client_id) {
-        setBoundClientId(res.bound_client_id);
       }
       localStorage.setItem('netops_user_role', 'owner');
       localStorage.setItem('netops_cluster_name', clusterName.trim() || 'CROC-FABRIC-PROD-01');
@@ -747,8 +735,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         setLlmConfigRaw('');
       }
       await api.configureBootstrapLayers({
-        groq_api_key: groqApiKey.trim() || undefined,
-        gemini_api_key: geminiApiKey.trim() || undefined,
         ollama_url: ollamaUrl.trim() || undefined,
         llm_cascade: finalCascade,
         auto_commit_on_diff: true,
@@ -824,13 +810,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
           'Connecting to PostgreSQL 16 & Redis 7 SoT Core',
           `Indexing CLOS Fabric Inventory (${preload.devicesCount} nodes)`,
           'Warming up Telemetry & HierConfig AST',
-          'Initializing Matryoshka Owner Bootstrap Engine',
+          'Initializing Owner Bootstrap Engine',
         ]
       : [
-          'Подключение ядра PostgreSQL 16 и брокера Redis 7',
-          `Индексация топологии CLOS (${preload.devicesCount} узлов в базе)`,
+          'Подключение PostgreSQL 16 и Redis 7',
+          `Индексация топологии (${preload.devicesCount} узлов)`,
           'Прогрев телеметрии и HierConfig AST',
-          'Запуск автономного мастера настройки Владельца («Матрёшка»)',
+          'Запуск мастера настройки Владельца',
         ];
 
   const stepsMeta: { id: WizardStep; title: string; icon: React.ReactNode }[] = [
@@ -854,10 +840,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     'h-7 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] hover:bg-[var(--bg-elevated)] text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-3 sm:p-4 bg-[var(--bg-main)]/95 backdrop-blur-xl transition-colors duration-300 overflow-y-auto">
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-[var(--bg-main)]/95 backdrop-blur-xl transition-colors duration-300 overflow-y-auto">
       {/* Global Top-Right Controls during Boot Splash */}
       {phase === 'welcome' && (
-        <div className="absolute top-5 right-5 z-20 flex items-center gap-2">
+        <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
           <button
             type="button"
             onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
@@ -893,7 +879,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       {phase === 'welcome' && (
         <div
           onClick={() => setPhase('wizard')}
-          className="relative z-10 w-full max-w-md flex flex-col items-center justify-center text-center cursor-pointer animate-win-fade select-none px-4"
+          className="relative z-10 w-full max-w-md flex flex-col items-center justify-center text-center cursor-pointer animate-win-fade select-none px-3"
         >
           <div className="w-14 h-14 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-center mb-5 shadow-xl">
             <Network className="w-6 h-6 text-[var(--text-primary)] animate-boot-pulse" />
@@ -944,10 +930,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
       {/* PHASE 2: COMPACT 5-STEP WIZARD */}
       {phase === 'wizard' && (
-        <div className="relative z-10 w-full max-w-xl rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl text-[var(--text-primary)] animate-win-fade flex flex-col overflow-hidden">
+        <div className="relative z-10 w-full max-w-xl max-h-[94dvh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl text-[var(--text-primary)] animate-win-fade flex flex-col overflow-hidden">
           {/* Header with Integrated Theme & Language Switchers */}
-          <div className="px-5 py-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]/60">
-            <div className="flex items-center justify-between gap-2 mb-3">
+          <div className="px-3.5 sm:px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]/60 shrink-0">
+            <div className="flex items-center justify-between gap-2 mb-2.5">
               <span className="inline-flex items-center gap-2 text-xs font-mono font-semibold text-[var(--text-primary)]">
                 <span className="w-2 h-2 rounded-full bg-emerald-500" />
                 <span>{w.clusterSetupTitle}</span>
@@ -998,7 +984,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-5 gap-1.5">
+            <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
               {stepsMeta.map((s) => {
                 const active = wizardStep === s.id;
                 const completed = wizardStep > s.id;
@@ -1007,7 +993,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     key={s.id}
                     type="button"
                     onClick={() => setWizardStep(s.id)}
-                    className={`px-2 py-2 rounded-lg border text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1 ${
+                    className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-lg border text-[10px] sm:text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1 ${
                       active
                         ? 'border-[var(--text-primary)] bg-[var(--bg-card)] text-[var(--text-primary)] shadow-xs'
                         : completed
@@ -1024,7 +1010,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
           </div>
 
           {/* Step Body */}
-          <div className="p-5 space-y-4">
+          <div className="p-3.5 sm:p-5 space-y-4 overflow-y-auto flex-1">
             {/* ==================== STEP 1: OWNER & CONTOUR ==================== */}
             {wizardStep === 1 && (
               <div className="space-y-3.5 animate-fade-in">
@@ -1079,7 +1065,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         >
                           <div className="text-xs font-semibold">{w.step1.publicTunnelTitle}</div>
                           <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                            {serverHost || window.location.hostname}:5173 {w.step1.publicTunnelDesc}
+                            {serverHost || window.location.hostname}:5173
                           </div>
                         </button>
                       </div>
@@ -1220,7 +1206,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-[11px] font-mono text-[var(--text-secondary)]">
-                      SSH-репозиторий GitHub (единый контур SoT)
+                      {w.step2.repoLabel}
                     </label>
                     <button
                       type="button"
@@ -1230,7 +1216,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       }}
                       className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
                     >
-                      Вставить git@github.com:Vazilll/...
+                      git@github.com:Vazilll/...
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
@@ -1247,20 +1233,20 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       disabled={savingGithub}
                       className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer transition-colors"
                     >
-                      {savingGithub ? '...' : 'Подключить SSH'}
+                      {savingGithub ? '...' : 'SSH'}
                     </button>
                   </div>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    Целевая ветка (определяется при подключении)
+                    {w.step2.branchLabel}
                   </label>
                   <input
                     type="text"
                     value={githubBranch}
                     onChange={(e) => setGithubBranch(e.target.value)}
-                    placeholder="Нажмите «Подключить SSH» (напр. main)"
+                    placeholder="main"
                     className={inputClass}
                   />
                 </div>
@@ -1327,7 +1313,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         <strong>
                           {telegramLinkedUser ? `@${telegramLinkedUser}` : 'owner'}
                         </strong>
-                        {telegramChatId ? ` (ID: ${telegramChatId})` : ''}
+                        {telegramChatId ? ` (${telegramChatId})` : ''}
                       </span>
                     </div>
                     <span className="px-2 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-mono font-bold">
@@ -1335,10 +1321,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     </span>
                   </div>
                 ) : (
-                  <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 text-xs font-mono text-[var(--text-secondary)] flex items-center justify-between gap-2">
+                  <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 text-xs font-mono text-[var(--text-secondary)] flex items-center justify-between gap-2">
                     <span>
                       {telegramBotConfigured && telegramBotUsername
-                        ? `Бот ${telegramBotUsername} подключён. Зайдите в бота (/start) — вы автоподгрузитесь как Владелец.`
+                        ? `${telegramBotUsername} · /start`
                         : w.step3.tgUnlinkedHint}
                     </span>
                     <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
@@ -1378,7 +1364,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)]/60 p-3 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-mono font-semibold text-[var(--text-primary)]">
-                      Каскад конфигов нейросетей ({llmCascade.length} активн.)
+                      Каскад LLM ({llmCascade.length})
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -1386,7 +1372,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         onClick={() => setShowLlmPasteBox((v) => !v)}
                         className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
                       >
-                        {showLlmPasteBox ? 'Скрыть импорт' : '+ Вставить конфиг'}
+                        {showLlmPasteBox ? 'Скрыть' : '+ Импорт'}
                       </button>
                       <button
                         type="button"
@@ -1404,7 +1390,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         }
                         className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 cursor-pointer"
                       >
-                        + Поля вручную
+                        + Провайдер
                       </button>
                     </div>
                   </div>
@@ -1412,24 +1398,21 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   {showLlmPasteBox && (
                     <div className="space-y-1.5">
                       <textarea
-                        rows={4}
+                        rows={3}
                         value={llmConfigRaw}
                         onChange={(e) => setLlmConfigRaw(e.target.value)}
                         placeholder={
-                          '{\n  "name": "Groq",\n  "base_url": "https://api.groq.com/openai/v1",\n  "model": "qwen/qwen3.8-27b",\n  "api_key": "gsk_...",\n  "timeout_seconds": 2.0\n}'
+                          '{\n  "name": "Groq",\n  "base_url": "https://api.groq.com/openai/v1",\n  "model": "qwen/qwen3.8-27b",\n  "api_key": "gsk_..."\n}'
                         }
                         className={`${inputClass} leading-relaxed resize-y`}
                       />
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[10px] font-mono text-[var(--text-muted)]">
-                          Поддерживается JSON-конфиг (объект/массив) или блок .env (NETOPS_GROQ_...)
-                        </span>
+                      <div className="flex justify-end">
                         <button
                           type="button"
                           onClick={handleApplyLlmConfig}
                           className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-[11px] font-mono font-semibold cursor-pointer shrink-0"
                         >
-                          Добавить в каскад
+                          Добавить
                         </button>
                       </div>
                     </div>
@@ -1444,7 +1427,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                              Приоритет #{idx + 1} · {item.name} ({item.model})
+                              #{idx + 1} · {item.name} ({item.model})
                             </span>
                             <button
                               type="button"
@@ -1453,7 +1436,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                               }
                               className="text-[10px] font-mono text-rose-500 hover:underline cursor-pointer"
                             >
-                              Удалить ×
+                              ×
                             </button>
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
@@ -1467,7 +1450,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Имя (Groq)"
+                              placeholder="Имя"
                               className={inputClass}
                             />
                             <input
@@ -1506,7 +1489,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="API Key (gsk_...)"
+                              placeholder="API Key"
                               className={inputClass}
                             />
                           </div>
@@ -1554,7 +1537,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     type="text"
                     value={serverHost}
                     onChange={(e) => setServerHost(e.target.value)}
-                    placeholder="IP или хост сервера (напр. 10.0.0.10)"
+                    placeholder="10.0.0.10"
                     className={inputClass}
                   />
                 </div>
@@ -1626,7 +1609,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       </div>
                     ) : (
                       <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
-                        SSH-сервер доступен, но активных SSH-портов коммутаторов (Containerlab) не обнаружено.
+                        Активных узлов Containerlab не обнаружено.
                       </div>
                     )}
                   </div>

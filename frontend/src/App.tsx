@@ -474,22 +474,12 @@ export function App() {
     const t = translations[locale];
     showToast(role === 'owner' ? t.toastOwnerSuccess : t.toastConnectSuccess, 'success');
     await refreshAll();
-    try {
-      const current = await api.getDevices();
-      if (!current || current.length === 0) {
-        await api.syncInventory();
-        await fetchDevices();
-      }
-    } catch (e) {
-      console.error('Welcome auto-sync error', e);
-    }
-  }, [locale, showToast, refreshAll, fetchDevices]);
+  }, [locale, showToast, refreshAll]);
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-[var(--bg-main)] text-[var(--text-primary)] flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors">
       <Header
         userRole={userRole}
-        setUserRole={handleSwitchRole}
         apiHealthy={apiHealthy}
         onToggleCopilot={handleToggleCopilot}
         copilotOpen={copilotOpen}
@@ -539,7 +529,7 @@ export function App() {
           setActiveTab={setActiveTab}
           locale={locale}
         />
-        <main className="flex-1 min-w-0 p-3 sm:p-6 space-y-4 sm:space-y-6 pb-24 lg:pb-6">
+        <main className="flex-1 min-w-0 w-full max-w-[2560px] mx-auto p-2.5 sm:p-4 lg:p-6 2xl:p-8 space-y-3 sm:space-y-5 pb-24 lg:pb-8">
           <Suspense fallback={<LoadingFallback />}>
             {activeTab === 'dashboard' && (
               <Dashboard

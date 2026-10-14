@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Play, X, GitBranch, CheckCircle2, AlertTriangle, Server, Network } from 'lucide-react';
+import { Play, X, GitBranch, AlertTriangle, Server, Network } from 'lucide-react';
 import { api, type Device } from '../../api';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 import { translations, type Locale } from '../../i18n';
@@ -135,22 +135,22 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 select-none"
+      className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-2 sm:p-4 select-none"
       onClick={onClose}
     >
       <div
-        className="w-full max-w-2xl rounded-xl bg-[#0c0e14] border border-white/[0.1] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="w-full max-w-2xl rounded-xl bg-[#0c0e14] border border-white/[0.1] shadow-2xl overflow-hidden flex flex-col max-h-[94dvh]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="bg-[#10131b]/95 border-b border-white/[0.08] px-5 py-3.5 flex items-center justify-between shrink-0">
+        <div className="bg-[#10131b]/95 border-b border-white/[0.08] px-4 sm:px-5 py-3.5 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
             <h2 className="text-sm font-semibold text-white tracking-tight">
               {t.dryRunTitle}
             </h2>
             <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-white/[0.05] text-zinc-400 border border-white/[0.08]">
-              {locale === 'en' ? 'Read-Only Simulation' : 'Read-Only симуляция'}
+              Read-Only
             </span>
           </div>
           <button
@@ -163,27 +163,14 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs">
-          {/* Top Meta Strip: Git & Lint Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {/* Git Branch & Source of Truth */}
-            <div className="rounded-lg border border-white/[0.08] bg-[#10121a] p-3 flex items-start gap-2.5">
-              <GitBranch className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <div className="text-[11px] text-zinc-400">Источник эталона (Git SoT)</div>
-                <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{liveGitBranch}</div>
-                <div className="text-[10px] text-zinc-500 font-mono truncate">{liveGitCommit}</div>
-              </div>
-            </div>
-
-            {/* Pre-flight Lint & Syntax */}
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.04] p-3 flex items-start gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <div className="text-[11px] text-zinc-400">Pre-flight Lint & Синтаксис</div>
-                <div className="font-mono text-emerald-300 font-medium mt-0.5">ВЕРИФИЦИРОВАНО</div>
-                <div className="text-[10px] text-zinc-400 truncate">Pydantic & HierConfig модели валидны (0 ошибок)</div>
-              </div>
+        <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
+          {/* Git Branch & Source of Truth */}
+          <div className="rounded-lg border border-white/[0.08] bg-[#10121a] p-3 flex items-start gap-2.5">
+            <GitBranch className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <div className="text-[11px] text-zinc-400">Git SoT</div>
+              <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{liveGitBranch}</div>
+              <div className="text-[10px] text-zinc-500 font-mono truncate">{liveGitCommit}</div>
             </div>
           </div>
 
@@ -192,7 +179,7 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Network className="w-4 h-4 text-indigo-400" />
-                <span className="font-medium text-zinc-200 text-xs">Оценка зоны поражения (Blast Radius)</span>
+                <span className="font-medium text-zinc-200 text-xs">{t.blastRadiusTitle}</span>
               </div>
               <span className={`font-mono text-[10px] px-2 py-0.5 rounded border ${blastRadius.levelColor}`}>
                 {blastRadius.levelLabel}
@@ -201,21 +188,21 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
 
             <div className="grid grid-cols-3 gap-2 pt-1 border-t border-white/[0.06] text-center">
               <div className="p-2 rounded bg-white/[0.02]">
-                <div className="text-[10px] text-zinc-500">Охват фабрики</div>
+                <div className="text-[10px] text-zinc-500">Охват</div>
                 <div className="font-mono text-sm font-semibold text-white mt-0.5">
-                  {blastRadius.pct}% <span className="text-[10px] text-zinc-500 font-normal">({targetDevices.length} / {devices.length})</span>
+                  {blastRadius.pct}% <span className="text-[10px] text-zinc-500 font-normal">({targetDevices.length}/{devices.length})</span>
                 </div>
               </div>
               <div className="p-2 rounded bg-white/[0.02]">
-                <div className="text-[10px] text-zinc-500">Затронутые линки</div>
+                <div className="text-[10px] text-zinc-500">Линки</div>
                 <div className="font-mono text-sm font-semibold text-white mt-0.5">
-                  ~{blastRadius.estimatedLinks} <span className="text-[10px] text-zinc-500 font-normal">CLOS каналов</span>
+                  ~{blastRadius.estimatedLinks}
                 </div>
               </div>
               <div className="p-2 rounded bg-white/[0.02]">
-                <div className="text-[10px] text-zinc-500">BGP сессии</div>
+                <div className="text-[10px] text-zinc-500">BGP</div>
                 <div className="font-mono text-sm font-semibold text-white mt-0.5">
-                  ~{blastRadius.estimatedPeers} <span className="text-[10px] text-zinc-500 font-normal">соседств</span>
+                  ~{blastRadius.estimatedPeers}
                 </div>
               </div>
             </div>
@@ -223,7 +210,7 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
             {blastRadius.spines > 0 && (
               <div className="flex items-center gap-2 text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded">
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
-                <span>В скоуп включены Spine-коммутаторы ({blastRadius.spines} шт.). Dry-run проверит ECMP-маршрутизацию без прерывания трафика.</span>
+                <span>Затронуты Spine-узлы ({blastRadius.spines} шт.)</span>
               </div>
             )}
           </div>
@@ -233,9 +220,9 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
             <div className="flex items-center justify-between text-zinc-400">
               <span className="flex items-center gap-1.5">
                 <Server className="w-3.5 h-3.5 text-zinc-500" />
-                <span>Устройства в скоупе ({targetDevices.length}):</span>
+                <span>Узлы ({targetDevices.length})</span>
               </span>
-              <span className="text-[11px] font-mono text-zinc-500">Режим: Dry-Run (нет мутаций)</span>
+              <span className="text-[11px] font-mono text-zinc-500">Dry-Run</span>
             </div>
 
             <div className="max-h-48 overflow-y-auto rounded-lg border border-white/[0.08] bg-[#08090c] divide-y divide-white/[0.05]">

@@ -33,8 +33,8 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [step, setStep] = useState<1 | 2>(1);
   const [ip, setIp] = useState('');
   const [port, setPort] = useState(22);
-  const [username, setUsername] = useState('admin');
-  const [password, setPassword] = useState('admin');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [proxyJump, setProxyJump] = useState('');
   const [authProfile, setAuthProfile] = useState('lab_creds');
   const [customCreds, setCustomCreds] = useState(true);
@@ -172,20 +172,20 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const isPermitted = userRole === 'admin' || userRole === 'owner';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/90 backdrop-blur-xl animate-fade-in">
-      <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[92vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-xl animate-fade-in">
+      <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[94dvh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] shrink-0">
+        <div className="flex items-center justify-between px-4 sm:px-5 py-3.5 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] shrink-0">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)]">
               <Server className="w-4 h-4" />
             </div>
             <div>
               <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-                Добавление устройства / сервера
+                Добавление узла
               </h2>
               <p className="text-xs text-[var(--text-secondary)]">
-                Шаг {step} из 2 · SSH Probe &amp; Безопасный онбординг (Safe-First)
+                Шаг {step} / 2
               </p>
             </div>
           </div>
@@ -198,7 +198,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         </div>
 
         {/* Content */}
-        <div className="p-6 space-y-4 overflow-y-auto flex-1">
+        <div className="p-4 sm:p-6 space-y-4 overflow-y-auto flex-1">
           {!isPermitted ? (
             <div className="p-4 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs flex items-center gap-3">
               <ShieldAlert className="w-5 h-5 shrink-0 text-rose-400" />
@@ -221,7 +221,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                         type="text"
                         value={ip}
                         onChange={(e) => handleIpChange(e.target.value)}
-                        placeholder="например, 127.0.0.1 или 10.0.10.15"
+                        placeholder="10.0.10.15"
                         className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-100 font-mono focus:outline-none transition-colors"
                       />
                     </div>
@@ -240,15 +240,14 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
                   {/* Bastion / ProxyJump */}
                   <div>
-                    <label className="flex items-center justify-between text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
-                      <span>Bastion / ProxyJump (Опционально)</span>
-                      <span className="text-zinc-500 font-normal lowercase">GlavNOC Jump Host</span>
+                    <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
+                      Bastion / ProxyJump (Опционально)
                     </label>
                     <input
                       type="text"
                       value={proxyJump}
                       onChange={(e) => setProxyJump(e.target.value)}
-                      placeholder="bastion-user@jump.infra.internal:22"
+                      placeholder="user@jump:22"
                       className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono focus:outline-none transition-colors"
                     />
                   </div>
@@ -275,9 +274,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                           onChange={(e) => setAuthProfile(e.target.value)}
                           className="bg-[#050608] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-zinc-200 flex-1 focus:outline-none"
                         >
-                          <option value="lab_creds">Профиль по умолчанию: lab_creds (admin/admin)</option>
-                          <option value="production_vault">Корпоративный HashiCorp Vault</option>
-                          <option value="ed25519_key">SSH-ключ ed25519</option>
+                          <option value="lab_creds">lab_creds</option>
                         </select>
                       </div>
                     ) : (
@@ -288,16 +285,17 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                             type="text"
                             value={username}
                             onChange={(e) => setUsername(e.target.value)}
+                            placeholder="admin"
                             className="w-full bg-[#050608] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none"
                           />
                         </div>
                         <div>
-                          <label className="block text-[11px] text-zinc-400 mb-1">Пароль / Secret Key</label>
+                          <label className="block text-[11px] text-zinc-400 mb-1">Пароль</label>
                           <input
                             type="password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            placeholder="••••••••••••"
+                            placeholder="admin"
                             className="w-full bg-[#050608] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none"
                           />
                         </div>

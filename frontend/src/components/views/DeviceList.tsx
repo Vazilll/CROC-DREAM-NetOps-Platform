@@ -171,9 +171,9 @@ export const DeviceList: React.FC<DeviceListProps> = ({
     'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors disabled:opacity-40';
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-[2560px] mx-auto space-y-4">
       {/* Title & Top Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div>
           <h1 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">
             {locale === 'en' ? 'Hardware Inventory' : 'Инвентарь оборудования'}{' '}
@@ -181,13 +181,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
               {rows.length} {locale === 'en' ? 'of' : 'из'} {devices.length}
             </span>
           </h1>
-          <p className="text-xs text-[var(--text-secondary)] mt-0.5">
-            {locale === 'en'
-              ? 'Physical fabric state (Oper Status) and Git SoT intent compliance (Intent Status)'
-              : 'Учет физического состояния фабрики (Oper Status) и соответствия намерениям Git SoT (Intent Status)'}
-          </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
           {(userRole === 'admin' || userRole === 'owner') && selected.length > 0 && (
             <button
               onClick={handleBulkDelete}
@@ -221,14 +216,14 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       </div>
 
       {/* Filter Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div className="relative w-full sm:w-auto">
           <Search className="w-3.5 h-3.5 text-[var(--text-muted)] absolute left-2.5 top-1/2 -translate-y-1/2" />
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Имя или IP…"
-            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] rounded-md pl-8 pr-3 py-1.5 text-xs text-[var(--text-primary)] w-48 focus:outline-none focus:border-[var(--text-secondary)]"
+            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] rounded-md pl-8 pr-3 py-1.5 text-xs text-[var(--text-primary)] w-full sm:w-48 focus:outline-none focus:border-[var(--text-secondary)]"
           />
         </div>
         <Filter value={role} onChange={setRole} label="Роль" options={ROLE_NAMES} />
@@ -251,7 +246,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           }}
         />
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-1.5 sm:gap-2">
           <span className="text-[11px] text-[var(--text-muted)] font-mono tabular-nums">{scope}</span>
           <button
             disabled={!targets.length}
@@ -280,7 +275,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       {/* High-Density Inventory Table */}
       <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse tabular-nums">
+          <table className="w-full min-w-[640px] text-left text-xs border-collapse tabular-nums">
             <thead>
               <tr className="bg-[var(--bg-elevated)]/60 text-[11px] uppercase tracking-wide text-[var(--text-muted)] border-b border-[var(--border-subtle)]">
                 <th className="w-10 px-3 py-2.5">
@@ -309,8 +304,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     </button>
                   </th>
                 ))}
-                <th className="px-3 py-2.5 font-medium hidden 2xl:table-cell">Нагрузка (тренд)</th>
-                <th className="px-3 py-2.5 font-medium hidden 2xl:table-cell">24h Timeline</th>
+                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">Нагрузка (тренд)</th>
+                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">24h Timeline</th>
                 <th className="px-3 py-2.5 font-medium text-right">Действия</th>
               </tr>
             </thead>
@@ -397,7 +392,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </td>
 
                   {/* Micro-Sparkline */}
-                  <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-2 hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="sparkline" data-testid="sparkline">
                       {d.sparkline && d.sparkline.length > 0 ? (
                         <Sparkline
@@ -413,7 +408,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                   </td>
 
                   {/* 24h State Timeline */}
-                  <td className="px-3 py-2 hidden 2xl:table-cell" onClick={(e) => e.stopPropagation()}>
+                  <td className="px-3 py-2 hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
                     <div className="state-timeline" data-testid="state-timeline">
                       {d.state_timeline && d.state_timeline.length > 0 ? (
                         <StateTimeline states={d.state_timeline} />
@@ -476,32 +471,26 @@ export const DeviceList: React.FC<DeviceListProps> = ({
               ))}
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={11} className="px-6 py-16 text-center">
+                  <td colSpan={11} className="px-6 py-12 text-center">
                     <div className="max-w-md mx-auto space-y-3">
-                      <div className="w-10 h-10 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] flex items-center justify-center mx-auto">
-                        <Plus className="w-5 h-5" />
-                      </div>
-                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">Инвентарь фабрики пуст</h3>
-                      <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-                        {devices.length
-                          ? 'Нет устройств под выбранные фильтры'
-                          : 'В системе пока нет активных устройств. Вы можете подключить первый Linux-сервер или сетевой коммутатор через SSH Probe либо синхронизировать Git SoT.'}
-                      </p>
+                      <h3 className="text-sm font-semibold text-[var(--text-primary)]">
+                        {devices.length ? 'Нет совпадений' : 'Нет устройств'}
+                      </h3>
                       {!devices.length && (
-                        <div className="flex items-center justify-center gap-2 pt-2">
+                        <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                           {(userRole === 'admin' || userRole === 'owner') && (
                             <button
                               onClick={() => setAddModalOpen(true)}
                               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-semibold bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 transition-opacity cursor-pointer"
                             >
-                              <Plus className="w-3.5 h-3.5" /> Добавить сервер / коммутатор
+                              <Plus className="w-3.5 h-3.5" /> + Добавить
                             </button>
                           )}
                           <button
                             onClick={onSyncInventory}
                             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[var(--border-subtle)] text-[var(--text-primary)] hover:border-[var(--border-hover)] transition-colors cursor-pointer"
                           >
-                            <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать Git SoT
+                            <RefreshCw className="w-3.5 h-3.5" /> Синхронизировать
                           </button>
                         </div>
                       )}

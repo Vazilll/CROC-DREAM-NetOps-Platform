@@ -32,31 +32,22 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
   };
 
   const cardClass =
-    'p-5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] flex flex-col justify-between space-y-4 transition-colors';
-  const codePill =
-    'px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] font-mono text-[11px] text-[var(--text-primary)]';
+    'p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] flex flex-col justify-between gap-3 transition-colors';
   const actionBtn =
     'w-full py-2 px-3 bg-[var(--bg-elevated)] hover:bg-[var(--text-primary)] text-[var(--text-primary)] hover:text-[var(--bg-main)] border border-[var(--border-subtle)] rounded-md text-xs font-medium transition-colors cursor-pointer disabled:opacity-50';
 
   return (
-    <div className="space-y-4">
+    <div className="w-full max-w-[2560px] mx-auto space-y-4">
       {/* Header Banner */}
-      <div className="p-5 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div className="space-y-1.5">
-          <div className="flex items-center gap-2.5">
-            <div className="p-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
-              <Flame className="w-4 h-4 text-amber-400" />
-            </div>
-            <div>
-              <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">{t.chaosTitle}</h2>
-              <div className="text-[11px] font-mono text-[var(--text-muted)]">{t.chaosSub}</div>
-            </div>
+      <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5">
+          <div className="p-1.5 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)]">
+            <Flame className="w-4 h-4 text-amber-400" />
           </div>
-          <p className="text-xs text-[var(--text-secondary)] max-w-3xl leading-relaxed pt-1">
-            {locale === 'en'
-              ? 'This module simulates network failures (out-of-band CLI edits, port drops, traffic storms), verifying the multi-vendor Drift Engine on Cisco/Huawei and commit trial auto-rollback.'
-              : 'Модуль имитирует типовые аварии на стенде (несанкционированные правки в CLI мимо Git, падение межузловых портов, скрытые блэкхолы), позволяя проверить работу Drift Engine на Cisco/Huawei и автооткат commit trial.'}
-          </p>
+          <div>
+            <h2 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">{t.chaosTitle}</h2>
+            <div className="text-[11px] font-mono text-[var(--text-muted)]">{t.chaosSub}</div>
+          </div>
         </div>
       </div>
 
@@ -67,23 +58,19 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         </div>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
         {/* Scenario 1: Cisco ACL Drift */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
                 СЦЕНАРИЙ #1 · CISCO IOS-XE
               </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Внепроцессный Дрейф ACL (Cisco)
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Имитация ручного входа по SSH на подключенный узел фабрики и добавление строки{' '}
-              <code className={codePill}>15 permit ip any any</code> в список <code className={codePill}>MGMT-IN</code> в обход репозитория Git.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('acl_drift')}
@@ -97,19 +84,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         {/* Scenario 2: Huawei VRP / Multi-Vendor ACL Drift */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
                 СЦЕНАРИЙ #2 · MULTI-VENDOR
               </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Дрейф на Huawei VRP
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Внедрение несанкционированного правила <code className={codePill}>rule 15 permit ip</code> на подключенном узле Huawei VRP. Проверяет работу HierConfig и транзакций{' '}
-              <code className={codePill}>commit trial</code>.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('huawei_drift')}
@@ -123,18 +106,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         {/* Scenario 3: Port Down */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
                 СЦЕНАРИЙ #3 · ФИЗИКА
               </span>
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400" />
+              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Авария Линка (Port Down)
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Падение межузлового линка <code className={codePill}>GigabitEthernet3</code> на подключенном узле фабрики. Платформа фиксирует сбой post-check и автоматически блокирует деплой.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('port_down')}
@@ -148,20 +128,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         {/* Scenario 4: Silent Blackhole */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
                 TELEMETRY · Q10 GUARD
               </span>
-              <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+              <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Тихая авария (Silent Blackhole)
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Порты остаются в статусе <code className={codePill}>up/up</code>, но трафик падает в ноль.{' '}
-              Мониторинг телеметрии выявляет пробой квантиля Q₁₀ во время окна{' '}
-              <code className={codePill}>commit confirmed</code> и инициирует автооткат.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('ai_blackhole')}
@@ -175,18 +150,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         {/* Scenario 5: Load Surge */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
                 TELEMETRY · Q90 GUARD
               </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+              <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Шторм трафика / Микропетля
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Имитация аномального взлета нагрузки выше Q₉₀. Система блокирует закрепление коммита до устранения аномалии.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('ai_storm')}
@@ -200,18 +172,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         {/* Reset */}
         <div className={cardClass}>
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 truncate">
                 ЭТАЛОН GIT SOT
               </span>
-              <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+              <RotateCcw className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
               Сброс к Git SoT
             </h3>
-            <p className="text-xs text-[var(--text-secondary)] leading-relaxed">
-              Возвращает рабочие конфигурации всех коммутаторов к эталонным состояниям из Git за 1 секунду. Очищает аномалии AI Guard.
-            </p>
           </div>
           <button
             onClick={() => handleInjectChaos('reset_lab')}

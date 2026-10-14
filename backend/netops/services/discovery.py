@@ -559,9 +559,6 @@ def discover_live_switch_via_ssh(
     }
 
 
-discover_live_switch_Via_ssh = discover_live_switch_via_ssh
-
-
 def extract_brownfield_intent(
     device: Device, data: DeviceCreate, settings: Any
 ) -> dict[str, Any] | None:
@@ -782,6 +779,7 @@ def execute_device_emergency_action(
 
     AiTelemetryGuard.inject_anomaly(device.hostname, "clear")
     output = ""
+    cmd = _emergency_cli_command(device.platform, data.action)
     if container.settings.network_driver == "offline":
         toolchain = build_toolchain(container.settings)
         if data.action == "rollback_last_commit" and not _is_protected_repo_path(
@@ -797,12 +795,10 @@ def execute_device_emergency_action(
             except Exception as exc:
                 output = f"Offline rollback completed ({exc})"
         else:
-            cmd = _emergency_cli_command(device.platform, data.action)
             output = f"[Offline Lab {device.platform.value}] Executed '{cmd}' on {device.hostname}"
     else:
         toolchain = build_toolchain(container.settings)
         target = toolchain.target_for(InventoryDevice.model_validate(device))
-        cmd = _emergency_cli_command(device.platform, data.action)
         try:
             with _ParamikoConnAdapter(target, timeout=20) as conn:
                 output = conn.send_command(cmd).result
@@ -816,12 +812,16 @@ def execute_device_emergency_action(
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "actor": actor_username,
+        "user": actor_username,
         "device": device.hostname,
         "device_id": device.id,
         "action": data.action,
+        "payload": cmd,
         "reason": data.reason,
         "status": "EXECUTED",
+        "success": True,
         "output": output[:200],
+        "output_preview": output[:200],
     }
     if not _is_protected_repo_path(audit_path):
         audit_path.parent.mkdir(parents=True, exist_ok=True)

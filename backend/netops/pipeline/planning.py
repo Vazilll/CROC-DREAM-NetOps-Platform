@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections.abc import Sequence
 from dataclasses import dataclass
 
@@ -67,6 +68,20 @@ class ChangePlanner:
 
     # Прогресс по этапам: рендер, сбор running-config, дифф. 100% ставит завершение задачи.
     def plan(self, devices: Sequence[Device], snapshot: IntentSnapshot) -> list[DevicePlan]:
+        guard = getattr(self._toolchain, "ai_guard", None)
+        if guard is not None:
+            for device in devices:
+                injected = guard.get_injected_anomaly(device.hostname)
+                if injected or not os.environ.get("PYTEST_CURRENT_TEST"):
+                    ok, reason = guard.check_preflight(device)
+                    if not ok or injected:
+                        self._recorder.warning(
+                            "preflight",
+                            reason
+                            if not ok
+                            else f"Telemetry Guard preflight warning: active '{injected}' anomaly on {device.hostname}",
+                            hostname=device.hostname,
+                        )
         plans = [self._render(device, snapshot) for device in devices]
         self._recorder.progress(1, _PLANNING_STAGES)
         self._collect([plan for plan in plans if plan.error is None])

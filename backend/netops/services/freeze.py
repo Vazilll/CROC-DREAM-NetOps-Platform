@@ -18,6 +18,7 @@ _local_freeze_state: dict[str, Any] = {
     "reason": "Штатная эксплуатация (заморозка выключена)",
     "timestamp": None,
     "user": None,
+    "updated_by": None,
 }
 
 
@@ -52,11 +53,13 @@ def set_factory_freeze(
     default_reason = (
         "Заморозка активирована оператором" if frozen else "Штатная эксплуатация"
     )
+    actor = user or "operator"
     state = {
         "frozen": frozen,
         "reason": reason or default_reason,
         "timestamp": datetime.now(UTC).isoformat(),
-        "user": user or "operator",
+        "user": actor,
+        "updated_by": actor,
     }
     _local_freeze_state.update(state)
 
@@ -73,4 +76,9 @@ def set_factory_freeze(
     else:
         logger.info("Factory freeze deactivated by %s", user)
     return dict(state)
+
+
+def set_freeze_state(frozen: bool, reason: str = "", by: str = "admin") -> dict[str, Any]:
+    return set_factory_freeze(frozen=frozen, reason=reason, user=by)
+
 
