@@ -1563,6 +1563,75 @@ export class NetOpsApiClient {
     localStorage.setItem('netops_user_role', role);
     this.setToken(ROLE_TOKENS[role]);
   }
+
+  async getBootstrapStatus(): Promise<any> {
+    return this.request<any>('/system/bootstrap/status');
+  }
+
+  async claimOwnerBootstrap(data: {
+    cluster_name: string;
+    owner_username?: string;
+    recovery_key?: string;
+  }): Promise<{
+    status: string;
+    username: string;
+    role: UserRole;
+    token: string;
+    recovery_key: string;
+    bound_client_id: string;
+    bound_ip: string;
+    cluster_name: string;
+  }> {
+    return this.request('/system/bootstrap/claim-owner', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async recoverOwnerAccess(data: {
+    action: 'request_telegram_code' | 'verify';
+    recovery_key?: string;
+    telegram_code?: string;
+  }): Promise<any> {
+    return this.request('/system/bootstrap/recover-owner', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async configureBootstrapLayers(data: {
+    cluster_name?: string;
+    github_repo_url?: string;
+    github_pat?: string;
+    webhook_public_url?: string;
+    telegram_bot_token?: string;
+    telegram_chat_id?: string;
+    groq_api_key?: string;
+    gemini_api_key?: string;
+    ollama_url?: string;
+    bootstrap_completed?: boolean;
+  }): Promise<any> {
+    return this.request('/system/bootstrap/configure', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async discoverAndAttachServer(data: {
+    mode: 'ssh' | 'offline';
+    host?: string;
+    port?: number;
+    username?: string;
+    password?: string;
+    switch_password_huawei?: string;
+    switch_password_arista?: string;
+    switch_password_cisco?: string;
+  }): Promise<any> {
+    return this.request('/system/bootstrap/discover-server', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
 }
 
 // ============================================================================

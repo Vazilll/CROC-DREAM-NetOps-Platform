@@ -686,6 +686,9 @@ class MetricsBot:
                     "/verify <КОД>\n"
                     "Код создаётся в веб-интерфейсе CROC DREAM NetOps -> «Доступ и Безопасность» -> «Код верификации TG»."
                 )
+            is_recover = explicit_tok == "recover_owner"
+            if explicit_tok in ("claim_owner", "recover_owner"):
+                explicit_tok = None
             user, token, role_badge = bind_telegram_chat_user(
                 session,
                 chat_id or 0,
@@ -694,6 +697,19 @@ class MetricsBot:
                 explicit_token=explicit_tok,
                 settings=self._settings,
             )
+            if is_recover:
+                user.bound_client_id = None
+                user.bound_ip = None
+                user.bound_user_agent = None
+                user.bound_at = None
+                session.commit()
+            if self._settings is not None and chat_id:
+                self._settings.save_runtime_overlay(
+                    {
+                        "telegram_chat_id": str(chat_id),
+                        "telegram_verified_username": (from_user or {}).get("username") or user.username,
+                    }
+                )
             mode = (
                 "ONLINE (Scrapli SSH -> 5.228.243.54:2211..2222)"
                 if (self._settings and self._settings.network_driver == "scrapli")
@@ -704,8 +720,14 @@ class MetricsBot:
                 if user.expires_at
                 else "НАВСЕГДА (бессрочный)"
             )
+            recover_banner = (
+                "🔓 Старая привязка ПК сброшена! Перейдите по ссылке ниже с нового компьютера, чтобы привязать его:\n"
+                if is_recover
+                else ""
+            )
             return (
                 f"CROC DREAM NetOps Bot (@Croc_Dream_bot) — Верификация подтверждена\n"
+                f"{recover_banner}"
                 f"Контур стенда: {mode}\n"
                 f"Участник: ID #{user.id} {user.username} [{role_badge.upper()}]\n"
                 f"Telegram ID: {chat_id} (@{user.telegram_username or 'verified'})\n"
@@ -715,6 +737,26 @@ class MetricsBot:
                 f"Веб-панель (публичная): http://5.228.243.54:5173/?token={token}\n"
                 f"Веб-панель (локальная): http://127.0.0.1:5173/?token={token}\n\n"
                 + _overview_text(session, self._settings)
+            )
+        if command == "/recover":
+            user, token, role_badge = bind_telegram_chat_user(
+                session,
+                chat_id or 0,
+                tg_username=(from_user or {}).get("username"),
+                first_name=(from_user or {}).get("first_name"),
+                settings=self._settings,
+            )
+            user.bound_client_id = None
+            user.bound_ip = None
+            user.bound_user_agent = None
+            user.bound_at = None
+            session.commit()
+            return (
+                f"🔓 Привязка старого ПК для {user.username} [{role_badge.upper()}] успешно сброшена!\n"
+                f"Откройте пульт на новом устройстве по вашей персональной ссылке:\n"
+                f"• Публичная: http://5.228.243.54:5173/?token={token}\n"
+                f"• Локальная: http://127.0.0.1:5173/?token={token}\n"
+                f"• Резервный ключ: {token}"
             )
         if command == "/overview":
             return _overview_text(session, self._settings)
@@ -1428,8 +1470,9 @@ def main() -> None:
     settings = get_settings()
     if settings.telegram_bot_token is None:
         logger.warning("Бот простаивает: задайте NETOPS_TELEGRAM_BOT_TOKEN")
-        while True:
+        while settings.telegram_bot_token is None:
             time.sleep(IDLE_SECONDS)
+            settings.apply_runtime_overlay()
 
     bot = build_bot(settings, settings.telegram_bot_token.get_secret_value())
     bot.catch_up()

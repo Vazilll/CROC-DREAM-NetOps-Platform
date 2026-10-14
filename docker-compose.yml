@@ -20,7 +20,7 @@ x-backend: &backend
     NETOPS_TEMPLATES_PATH: /data/templates
     NETOPS_OFFLINE_LAB_PATH: /data/lab
   volumes:
-    - ${INTENT_REPO:-./intent}:/data/intent:ro
+    - ${INTENT_REPO:-./intent}:/data/intent
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
   restart: unless-stopped

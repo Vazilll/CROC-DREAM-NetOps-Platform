@@ -301,3 +301,62 @@ def test_token_ttl_and_verification_code_generation(
     assert forever_res.json()["expires_at"] is None
     assert client.get("/api/v1/auth/me", headers=_bearer(token)).status_code == 200
 
+
+def test_matryoshka_bootstrap_and_owner_pc_recovery(
+    client: TestClient,
+) -> None:
+    # Step 0: Check public bootstrap status before initialization
+    st0 = client.get("/api/v1/system/bootstrap/status", headers={"X-Client-Id": "pc-owner-1"})
+    assert st0.status_code == 200
+    assert st0.json()["initialized"] is False
+
+    # Step 1: Owner claims cluster on PC #1
+    claim = client.post(
+        "/api/v1/system/bootstrap/claim-owner",
+        json={"cluster_name": "CROC-DOCKER-CLUSTER-1"},
+        headers={"X-Client-Id": "pc-owner-1"},
+    )
+    assert claim.status_code == 200
+    claim_data = claim.json()
+    assert claim_data["status"] == "claimed"
+    assert claim_data["bound_client_id"] == "pc-owner-1"
+    recovery_key = claim_data["recovery_key"]
+    assert recovery_key.startswith("crk_owner_")
+
+    # Step 2 & 3: Owner configures GitHub, Telegram & marks bootstrap_completed
+    cfg = client.post(
+        "/api/v1/system/bootstrap/configure",
+        json={
+            "cluster_name": "CROC-DOCKER-CLUSTER-1",
+            "github_repo_url": "https://github.com/Vazilll/CROC-DREAM-NetOps-Platform",
+            "bootstrap_completed": True,
+        },
+    )
+    assert cfg.status_code == 200
+
+    # Step 4: Discover / unpack server in offline mode
+    disc = client.post(
+        "/api/v1/system/bootstrap/discover-server",
+        json={"mode": "offline"},
+    )
+    assert disc.status_code == 200
+    assert disc.json()["synced_total"] == 4
+
+    # Stranger on PC #2 tries to claim owner without recovery key -> 403 Forbidden
+    stranger = client.post(
+        "/api/v1/system/bootstrap/claim-owner",
+        json={"cluster_name": "HACKED"},
+        headers={"X-Client-Id": "pc-stranger-99"},
+    )
+    assert stranger.status_code == 403
+
+    # Owner moves to PC #2 (old PC lost) and recovers using Master Recovery Key
+    recovered = client.post(
+        "/api/v1/system/bootstrap/recover-owner",
+        json={"action": "verify", "recovery_key": recovery_key},
+        headers={"X-Client-Id": "pc-owner-new-2"},
+    )
+    assert recovered.status_code == 200
+    assert recovered.json()["bound_client_id"] == "pc-owner-new-2"
+
+

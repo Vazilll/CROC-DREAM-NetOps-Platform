@@ -177,7 +177,83 @@ class Settings(BaseSettings):
                         )
             except Exception:
                 pass
+        self.apply_runtime_overlay()
         return self
+
+    def apply_runtime_overlay(self) -> dict[str, object]:
+        import json  # noqa: PLC0415
+
+        rt_file = self.offline_lab_path / "runtime_settings.json"
+        if not rt_file.is_file():
+            return {}
+        try:
+            data = json.loads(rt_file.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                return {}
+            if data.get("github_repo_url"):
+                self.github_repo_url = str(data["github_repo_url"])
+            if data.get("network_driver") in ("offline", "scrapli"):
+                self.network_driver = data["network_driver"]
+            if data.get("telegram_bot_token"):
+                self.telegram_bot_token = SecretStr(str(data["telegram_bot_token"]))
+            if data.get("telegram_chat_id"):
+                self.telegram_chat_id = str(data["telegram_chat_id"])
+                try:
+                    cid = int(self.telegram_chat_id.strip())
+                    if cid not in self.telegram_chat_ids:
+                        self.telegram_chat_ids.append(cid)
+                except ValueError:
+                    pass
+            if isinstance(data.get("telegram_chat_ids"), list):
+                for raw_cid in data["telegram_chat_ids"]:
+                    try:
+                        cid = int(str(raw_cid).strip())
+                        if cid not in self.telegram_chat_ids:
+                            self.telegram_chat_ids.append(cid)
+                    except ValueError:
+                        pass
+            if data.get("clab_host"):
+                self.clab_host = str(data["clab_host"])
+            if data.get("clab_port"):
+                try:
+                    self.clab_port = int(data["clab_port"])
+                except ValueError:
+                    pass
+            if data.get("clab_user"):
+                self.clab_user = str(data["clab_user"])
+            if data.get("clab_password"):
+                self.clab_password = SecretStr(str(data["clab_password"]))
+            if data.get("groq_api_key"):
+                self.groq_api_key = SecretStr(str(data["groq_api_key"]))
+            if data.get("gemini_api_key"):
+                self.gemini_api_key = SecretStr(str(data["gemini_api_key"]))
+            if data.get("ollama_url") is not None:
+                self.ollama_url = str(data["ollama_url"])
+            return data
+        except Exception:
+            return {}
+
+    def save_runtime_overlay(self, updates: dict[str, object]) -> dict[str, object]:
+        import json  # noqa: PLC0415
+
+        rt_file = self.offline_lab_path / "runtime_settings.json"
+        rt_file.parent.mkdir(parents=True, exist_ok=True)
+        existing: dict[str, object] = {}
+        if rt_file.is_file():
+            try:
+                loaded = json.loads(rt_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, dict):
+                    existing = loaded
+            except Exception:
+                existing = {}
+        for k, v in updates.items():
+            if v is not None:
+                existing[k] = v
+        rt_file.write_text(
+            json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        self.apply_runtime_overlay()
+        return existing
 
     def authenticate(self, token: str) -> ApiPrincipal | None:
         candidate = token.encode()

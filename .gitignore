@@ -45,5 +45,6 @@ backend/lab/
 *telegram_subscribers.json
 *user_tokens.json
 *custom_auth_profiles.json
+*runtime_settings.json
 lab/running/emergency_audit.jsonl
 lab/running/freeze_state.json
