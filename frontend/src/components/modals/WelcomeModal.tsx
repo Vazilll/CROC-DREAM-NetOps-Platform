@@ -660,10 +660,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       const arr = Array.isArray(parsed) ? parsed : [parsed];
       return arr
         .filter((x) => x && typeof x === 'object' && (x.base_url || x.model || x.api_key))
-        .map((x, idx) => ({
-          name: String(x.name || x.provider || `LLM-${idx + 1}`),
-          base_url: String(x.base_url || 'https://api.groq.com/openai/v1'),
-          model: String(x.model || 'qwen/qwen3.8-27b'),
+        .map((x) => ({
+          name: String(x.name || x.provider || ''),
+          base_url: String(x.base_url || ''),
+          model: String(x.model || ''),
           api_key: String(x.api_key || x.token || ''),
           timeout_seconds: Number(x.timeout_seconds || 2.0),
         }));
@@ -682,7 +682,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         out.push({
           name: 'Groq',
           base_url: kv.NETOPS_GROQ_BASE_URL || 'https://api.groq.com/openai/v1',
-          model: kv.NETOPS_GROQ_MODEL || 'qwen/qwen3.8-27b',
+          model: kv.NETOPS_GROQ_MODEL || '',
           api_key: kv.NETOPS_GROQ_API_KEY || kv.GROQ_API_KEY,
           timeout_seconds: Number(kv.NETOPS_GROQ_TIMEOUT_SECONDS || 2.0),
         });
@@ -1380,9 +1380,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           setLlmCascade((prev) => [
                             ...prev,
                             {
-                              name: `LLM-${prev.length + 1}`,
-                              base_url: 'https://api.groq.com/openai/v1',
-                              model: 'qwen/qwen3.8-27b',
+                              name: '',
+                              base_url: '',
+                              model: '',
                               api_key: '',
                               timeout_seconds: 2.0,
                             },
@@ -1402,7 +1402,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         value={llmConfigRaw}
                         onChange={(e) => setLlmConfigRaw(e.target.value)}
                         placeholder={
-                          '{\n  "name": "Groq",\n  "base_url": "https://api.groq.com/openai/v1",\n  "model": "qwen/qwen3.8-27b",\n  "api_key": "gsk_..."\n}'
+                          '{\n  "name": "",\n  "model": "",\n  "base_url": "",\n  "api_key": ""\n}'
                         }
                         className={`${inputClass} leading-relaxed resize-y`}
                       />
@@ -1419,27 +1419,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   )}
 
                   {llmCascade.length > 0 && (
-                    <div className="space-y-2 max-h-44 overflow-y-auto pr-1">
+                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
                       {llmCascade.map((item, idx) => (
                         <div
                           key={idx}
-                          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] p-2 space-y-1.5"
+                          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] p-1.5 flex items-center gap-1.5"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[10px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                              #{idx + 1} · {item.name} ({item.model})
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setLlmCascade((prev) => prev.filter((_, i) => i !== idx))
-                              }
-                              className="text-[10px] font-mono text-rose-500 hover:underline cursor-pointer"
-                            >
-                              ×
-                            </button>
-                          </div>
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1">
                             <input
                               type="text"
                               value={item.name}
@@ -1450,7 +1436,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Имя"
+                              placeholder="Провайдер"
                               className={inputClass}
                             />
                             <input
@@ -1493,6 +1479,16 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                               className={inputClass}
                             />
                           </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLlmCascade((prev) => prev.filter((_, i) => i !== idx))
+                            }
+                            className="px-1.5 py-1 text-xs font-mono text-rose-500 hover:text-rose-400 cursor-pointer shrink-0"
+                            title="Удалить"
+                          >
+                            ×
+                          </button>
                         </div>
                       ))}
                     </div>
