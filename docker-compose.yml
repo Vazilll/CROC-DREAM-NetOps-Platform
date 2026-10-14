@@ -86,6 +86,15 @@ services:
     <<: *backend
     command: python -m netops.telemetry.bot
 
+  snmp-exporter:
+    image: prom/snmp-exporter:v0.26.0
+    ports:
+      - "9116:9116"
+    networks:
+      - default
+      - clab_mgmt
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v3.15.0
     command:
@@ -95,10 +104,11 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    networks:
+      - default
     restart: unless-stopped
     depends_on:
-      api:
-        condition: service_healthy
+      - snmp-exporter
 
   # nginx отдаёт собранный интерфейс и проксирует /api на бэкенд.
   frontend:
@@ -110,8 +120,14 @@ services:
       api:
         condition: service_healthy
 
-  # Сюда добавится Grafana поверх Prometheus.
+  # Сюда добавится Grafana поверх Prometheus. 
 
 volumes:
   postgres-data:
   prometheus-data:
+
+networks:
+  default:
+  clab_mgmt:
+    external: true
+    name: clab_mgmt
