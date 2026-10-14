@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from netops.enums import DeviceRole, DeviceStatus, Platform
+from netops.enums import DeviceRole, DeviceStatus, ManagementMode, Platform
 from netops.errors import ConflictError, NotFoundError
 from netops.intent.models import Inventory
 from netops.models import Device
@@ -59,6 +59,12 @@ class DeviceService:
         self._commit(f"Device {device.hostname}")
         return device
 
+    def set_management_mode(self, device_id: int, mode: ManagementMode) -> Device:
+        device = self.get(device_id)
+        device.management_mode = mode
+        self._commit("Device")
+        return device
+
     def delete(self, device_id: int) -> None:
         device = self.get(device_id)
         if device.status is DeviceStatus.IN_PROGRESS:
@@ -73,7 +79,8 @@ class DeviceService:
             values = _column_values(spec.model_dump(include={"hostname", *_INVENTORY_FIELDS}))
             device = existing.get(spec.hostname)
             if device is None:
-                self._session.add(Device(**values))
+                # Устройство из inventory.yaml сразу управляемое: оно объявлено в источнике правды.
+                self._session.add(Device(**values, management_mode=ManagementMode.MANAGED))
                 result.created.append(spec.hostname)
                 continue
             changed = False

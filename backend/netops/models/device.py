@@ -6,7 +6,7 @@ from sqlalchemy import String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from netops.db import Base, enum_type, utcnow
-from netops.enums import DeviceRole, DeviceStatus, Platform
+from netops.enums import DeviceRole, DeviceStatus, ManagementMode, Platform
 
 
 class Device(Base):
@@ -20,6 +20,14 @@ class Device(Base):
     platform: Mapped[Platform] = mapped_column(enum_type(Platform), index=True)
     role: Mapped[DeviceRole] = mapped_column(enum_type(DeviceRole), index=True)
     auth_profile: Mapped[str] = mapped_column(String(64))
+    management_mode: Mapped[ManagementMode] = mapped_column(
+        enum_type(ManagementMode),
+        default=ManagementMode.MONITORING_ONLY,
+        server_default=ManagementMode.MONITORING_ONLY.value,
+    )
+    # Промежуточный SSH-хост и данные, снятые при проверке устройства: только справочно.
+    proxy_jump: Mapped[str | None] = mapped_column(String(255))
+    hardware_specs: Mapped[str | None] = mapped_column(String(2048))
     status: Mapped[DeviceStatus] = mapped_column(
         enum_type(DeviceStatus),
         default=DeviceStatus.UNKNOWN,

@@ -30,7 +30,8 @@ os.environ.setdefault(
 )
 os.environ.setdefault(
     "NETOPS_API_TOKENS",
-    '{"dev-admin-token": {"username": "admin", "role": "admin"}, '
+    '{"dev-owner-token": {"username": "owner", "role": "admin"}, '
+    '"dev-admin-token": {"username": "admin", "role": "admin"}, '
     '"dev-operator-token": {"username": "operator", "role": "operator"}, '
     '"dev-viewer-token": {"username": "viewer", "role": "viewer"}}',
 )

@@ -5,7 +5,7 @@ from ipaddress import IPv4Address
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from netops.enums import DeviceRole, DeviceStatus, Platform
+from netops.enums import DeviceRole, DeviceStatus, ManagementMode, Platform
 from netops.intent.models import DeviceIntent, Hostname, Identifier
 from netops.schemas.common import PartialUpdate
 from netops.schemas.intent import IntentIssueRead
@@ -20,6 +20,9 @@ class DeviceCreate(BaseModel):
     platform: Platform
     role: DeviceRole
     auth_profile: Identifier = Field(examples=["lab"])
+    management_mode: ManagementMode = ManagementMode.MONITORING_ONLY
+    proxy_jump: str | None = Field(default=None, max_length=255)
+    hardware_specs: str | None = Field(default=None, max_length=2048)
 
 
 class DeviceUpdate(PartialUpdate):
@@ -28,6 +31,9 @@ class DeviceUpdate(PartialUpdate):
     management_port: int | None = Field(default=None, ge=1, le=65535)
     platform: Platform | None = None
     role: DeviceRole | None = None
+    management_mode: ManagementMode | None = None
+    proxy_jump: str | None = Field(default=None, max_length=255)
+    hardware_specs: str | None = Field(default=None, max_length=2048)
     auth_profile: Identifier | None = None
 
 
@@ -41,6 +47,9 @@ class DeviceRead(BaseModel):
     platform: Platform
     role: DeviceRole
     auth_profile: str
+    management_mode: ManagementMode
+    proxy_jump: str | None
+    hardware_specs: str | None
     status: DeviceStatus
     last_checked_at: datetime | None
     created_at: datetime
@@ -50,6 +59,23 @@ class DeviceRead(BaseModel):
 class DeviceDetail(DeviceRead):
     intent: DeviceIntent | None = None
     intent_issues: list[IntentIssueRead] = Field(default_factory=list)
+
+
+# Честная проверка: TCP-доступность и SSH-баннер. Платформу подсказываем только если она
+# однозначно видна в баннере, остальное админ выбирает сам.
+class DeviceProbeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    management_ip: str = Field(examples=["172.20.20.11"])
+    management_port: int = Field(default=22, ge=1, le=65535)
+
+
+class DeviceProbeResult(BaseModel):
+    reachable: bool
+    message: str
+    banner: str | None = None
+    detected_platform: Platform | None = None
+    os_version: str | None = None
 
 
 class InventorySyncResult(BaseModel):
