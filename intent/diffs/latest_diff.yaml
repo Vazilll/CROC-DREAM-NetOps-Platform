@@ -1,0 +1,17 @@
+# CROC DREAM NetOps — Auto Diff Snapshot
+job_id: f92b03a8-75fb-4070-879e-3479674a1e79
+job_type: DRIFT_SCAN
+timestamp_epoch: 1792004516
+devices:
+  - hostname: leaf-1.croc.lab
+    in_sync: true
+    remediation_lines: 0
+  - hostname: leaf-2.croc.lab
+    in_sync: true
+    remediation_lines: 0
+  - hostname: spine-1.croc.lab
+    in_sync: true
+    remediation_lines: 0
+  - hostname: spine-2.croc.lab
+    in_sync: true
+    remediation_lines: 0
