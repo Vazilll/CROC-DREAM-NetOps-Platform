@@ -102,8 +102,8 @@ services:
       - --storage.tsdb.retention.time=15d
     ports: ["${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+      - ./monitoring:/etc/prometheus:ro
     networks:
       - default
     restart: unless-stopped

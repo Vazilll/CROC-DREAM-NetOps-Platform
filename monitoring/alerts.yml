@@ -1,0 +1,32 @@
+groups:
+  - name: fabric_triggers
+    rules:
+      # Коммутатор целиком перестал отвечать по SNMP
+      - alert: DeviceDown
+        expr: up{job="snmp_fabric"} == 0
+        for: 20s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Коммутатор {{ $labels.hostname }} недоступен"
+          description: "Prometheus потерял связь с {{ $labels.instance }} (SNMP timeout > 20s)"
+
+      # Упал межузловой линк (интерфейс в статусе DOWN)
+      - alert: FabricLinkDown
+        expr: ifOperStatus{ifDescr=~"GigabitEthernet[23]|Ethernet[12]|GE1/0/[019]"} == 2
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Упал порт {{ $labels.ifDescr }} на {{ $labels.hostname }}"
+          description: "Интерфейс {{ $labels.ifDescr }} перешел в состояние DOWN (ifOperStatus=2)"
+
+      # Ошибки на порту (drops / discards)
+      - alert: HighInterfaceDiscards
+        expr: rate(ifInDiscards[1m]) > 5
+        for: 30s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Сброс пакетов на {{ $labels.hostname }} ({{ $labels.ifDescr }})"
+          description: "Дропы пакетов на порту превышают 5 пакетов/сек"
