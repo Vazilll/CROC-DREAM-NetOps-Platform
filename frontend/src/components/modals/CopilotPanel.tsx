@@ -9,9 +9,9 @@ import {
   ShieldCheck,
   ExternalLink,
 } from 'lucide-react';
-import { api, type CopilotAction, type CopilotReplyWithAction } from '../api';
+import { api, type CopilotAction, type CopilotReplyWithAction } from '../../api';
 export type { CopilotAction, CopilotReplyWithAction };
-import { translations, type Locale } from '../i18n';
+import { translations, type Locale } from '../../i18n';
 
 interface Message {
   role: 'user' | 'ai';

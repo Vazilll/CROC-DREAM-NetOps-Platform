@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emergency", tags=["emergency"])
 
-AUDIT_LOG_FILE = Path("lab/running/emergency_audit.jsonl")
+AUDIT_LOG_FILE = Path(__file__).resolve().parents[4] / "lab" / "running" / "emergency_audit.jsonl"
 
 
 def record_audit(

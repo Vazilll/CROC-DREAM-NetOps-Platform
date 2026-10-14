@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Command, Shield } from 'lucide-react';
-import { type Locale } from '../i18n';
+import { type Locale } from '../../i18n';
 
 interface ShortcutsModalProps {
   isOpen: boolean;

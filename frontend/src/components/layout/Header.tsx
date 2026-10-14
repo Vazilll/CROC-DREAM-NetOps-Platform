@@ -9,8 +9,8 @@ import {
   Share2,
   HelpCircle,
 } from 'lucide-react';
-import type { UserRole } from '../api';
-import { translations, type Locale } from '../i18n';
+import type { UserRole } from '../../api';
+import { translations, type Locale } from '../../i18n';
 
 export type AppTheme = 'dark' | 'light';
 

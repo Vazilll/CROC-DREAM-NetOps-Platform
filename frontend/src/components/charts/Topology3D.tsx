@@ -8,7 +8,7 @@ import {
   Minimize2,
   ExternalLink,
 } from 'lucide-react';
-import type { Device } from '../api';
+import type { Device } from '../../api';
 
 interface Topology3DProps {
   devices: Device[];

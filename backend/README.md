@@ -19,12 +19,113 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Drift Engine: Celery Beat каждые 15 минут, классификация `IN_SYNC / DRIFT_DETECTED / UNREACHABLE`, устранение дрейфа | `netops/pipeline/pipelines.py`, `netops/services/jobs.py` |
 | Нормализация конфигов по правилам Ани: сравниваются только управляемые секции, служебные строки и хэши паролей отбрасываются | `netops/network/normalization.py`, `netops/network/diff_filters.yaml` |
 | Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
-| RBAC: viewer / operator / admin, управление пользователями и токенами | `netops/api/deps.py`, `netops/services/users.py` |
-| Общий docker-compose: бэкенд, PostgreSQL, Redis, миграции, воркер, Beat | `../docker-compose.yml` |
+| Живой SSH-драйвер (`Scrapli` + `Paramiko` fallback) и файловый эмулятор (`OfflineLab`) | `netops/network/scrapli_driver.py`, `netops/network/offline.py` |
+| Предиктивная аналитика временных рядов (`TimesFM 3.0`), `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/forecast.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
+| Аварийный пульт (`Emergency Hub`: прямой CLI, экстренный патч, Soft/Hard Reset, `Factory Freeze`) | `netops/api/routes/emergency.py`, `netops/services/freeze.py` |
+| 4-шаговый визард инициализации «Матрёшка», GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/notifier.py` |
+| RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами и областями доступа (`allowed_scopes`) | `netops/api/deps.py`, `netops/services/users.py` |
+| Встроенный MCP-сервер (`FastMCP`) для управления фабрикой из ИИ-агентов | `netops/mcp_server.py` |
+| Общий docker-compose: бэкенд, фронтенд, PostgreSQL, Redis, миграции, воркер, Beat, Prometheus, Telegram-бот | `../docker-compose.yml` |
 | CI/CD: линтеры и тесты, сборка образа, smoke-тест всего стека, публикация образа в GHCR | `../.github/workflows/ci-cd.yml`, `scripts/smoke_stack.py` |
 | OpenAPI/Swagger | `/docs`, `/openapi.json` |
 
+---
+
+## Структура каталогов и модулей `backend/`
+
+Ниже приведена полная карта серверных пакетов с объяснением ответственности каждого модуля:
+
+```
+backend/
+├── run_local.py                     # Автономный лаунчер для локальной разработки (SQLite + Eager Celery + Seed)
+├── pyproject.toml                   # Зависимости проекта и настройки ruff / black / mypy / pytest
+├── alembic.ini                      # Конфигурация миграций БД
+├── migrations/                      # Версии схемы базы данных Alembic
+├── scripts/
+│   └── smoke_stack.py               # Сквозной smoke-тест Docker-стека
+├── tools/
+│   └── timesfm_server.py            # Микросервер инференса временных рядов TimesFM
+├── tests/                           # 300+ модульных и интеграционных тестов (unit / integration / api)
+└── netops/
+    ├── main.py                      # Точка входа ASGI (uvicorn netops.main:app)
+    ├── settings.py                  # Типизированная конфигурация Pydantic Settings (NETOPS_*)
+    ├── enums.py                     # Перечисления домена (Platform, DeviceRole, DeviceStatus, JobType, JobStatus, UserRole)
+    ├── errors.py                    # Иерархия доменных исключений
+    ├── security.py                  # Хэширование токенов (SHA-256) и криптографические утилиты
+    ├── toolchain.py                 # Фабрика сетевого драйвера: собирает OfflineLab или Scrapli по NETOPS_NETWORK_DRIVER
+    ├── mcp_server.py                # MCP-сервер (Model Context Protocol) для подключения внешних ИИ-агентов
+    ├── api/                         # Слой HTTP / WebSocket контроллеров FastAPI
+    │   ├── app.py                   # Фабрика create_app(), CORS, роутеры, /healthz, /readyz, /metrics
+    │   ├── deps.py                  # DI-контейнер, аутентификация Bearer/Session, RBAC-гарды (Viewer, Operator, Admin)
+    │   ├── errors.py                # Глобальные обработчики исключений → JSON (404, 409, 422, 503)
+    │   └── routes/
+    │       ├── devices.py           # CRUD узлов, /devices/probe, телеметрия, снапшоты, quick-action, reset-golden
+    │       ├── jobs.py              # Запуск dry-run и deploy, лог шагов, вычисление diff
+    │       ├── drift.py             # Внеочередной скан дрейфа, отчёт и авто-ремедиация (remediate)
+    │       ├── insights.py          # Прогноз TimesFM (/forecast), AI Guard (/ai-guard), Chaos Lab (/chaos), Copilot (/copilot), /jobs/{id}/explain
+    │       ├── emergency.py         # Аварийная консоль (/emergency/command, /patch, /soft-reset, /hard-reset, /freeze, /audit)
+    │       ├── system.py            # Визард «Матрёшка» (/system/bootstrap/*), GitHub SoT (/git/*), WebSocket (/ws/ticket, /ws/stream)
+    │       └── users.py             # Управление пользователями, ролями, TTL-токенами и /auth/me
+    ├── db/                          # Слой подключения к СУБД
+    │   ├── base.py                  # Декларативная база SQLAlchemy 2.0
+    │   └── session.py               # Движок и фабрика транзакционных сессий
+    ├── models/                      # ORM-таблицы базы данных
+    │   ├── device.py                # Устройство фабрики (Device)
+    │   ├── job.py                   # Задача (Job), цели (JobTarget) и лог шагов (JobStepLog)
+    │   ├── snapshot.py              # Снимок конфигурации (ConfigSnapshot)
+    │   ├── drift.py                 # Запись обнаруженного дрейфа (DriftRecord)
+    │   ├── metric.py                # Исторические метрики телеметрии (MetricSample)
+    │   └── user.py                  # Пользователь, роль, скоупы и срок действия токена (User)
+    ├── schemas/                     # Контракты запросов и ответов Pydantic v2
+    │   ├── common.py, devices.py, drift.py, intent.py, jobs.py, users.py
+    ├── intent/                      # Работа с Git Source of Truth и валидация YAML
+    │   ├── models.py                # Строгие схемы инвентаря, интерфейсов, BGP и ACL (Pydantic)
+    │   ├── repository.py            # Чтение и запись файлов в каталоге intent/
+    │   ├── lint.py                  # Межузловая проверка фабрики (пересечения IP/подсетей, дубли Router ID и ASN)
+    │   └── netbox.py                # Экспорт/импорт топологии в формат NetBox
+    ├── network/                     # Сетевые драйверы, рендеринг шаблонов и нормализация CLI
+    │   ├── base.py                  # Протоколы ConfigCollector, ConfigDeployer, HealthProbe
+    │   ├── scrapli_driver.py        # Живой SSH-драйвер для Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex (Scrapli + Paramiko)
+    │   ├── offline.py               # Файловый эмулятор сети (OfflineLab) поверх каталога lab/running/
+    │   ├── rendering.py             # Генератор целевых конфигов из шаблонов Jinja2 (templates/<platform>/*.j2)
+    │   ├── normalization.py         # Очистка шума и выделение управляемых секций перед сравнением
+    │   ├── diff_filters.yaml        # Декларативные правила фильтрации CLI по вендорам
+    │   ├── diff.py                  # Иерархический расчёт патчей наката и отката (hier_config)
+    │   └── health.py                # Post-check верификатор (BGP Established, префиксы, порты up/up, ping loss ≤ 20%)
+    ├── pipeline/                    # Оркестрация транзакционных пайплайнов
+    │   ├── runner.py                # Исполнитель фоновых задач с перехватом ошибок и таймаутов
+    │   ├── planning.py              # Логика DRY_RUN (lint → render → collect → normalize → diff)
+    │   ├── deployment.py            # Логика DEPLOY (pre-check → apply commit confirmed → post-check → confirm/rollback)
+    │   ├── pipelines.py             # Логика DRIFT_SCAN и DRIFT_REMEDIATE
+    │   └── recorder.py              # Запись прогресса и шагов выполнения в БД
+    ├── services/                    # Прикладные доменные сервисы
+    │   ├── devices.py, jobs.py, drift.py, users.py
+    │   ├── forecast.py              # Расчёт прогнозов временных рядов TimesFM 3.0 (квантили p10/p50/p90 и ETA отказа)
+    │   ├── ai_guard.py              # Эвристический и ИИ-анализ безопасности патча перед деплоем (Pre-Flight Guard)
+    │   ├── llm.py                   # Интеграция с LLM (OpenRouter / Gemini / локальная эвристика) для объяснения diff и Copilot
+    │   ├── freeze.py                # Глобальный рубильник заморозки изменений (Factory Freeze в Redis / памяти)
+    │   ├── telemetry.py             # Парсинг живых CLI-метрик CPU/RAM/Uplink по SSH и кэширование в lab/running/
+    │   └── notifier.py              # Диспетчер уведомлений в Telegram, реестр доступов и синхронизация токенов
+    ├── telemetry/                   # Фоновый сбор метрик Prometheus и Telegram-бот
+    │   ├── collector.py, metrics.py, bot.py
+    └── worker/                      # Конфигурация Celery и периодических задач Beat
+        ├── celery_app.py
+        └── tasks.py
+```
+
+---
+
 ## Быстрый старт
+
+### Вариант А — Автономный локальный запуск одной командой (без Docker и Redis)
+
+Для быстрой локальной разработки или демонстрации на ноутбуке предусмотрен скрипт [`run_local.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/run_local.py). Он автоматически поднимает SQLite-базу, включает синхронный режим Celery (`task_always_eager=True`), засевает 4 устройства CLOS-фабрики и запускает сервер на порту `8001`:
+
+```bash
+backend/.venv/bin/python backend/run_local.py
+```
+
+### Вариант Б — Полный продакшн-стек (PostgreSQL + Redis + Celery)
 
 Нужны Python 3.11+ и [uv](https://docs.astral.sh/uv/).
 
@@ -52,13 +153,9 @@ docker compose up --build
 При старте API применяет миграции (`alembic upgrade head`) и запускает сервер; воркер и Beat
 стартуют, когда API стал `healthy`. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
 офлайн-стендом можно переопределить переменными `API_PORT`, `POSTGRES_PORT`, `INTENT_REPO`,
-`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`). Фронтенд добавится туда же
-позже.
+`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`).
 
-Поднимаются семь сервисов: `postgres`, `redis`, `api`, `worker`, `beat`, `prometheus` и
-`telegram-bot`. Prometheus — на <http://localhost:9090>, бот без токена простаивает.
-
-Swagger: <http://localhost:8000/docs>. Авторизация в API — заголовок `Authorization: Bearer <token>`.
+Swagger: <http://localhost:8000/docs> (или <http://127.0.0.1:8001/docs> при запуске через `run_local.py`). Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
 ### Если в базе нет таблиц
 
@@ -72,17 +169,10 @@ docker compose exec api alembic upgrade head       # применить мигр
 docker compose exec postgres psql -U netops -d netops -c '\dt'
 ```
 
-Если стек поднимали до этого изменения, в нём остался старый контейнер `migrate` в статусе
-`Exited`; его убирает `docker compose up -d --build --remove-orphans`.
-
-Postgres считается готовым только когда принимает TCP-соединения к базе `netops`, а миграции
-дополнительно ждут базу до минуты: при первом старте контейнер Postgres сначала инициализируется
-и какое-то время слушает только unix-сокет.
-
 ## Проверки
 
 ```bash
-uv run pytest --cov=netops   # 329 тестов, SQLite, без Redis и сети
+uv run pytest --cov=netops   # все модульные и интеграционные тесты, SQLite, без Redis и сети
 uv run ruff check .
 uv run black --check .
 uv run mypy                  # strict
@@ -93,8 +183,7 @@ uv run mypy                  # strict
 `uv run alembic revision --autogenerate -m "..."`, затем проверить файл руками.
 
 Тесты `tests/integration/test_repo_data.py` проверяют данные стенда в корне репозитория: intent
-проходит линт, шаблоны из `templates/` рендерятся для каждого устройства. Если
-`intent/inventory.yaml` нет, они пропускаются.
+проходит линт, шаблоны из `templates/` рендерятся для каждого устройства.
 
 **Smoke-тест стека.** Когда стек поднят (`docker compose up -d --wait`), из корня репозитория:
 
@@ -102,70 +191,94 @@ uv run mypy                  # strict
 python3 backend/scripts/smoke_stack.py
 ```
 
-Скрипт проверяет, что миграции применены, токен администратора работает, dry-run и скан дрейфа
-на всех устройствах проходят через Redis и воркер, а все контейнеры compose `running` /
-`healthy` и ни разу не перезапускались. На устройствах ничего не меняет. С `--beat-timeout 120`
-дополнительно дождётся планового скана от Celery Beat — для этого
-`NETOPS_DRIFT_SCAN_INTERVAL_SECONDS` нужно уменьшить, например до 60.
-
-**CI/CD** (`.github/workflows/ci-cd.yml`) запускается на пуш в любую ветку и на PR из форков:
-
-- бэкенд: ruff, black, mypy, pytest; покрытие — в сводке запуска;
-- фронтенд: `npm ci` и `npm run build` (сборка и проверка типов);
-- сборка Docker-образа и весь стек в docker compose со smoke-тестом на стенде из фикстур
-  (4 устройства); данные из `intent/` и `templates/` проверяет `test_repo_data`; интервал
-  скана — 60 с, чтобы дождаться задачи от Beat;
-- после мержа в `main` образ публикуется в `ghcr.io/xadecoride/netops-backend`
-  (теги `latest` и `sha-<коммит>`).
-
 ## Конфигурация
 
 Все переменные с префиксом `NETOPS_`, полный список — `netops/settings.py` и `.env.example`.
 
 | Переменная | Назначение |
 |---|---|
-| `DATABASE_URL` | PostgreSQL, `postgresql+psycopg://...` |
-| `REDIS_URL` | брокер Celery |
-| `INTENT_REPO_PATH` | checkout Git-репозитория с intent |
+| `DATABASE_URL` | PostgreSQL (`postgresql+psycopg://...`) или SQLite (`sqlite:///...`) |
+| `REDIS_URL` | брокер Celery и хранилище флага `Factory Freeze` |
+| `INTENT_REPO_PATH` | checkout Git-репозитория с intent (`intent/`) |
 | `TEMPLATES_PATH` | шаблоны Jinja2 (`<platform>/{base,interfaces,acls,bgp}.j2`) |
 | `DIFF_FILTERS_PATH` | свой файл фильтров диффа в формате `netops/network/diff_filters.yaml`; по умолчанию берётся он |
-| `NETWORK_DRIVER` | пока только `offline` (см. ниже) |
+| `NETWORK_DRIVER` | `offline` (файловый стенд `lab/running/`) или `scrapli` (живой SSH до Containerlab / железа) |
 | `COMMIT_CONFIRM_TIMEOUT_SECONDS` | таймер `commit confirmed`, по умолчанию 180 |
-| `POST_CHECK_ATTEMPTS`, `POST_CHECK_INTERVAL_SECONDS` | повторы post-check, пока сходится BGP: по умолчанию 6 × 10 с (не больше половины таймера) |
+| `POST_CHECK_ATTEMPTS`, `POST_CHECK_INTERVAL_SECONDS` | повторы post-check, пока сходится BGP: по умолчанию 6 × 10 с |
 | `MAX_PING_LOSS_PERCENT` | допустимые потери ping, по умолчанию 20 |
 | `DRIFT_SCAN_INTERVAL_SECONDS` | период фонового скана, по умолчанию 900 (15 минут) |
-| `API_TOKENS` | начальные токены `{"<token>": {"username": ..., "role": "viewer\|operator\|admin"}}`: нужны хотя бы для первого администратора, остальных пользователей он заводит через API |
-| `AUTH_PROFILES` | JSON `{"lab": {"username": ..., "password": ...}}`: SSH-учётки для `auth_profile` из инвентаря. Пароли — только здесь: `inventory.yaml` с `auth_profiles` не проходит валидацию |
-| `CORS_ORIGINS` | адреса фронтенда, которым разрешены запросы из браузера; по умолчанию Vite `http://localhost:5173` |
+| `API_TOKENS` | начальные токены `{"<token>": {"username": ..., "role": "viewer\|operator\|admin"}}` |
+| `AUTH_PROFILES` | JSON `{"lab": {"username": ..., "password": ...}}`: SSH-учётки для `auth_profile` из инвентаря |
+| `CORS_ORIGINS` | адреса фронтенда, которым разрешены запросы из браузера |
 
 ## API
 
+### 1. Устройства, Инвентарь и Intent (`routes/devices.py`)
+
 | Метод | URL | Роль | Что делает |
 |---|---|---|---|
-| GET | `/api/v1/devices?status=&role=&platform=` | viewer | список устройств |
-| GET | `/api/v1/devices/{id}` | viewer | карточка устройства + параметры из intent |
-| POST/PATCH/DELETE | `/api/v1/devices[/{id}]` | admin | управление инвентарём |
-| POST | `/api/v1/inventory/sync` | admin | импорт `inventory.yaml` из Git |
+| GET | `/api/v1/devices?status=&role=&platform=` | viewer | список устройств со спарклайнами и операционным статусом |
+| GET | `/api/v1/devices/{id}` | viewer | карточка устройства + параметры из intent + снапшоты |
+| POST/PATCH/DELETE | `/api/v1/devices[/{id}]` | operator/admin | управление инвентарём и добавление узлов |
+| POST | `/api/v1/devices/probe` | operator | живая проверка доступности IP/порта по TCP/SSH перед добавлением |
+| GET | `/api/v1/devices/{id}/telemetry` | viewer | метрики CPU, RAM, утилизации интерфейсов и BGP-соседей |
+| POST | `/api/v1/devices/{id}/quick-action` | admin | быстрый диагностический CLI-запрос на устройство с записью в аудит |
+| POST | `/api/v1/devices/reset-golden` | operator | восстановление эталонных конфигураций (`lab/golden_configs/`) |
+| POST | `/api/v1/inventory/sync` | operator | импорт `inventory.yaml` из Git в базу данных |
 | GET | `/api/v1/intent/lint` | viewer | pre-flight lint репозитория intent |
-| POST | `/api/v1/jobs/dry-run` | operator | `{"device_ids": [1, 2], "intent_source": "git_main"}` → `job_id` |
+
+### 2. Оркестрация задач и Контроль дрейфа (`routes/jobs.py`, `routes/drift.py`)
+
+| Метод | URL | Роль | Что делает |
+|---|---|---|---|
+| POST | `/api/v1/jobs/dry-run` | viewer | расчёт плана изменений (`DRY_RUN`) без наката в сеть → `job_id` |
+| POST | `/api/v1/jobs/deploy` | operator | боевой деплой по успешному `dry-run` с проверкой `Factory Freeze` |
+| POST | `/api/v1/jobs/{id}/rollback` | operator | принудительный откат задачи к предыдущему снапшоту |
 | GET | `/api/v1/jobs?type=&status=` | viewer | история задач |
 | GET | `/api/v1/jobs/{id}` | viewer | статус, прогресс (%), устройства, логи шагов |
-| GET | `/api/v1/jobs/{id}/logs?after_id=` | viewer | только новые строки лога — для живого экрана деплоя |
-| GET | `/api/v1/jobs/{id}/diff` | viewer | `running_config`, `intended_config`, `remediation_patch`, `rollback_patch` по каждому устройству |
-| POST | `/api/v1/jobs/deploy` | operator | `{"job_id": "<dry-run>", "confirmed_by": "..."}` → `job_id` деплоя |
-| POST | `/api/v1/drift/scan` | operator | внеочередной скан (`{"device_ids": [...]}` или все) |
-| GET | `/api/v1/drift/report?since=&until=&status=` | viewer | последняя проверка каждого устройства |
-| POST | `/api/v1/drift/remediate` | operator | `{"device_id": 1}` → `job_id` |
-| GET | `/api/v1/auth/me` | viewer | текущий пользователь и роль (для UI) |
-| GET/POST | `/api/v1/users` | admin | пользователи; при создании выдаётся токен (показывается один раз) |
-| GET/PATCH/DELETE | `/api/v1/users/{id}` | admin | роль, блокировка (`is_active`), удаление; себя изменить нельзя |
-| POST | `/api/v1/users/{id}/token` | admin | выпустить новый токен, старый перестаёт работать |
-| GET | `/healthz`, `/readyz` | — | сервис жив / готов: база доступна и миграции применены |
-| GET | `/metrics` | — | срез последнего сбора метрик в формате Prometheus |
+| GET | `/api/v1/jobs/{id}/logs?after_id=` | viewer | инкрементальная подгрузка новых строк лога |
+| GET | `/api/v1/jobs/{id}/diff` | viewer | `running_config`, `intended_config`, `remediation_patch`, `rollback_patch` |
+| POST | `/api/v1/drift/scan` | operator | внеочередной скан дрейфа (`{"device_ids": [...]}` или все) |
+| GET | `/api/v1/drift/report` | viewer | последняя проверка каждого устройства + число строк отклонений |
+| POST | `/api/v1/drift/remediate` | operator | автоматическое устранение дрейфа (`DRIFT_REMEDIATE`) |
 
-Ошибки: `404` — нет сущности, `409` — конфликт состояния (dry-run не успешен, устройство уже
-деплоится и т. п.), `422` — ошибка валидации (для intent — со списком `issues` с файлом и полем),
-`503` — очередь недоступна (задача сразу помечается `FAILED`).
+### 3. Предиктивная аналитика TimesFM 3.0, AI Guard и Chaos Lab (`routes/insights.py`)
+
+| Метод | URL | Роль | Что делает |
+|---|---|---|---|
+| GET | `/api/v1/forecast` | viewer | прогноз временных рядов `TimesFM 3.0` (`cpu_pct`, `uplink_util_pct`) с квантилями `p10`/`p90` и расчётом времени до пробития SLA (`eta_hours`) |
+| POST | `/api/v1/ai-guard` | viewer | проверка безопасности изменений (`AI Pre-Flight Guard`) перед выкаткой |
+| POST | `/api/v1/chaos` | operator | инъекция тестовых сбоев в стенд (несанкционированный CLI-дрейф, BGP flap, перегрузка линка) |
+| POST | `/api/v1/copilot` | viewer | интерактивный чат с ИИ-ассистентом `NetOps Copilot` с контекстом всей фабрики |
+| POST | `/api/v1/jobs/{id}/explain` | viewer | анализ рисков конфигурационного диффа задачи (LLM + детерминированная эвристика) |
+
+### 4. Аварийный контур `Emergency Hub` (`routes/emergency.py`)
+
+| Метод | URL | Роль | Что делает |
+|---|---|---|---|
+| POST | `/api/v1/emergency/command` | admin | прямое выполнение диагностической CLI-команды (`show`/`display`) на узле |
+| POST | `/api/v1/emergency/patch` | admin | экстренный накат конфигурационного патча в обход стандартных гейтов |
+| POST | `/api/v1/emergency/soft-reset` | admin | мягкий сброс: принудительное возвращение фабрики к `golden_configs` |
+| POST | `/api/v1/emergency/hard-reset` | admin | жёсткий сброс: переразвёртывание топологии `Containerlab` по SSH |
+| GET/POST | `/api/v1/emergency/freeze` | viewer/operator | чтение и переключение глобальной блокировки изменений (`Factory Freeze`) |
+| GET | `/api/v1/emergency/audit` | admin | неизменяемый журнал всех аварийных вмешательств (`emergency_audit.jsonl`) |
+
+### 5. Система, Визард «Матрёшка», Git SoT и Пользователи (`routes/system.py`, `routes/users.py`)
+
+| Метод | URL | Роль | Что делает |
+|---|---|---|---|
+| GET | `/api/v1/system/bootstrap/status` | — | статус 4-шагового визарда первичной инициализации («Матрёшка») |
+| POST | `/api/v1/system/bootstrap/step{1..4}` | — | шаги визарда: (1) Telegram Bot + Owner, (2) Режим контура + TCP Probe, (3) Матрица паролей узлов, (4) GitHub SoT |
+| GET | `/api/v1/git/status` | viewer | статус репозитория Intent (ветка, коммит, локальные изменения) |
+| POST | `/api/v1/git/sync` | operator | синхронизация `git pull` / `git push` и автоматический ре-импорт инвентаря |
+| POST | `/api/v1/git/webhook` | — | приёмник GitHub Webhook (`X-Hub-Signature-256`) для авто-запуска `Dry-Run` при `push` |
+| POST | `/api/v1/ws/ticket` | viewer | выдача одноразового криптографического билета (TTL 30 с) для подключения к WebSocket |
+| WS | `/api/v1/ws/stream?ticket=` | viewer | потоковая телеметрия состояния фабрики и задач в реальном времени |
+| GET | `/api/v1/auth/me` | viewer | текущий пользователь, роль, время истечения и разрешённые скоупы |
+| GET/POST/PATCH/DELETE | `/api/v1/users[/{id}]` | admin | управление пользователями, выпуск именных TTL-токенов и привязка к Telegram |
+| GET | `/healthz`, `/readyz`, `/metrics` | — | проверки живучести/готовности контейнера и экспорт метрик Prometheus |
+
+---
 
 ## Метрики и телеграм-бот
 
@@ -176,128 +289,40 @@ python3 backend/scripts/smoke_stack.py
 Из базы: `netops_device_status`, `netops_devices_total`, `netops_drift_devices`,
 `netops_jobs_total`, `netops_job_last_finished_timestamp_seconds`. Со стенда (через тот же
 `HealthProbe`, что и post-check): `netops_device_reachable`, `netops_bgp_session_up`,
-`netops_bgp_prefixes_accepted`, `netops_interface_up`, `netops_ping_loss_percent`. Устройство,
-которое не ответило, помечается недоступным, и сбор идёт дальше.
-
-Prometheus снимает `/metrics` раз в 30 с, конфиг — `monitoring/prometheus.yml`. Grafana поверх
-него — задача Тимофея, место под неё отмечено в `docker-compose.yml`.
+`netops_bgp_prefixes_accepted`, `netops_interface_up`, `netops_ping_loss_percent`.
 
 **Бот** (`python -m netops.telemetry.bot`, контейнер `telegram-bot`) присылает оповещения при
 смене состояния устройства (появился дрейф, устройство недоступно, снова совпало с эталоном) и об
-упавших задачах. Повторы не дублируются: скан идёт каждые 15 минут, но одно и то же состояние
-сообщается один раз. Отвечает на команды: `/status` — устройства по статусам, `/drift` — где
-найден дрейф, `/jobs` — последние задачи, `/metrics` — сводка: устройства, сколько BGP-сессий Established и
-портов up/up из общего числа, потери ping и дрейф. Чтобы включить:
+упавших задачах. Отвечает на команды `/status`, `/drift`, `/jobs`, `/metrics`, а также поддерживает
+привязку профилей инженеров через `netops/services/notifier.py`.
 
-```bash
-# в backend/.env
-NETOPS_TELEGRAM_BOT_TOKEN=<токен от @BotFather>
-NETOPS_TELEGRAM_CHAT_IDS='[123456789]'
-```
-
-Бот отвечает только чатам из этого списка, иначе данные о сети получил бы любой, кто найдёт бота
-(узнать свой id — командой боту `/start` и затем по логу контейнера). После правки `.env`:
-`docker compose up -d telegram-bot`. При старте бот запоминает текущее состояние базы, поэтому
-после перезапуска не присылает весь накопленный дрейф.
+---
 
 ## Как работают задачи
 
 - **DRY_RUN** — lint всего intent (при ошибке — `FAILED` без обращения к сети) → рендер
-  шаблонов → сбор running-config → нормализация → hier_config. Снимки конфигов и патчи
+  шаблонов → сбор running-config → нормализация → `hier_config`. Снимки конфигов и патчи
   сохраняются в `config_snapshots` / `job_targets`.
 - **DEPLOY** — только для успешного dry-run с изменениями, одно подтверждение на dry-run.
-  Устройства обрабатываются по очереди, при первой ошибке раскатка останавливается (остальные — `SKIPPED`).
+  Проверяет отсутствие `Factory Freeze`. Устройства обрабатываются по очереди, при первой ошибке раскатка останавливается (остальные — `SKIPPED`).
   Перед применением running-config сверяется по хешу с dry-run: если на устройстве что-то поменяли,
-  деплой отклоняется. Далее pre-check → apply → post-check → confirm или rollback (`ROLLED_BACK`).
+  деплой отклоняется. Далее `pre-check → apply → post-check → confirm` или `rollback` (`ROLLED_BACK`).
 - **DRIFT_SCAN** — по расписанию (пропускается, если предыдущий скан ещё идёт) или вручную;
   пишет `drift_records` и статус устройства.
 - **DRIFT_REMEDIATE** — пересчитывает компенсирующий патч на текущем running-config и
   прогоняет его через тот же транзакционный деплой.
 
-Прогресс (`progress` в `GET /api/v1/jobs/{id}`): у dry-run и скана — по этапам (рендер — 33 %,
-сбор running-config — 66 %), у деплоя — по устройствам; 100 % — после успешного завершения.
-У упавшей задачи прогресс остаётся на том этапе, где она остановилась.
+---
 
-**Post-check** (правила Health-Check из раздела 2.6). При dry-run из intent запоминается, что
-заявлено для устройства: BGP-соседи и интерфейсы. После применения:
+## Точки интеграции и мульти-вендорная матрица
 
-- каждый заявленный сосед — `Established` и принимает префиксы (`Prefixes Accepted > 0`);
-- каждый включённый заявленный интерфейс — `up/up`; выключенные (`enabled: false`) могут лежать;
-- интерфейсы, которых нет в intent, проверяются на регрессию: был `up/up` — должен остаться;
-- потери ping до соседей не больше 20 %.
+- **Сетевой драйвер (`netops/network/scrapli_driver.py` и `offline.py`)**: поддерживает работу как с живым стендом Containerlab по SSH (`NETOPS_NETWORK_DRIVER=scrapli` с автоматическим fallback на `Paramiko`), так и с локальным файловым эмулятором (`NETOPS_NETWORK_DRIVER=offline`, каталог `lab/running/`).
+- **Шаблоны Jinja2 (`templates/<platform>/`)**: реализованы и протестированы для всех 6 платформ:
+  - `cisco_iosxe` (Cisco Catalyst / CSR1000v / c8000v)
+  - `arista_eos` (Arista cEOS / vEOS)
+  - `huawei_vrp` (Huawei CloudEngine CE12800 / VRP)
+  - `eltex_mes` (Eltex MES / ESR)
+  - `juniper_junos` (Juniper vMX / vQFX)
+  - `yadro_kornfe` (YADRO KORNFE SONiC)
+- **Нормализация (`netops/network/normalization.py`, `diff_filters.yaml`)**: маскирует секреты, отбрасывает служебные строки и выделяет только управляемые секции (`managed_sections`), исключая ложные срабатывания дрейфа на management-интерфейсах и VTY-линиях.
 
-Сосед, удалённый из intent, может пропасть — это не авария. Пока BGP сходится, проверка
-повторяется (`POST_CHECK_ATTEMPTS` раз); не прошла последняя попытка — откат.
-
-Задача `FAILED`, если упало хотя бы одно устройство. Зависшие задачи (воркер умер, сообщение
-потерялось) через `JOB_TIMEOUT_SECONDS` переводятся в `FAILED` фоновой задачей Beat, устройства
-освобождаются. Статус устройства `UNKNOWN` (добавлен к статусам ТЗ) — ещё не проверялось или
-состояние неизвестно после неудачного отката.
-
-## Точки интеграции для команды
-
-**Максим (Scrapli/Nornir).** Пайплайн работает с сетью только через протоколы из
-`netops/network/base.py`: `ConfigCollector` (параллельный сбор running-config),
-`ConfigDeployer` (`apply` с commit confirmed / `confirm` / `rollback`) и `HealthProbe`
-(снимок BGP, интерфейсов, ping). В `HealthProbe.snapshot` приходят ожидания из intent: список
-заявленных соседей — это и адреса, которые нужно пинговать (5 пакетов). Реализацию достаточно зарегистрировать в `build_toolchain()`
-(`netops/toolchain.py`) под новым значением `NETOPS_NETWORK_DRIVER`, оркестрацию менять не нужно.
-Пока используется `OfflineLab` — «стенд на файлах»: running-config читается из
-`<OFFLINE_LAB_PATH>/<hostname>.cfg`, confirm записывает туда intended config. Так можно
-показать весь сценарий без Containerlab.
-
-**Тимофей (шаблоны).** Шаблоны: `<TEMPLATES_PATH>/<platform>/{base,interfaces,acls,bgp}.j2`,
-склеиваются в этом порядке, отсутствующие секции пропускаются. В контексте: `device`
-(`InventoryDevice`: hostname, platform, role, management_ip…) и `intent` (`DeviceIntent`).
-Адреса — объекты `ipaddress`: `iface.ipv4_address.ip`, `.netmask`, `.with_prefixlen`,
-`prefix.hostmask`. Неизвестная переменная — ошибка (`StrictUndefined`), поэтому вместо
-`is defined` проверяйте значение: `{% if iface.ipv4_address %}`.
-
-В `templates/` лежат шаблоны под IOS-XE, EOS и VRP, сверенные с конфигами стенда
-(`lab/golden_configs/`). Что из набора Тимура взято и где реализовано — в
-[`docs/templates-integration.md`](../docs/templates-integration.md). `Loopback` генерируется из `bgp.router_id`, если в intent он не
-описан: иначе патч предлагает удалить интерфейс с router-id и роняет BGP. Учётки в шаблоны не
-передаются — пароли живут в `.env`, а management-порт, `vrf`, `line vty` и `ssh` в сравнение не
-входят (см. `managed_sections` в фильтрах), поэтому генерировать их не нужно.
-
-**Аня (нормализация).** Правила лежат в `netops/network/diff_filters.yaml` — это файл Ани
-как есть, править можно без кода. Для каждой платформы перед сравнением:
-
-- маскируются хэши паролей (`mask_secrets`);
-- выбрасываются служебные строки (`drop_line_patterns`) и блоки с вложенными строками (`drop_blocks`);
-- остаются только управляемые секции (`managed_sections`) — и в скане дрейфа, и в dry-run.
-  Management-порт, пользователи, aaa и прочее вне этих секций не дают ложного дрейфа, и патч
-  наката их не трогает;
-- убираются неявные строки (`no shutdown`, `undo shutdown`): на устройстве их не видно.
-
-Регулярки применяются к строке с отступом, поэтому `^end$` ловит только конец конфига.
-
-**Даня (формат intent).** Репозиторий intent: `inventory.yaml` (список устройств) и
-`devices/<hostname>.yaml` (`interfaces`, `bgp`, `acls` по разделу 2.1 ТЗ). Схема — Pydantic-модели
-в `netops/intent/models.py`, пример — `tests/fixtures/intent-repo/` (CLOS: 2 spine Arista + 2 leaf Cisco).
-Неизвестные поля запрещены, чтобы опечатки не проходили молча. В инвентаре допустимы `id`
-(уникальный) и `status` из модели устройства ТЗ; статус справочный, в базе его выставляет Drift
-Engine. Платформы: `cisco_iosxe`, `arista_eos`, `huawei_vrp`, `eltex_esr`.
-
-## Что ещё не сделано
-
-- Драйвер Scrapli (Максим, `netops/network/scrapli_driver.py`) на живом стенде не проверялся.
-  В Docker-образе его пока не запустить: `scrapli` — необязательная зависимость, а системного
-  `ssh` в образе нет.
-- Шаблонов для Eltex нет, dry-run на таком устройстве упадёт с «No templates found». CI
-  проверяет, что шаблоны рендерятся для всех устройств своей платформы.
-- ACL в intent пока пустые (`acls: []`) и на стенде их нет. Когда Аня их опишет, шаблоны
-  `acls.j2` нужно сверить с устройствами: секция `ip access-list` / `acl name` участвует в
-  сравнении, то есть незаполненный шаблон приведёт к удалению ACL с оборудования.
-- `hostname` в intent — FQDN (`spine-1.croc.lab`), а на стенде короткие имена (`spine1`).
-  Сейчас это единственный дрейф на всех четырёх устройствах. Нужно решение команды: приводим
-  стенд к FQDN или меняем intent.
-- Дашборды Grafana (Тимофей) — Prometheus в compose уже есть, остаётся добавить Grafana и
-  дашборды. Алертов в Prometheus нет: оповещения шлёт телеграм-бот.
-- Фронтенд в `docker-compose.yml` — когда будет образ React-приложения.
-- Из раздела 2.7 для администратора пока нет «утверждения опасных изменений» и
-  «принудительного наката команд отката» — вынести на обсуждение, что считать опасным изменением.
-- LLM-ассистент (Максим): `POST /api/v1/jobs/{id}/explain`, без ключа работает эвристика.
-  Нужно согласовать провайдера: в диффах, которые уходят модели, есть пароли BGP.
-- `intent_source` поддерживает только `git_main` (читается рабочая копия в `INTENT_REPO_PATH`,
-  `git pull` выполняется снаружи).

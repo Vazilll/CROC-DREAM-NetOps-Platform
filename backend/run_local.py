@@ -148,20 +148,24 @@ def init_local_environment() -> None:
     templates_dir = Path(settings.templates_path)
     renderer = JinjaConfigRenderer(templates_dir)
 
-    # Continuous GitOps: Reconcile inventory on boot from Git repository
-    try:
-        snapshot = intent_repo.load()
-        with session_factory() as session:
-            device_svc = DeviceService(session)
-            sync_res = device_svc.sync_inventory(snapshot.inventory)
-            logger.info(
-                "GitOps inventory reconcile on boot: created=%s, updated=%s, unchanged=%s",
-                sync_res.created,
-                sync_res.updated,
-                sync_res.unchanged,
-            )
-    except Exception:
-        logger.exception("Failed to reconcile inventory from %s", settings.intent_repo_path)
+    # Continuous GitOps: Reconcile inventory on boot only after Owner bootstrap is completed
+    rt_overlay = settings.apply_runtime_overlay()
+    if rt_overlay.get("bootstrap_completed"):
+        try:
+            snapshot = intent_repo.load()
+            with session_factory() as session:
+                device_svc = DeviceService(session)
+                sync_res = device_svc.sync_inventory(snapshot.inventory)
+                logger.info(
+                    "GitOps inventory reconcile on boot: created=%s, updated=%s, unchanged=%s",
+                    sync_res.created,
+                    sync_res.updated,
+                    sync_res.unchanged,
+                )
+        except Exception:
+            logger.exception("Failed to reconcile inventory from %s", settings.intent_repo_path)
+    else:
+        logger.info("Fresh uninitialized database: waiting for Owner Matryoshka Bootstrap Wizard in Web UI")
 
     # Ensure initial running .cfg files exist for each device
     try:

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, Network, Server, Shield, Globe, Cpu, AlertTriangle } from 'lucide-react';
-import { api } from '../api';
-import type { DeviceDetail } from '../api';
+import { api } from '../../api';
+import type { DeviceDetail } from '../../api';
 
 interface DeviceDetailModalProps {
   deviceId: number;

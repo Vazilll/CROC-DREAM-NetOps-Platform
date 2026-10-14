@@ -14,14 +14,14 @@ import {
   ArrowRight,
   Presentation,
 } from 'lucide-react';
-import { api } from '../api';
-import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../api';
-import { translations, type Locale } from '../i18n';
-import { TopologyMap } from './TopologyMap';
-import { BentoCard, Sparkline } from './ui';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
-import { AddDeviceModal } from './AddDeviceModal';
-import { DeviceDrawer } from './DeviceDrawer';
+import { api } from '../../api';
+import type { Device, ForecastAlert, JobSummary, AiGuardResponse, UserRole } from '../../api';
+import { translations, type Locale } from '../../i18n';
+import { TopologyMap } from '../charts/TopologyMap';
+import { BentoCard, Sparkline } from '../layout/ui';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
+import { AddDeviceModal } from '../modals/AddDeviceModal';
+import { DeviceDrawer } from '../modals/DeviceDrawer';
 
 interface DashboardProps {
   devices: Device[];

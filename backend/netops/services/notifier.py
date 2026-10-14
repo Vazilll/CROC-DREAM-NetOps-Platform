@@ -35,73 +35,54 @@ KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {
 }
 
 
+def _runtime_dir(settings: Settings | None = None) -> Path:
+    if settings is not None:
+        return settings.offline_lab_path
+    return Path(__file__).resolve().parents[3] / "lab" / "running"
+
+
 def _subscribers_files(settings: Settings) -> list[Path]:
-    primary = settings.offline_lab_path / "telegram_subscribers.json"
-    local = Path(__file__).resolve().parents[2] / "telegram_subscribers.json"
-    files = [primary]
-    if local != primary:
-        files.append(local)
-    return files
+    return [_runtime_dir(settings) / "telegram_subscribers.json"]
 
 
 def _tokens_file(settings: Settings | None = None) -> Path:
-    if settings is not None:
-        return settings.offline_lab_path / "user_tokens.json"
-    return Path(__file__).resolve().parents[2] / "user_tokens.json"
+    return _runtime_dir(settings) / "user_tokens.json"
 
 
 def load_user_tokens(settings: Settings | None = None) -> dict[str, str]:
-    candidates = [_tokens_file(settings)]
-    fallback = Path(__file__).resolve().parents[2] / "user_tokens.json"
-    if fallback not in candidates:
-        candidates.append(fallback)
-    merged: dict[str, str] = {}
-    for path in candidates:
-        if not path.is_file():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if isinstance(k, str) and isinstance(v, str) and v:
-                        merged[k] = v
-        except Exception:
-            pass
-    return merged
+    path = _tokens_file(settings)
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v}
+    except Exception:
+        pass
+    return {}
 
 
 def save_user_token(username: str, token: str, settings: Settings | None = None) -> None:
     current = load_user_tokens(settings)
     current[username] = token
-    targets = [_tokens_file(settings)]
-    fallback = Path(__file__).resolve().parents[2] / "user_tokens.json"
-    if fallback not in targets:
-        targets.append(fallback)
-    for path in targets:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+    path = _tokens_file(settings)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _tg_bindings_file(settings: Settings | None = None) -> Path:
-    if settings is not None:
-        return settings.offline_lab_path / "telegram_bindings.json"
-    return Path(__file__).resolve().parents[2] / "telegram_bindings.json"
+    return _runtime_dir(settings) / "telegram_bindings.json"
 
 
 def load_telegram_bindings(settings: Settings | None = None) -> dict[str, dict[str, Any]]:
-    candidates = [_tg_bindings_file(settings)]
-    fallback = Path(__file__).resolve().parents[2] / "telegram_bindings.json"
-    if fallback not in candidates:
-        candidates.append(fallback)
     merged: dict[str, dict[str, Any]] = {}
     for cid, prof in KNOWN_TELEGRAM_PROFILES.items():
         merged[str(cid)] = {"chat_id": cid, **prof}
-    for path in candidates:
-        if not path.is_file():
-            continue
+    path = _tg_bindings_file(settings)
+    if path.is_file():
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(data, dict):
@@ -121,26 +102,16 @@ def save_telegram_binding(
     current = load_telegram_bindings(settings)
     key = str(chat_id)
     current[key] = {**current.get(key, {}), "chat_id": chat_id, **info}
-    targets = [_tg_bindings_file(settings)]
-    fallback = Path(__file__).resolve().parents[2] / "telegram_bindings.json"
-    if fallback not in targets:
-        targets.append(fallback)
-    for path in targets:
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+    path = _tg_bindings_file(settings)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _registry_files(settings: Settings | None = None) -> list[Path]:
-    local = Path(__file__).resolve().parents[2] / "access_registry.json"
-    files = [local]
-    if settings is not None:
-        lab = settings.offline_lab_path / "access_registry.json"
-        if lab != local:
-            files.insert(0, lab)
-    return files
+    return [_runtime_dir(settings) / "access_registry.json"]
 
 
 def load_access_registry(settings: Settings | None = None) -> dict[str, Any]:

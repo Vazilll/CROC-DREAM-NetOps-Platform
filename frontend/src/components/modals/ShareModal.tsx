@@ -20,15 +20,15 @@ import {
   Globe,
   Clock,
 } from 'lucide-react';
-import { api } from '../api';
+import { api, getErrorMessage } from '../../api';
 import type {
   UserRole,
   UserAccount,
   UserInviteCreated,
   IntegrationsStatus,
-} from '../api';
-import type { Locale } from '../i18n';
-import { Modal } from './ui';
+} from '../../api';
+import type { Locale } from '../../i18n';
+import { Modal } from '../layout/ui';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -187,8 +187,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         const integ = await api.getIntegrationsStatus();
         setIntegrations(integ);
         if (integ.sessions) setUsers(integ.sessions);
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Не удалось загрузить список ссылок');
+      } catch (err: unknown) {
+        setErrorMsg(getErrorMessage(err, 'Не удалось загрузить список ссылок'));
       }
     } finally {
       setLoadingUsers(false);
@@ -210,8 +210,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       if (data.sessions && data.sessions.length > 0) {
         setUsers(data.sessions);
       }
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Не удалось загрузить статус интеграций');
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err, 'Не удалось загрузить статус интеграций'));
     } finally {
       setLoadingIntegrations(false);
     }
@@ -239,8 +239,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             return merged;
           });
         }
-      } catch (err: any) {
-        if (active) setErrorMsg(err.message || 'Ошибка загрузки данных');
+      } catch (err: unknown) {
+        if (active) setErrorMsg(getErrorMessage(err, 'Ошибка загрузки данных'));
       }
     };
     poll();
@@ -313,8 +313,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       );
       await fetchUsers();
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка генерации ссылок');
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err, 'Ошибка генерации ссылок'));
     }
   };
 
@@ -331,8 +331,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       );
       await fetchUsers();
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -353,8 +353,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       );
       await fetchUsers();
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка генерации кода верификации');
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err, 'Ошибка генерации кода верификации'));
     }
   };
 
@@ -372,8 +372,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           : `Доступ для ${u.username} ограничен (все запросы по токену заблокированы)`
       );
       await fetchUsers();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -385,8 +385,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       await api.updateUserInvite(u.id, { role: newRole });
       setStatusMsg(`Роль пользователя ${u.username} изменена на ${newRole.toUpperCase()}`);
       await fetchUsers();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -403,8 +403,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           : `Пользователю ${u.username} открыт доступ ко всей фабрике CLOS`
       );
       await fetchUsers();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -420,8 +420,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setNewlyCreated([rotated]);
       setStatusMsg(`Токен для ${rotated.username} перевыпущен, привязка к устройству сброшена`);
       await fetchUsers();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -434,8 +434,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setStatusMsg(`Устройство отвязано от ${u.username}. Ссылка снова свободна для входа.`);
       await fetchUsers();
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -448,8 +448,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       setNewlyCreated((prev) => prev.filter((item) => item.id !== u.id));
       await fetchUsers();
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message);
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err));
     }
   };
 
@@ -462,8 +462,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         `Git SoT синхронизирован (${res.pull_output}): создано ${res.sync.created.length}, обновлено ${res.sync.updated.length}`
       );
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка синхронизации Git');
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err, 'Ошибка синхронизации Git'));
     } finally {
       setSyncingGit(false);
     }
@@ -483,8 +483,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         );
       }
       await fetchIntegrations();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Ошибка отправки в Telegram');
+    } catch (err: unknown) {
+      setErrorMsg(getErrorMessage(err, 'Ошибка отправки в Telegram'));
     } finally {
       setSendingTelegram(false);
     }

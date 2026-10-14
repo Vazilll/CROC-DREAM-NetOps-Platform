@@ -16,8 +16,8 @@ import {
   History,
   User,
 } from 'lucide-react';
-import { api } from '../api';
-import type { EmergencyAuditLog } from '../api';
+import { api, getErrorMessage } from '../../api';
+import type { EmergencyAuditLog } from '../../api';
 
 const DEFAULT_DEVICES = [
   { hostname: 'spine-1.croc.lab', platform: 'cisco_iosxe', label: 'spine-1.croc.lab (cisco_iosxe)' },
@@ -115,8 +115,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     try {
       const res = await api.executeEmergencyCommand(selectedDevice, cmdToRun);
       setCliOutput((prev) => `${prev}\n${res.output || '(нет вывода)'}`);
-    } catch (err: any) {
-      setCliOutput((prev) => `${prev}\n[ОШИБКА]: ${err.message || String(err)}`);
+    } catch (err: unknown) {
+      setCliOutput((prev) => `${prev}\n[ОШИБКА]: ${getErrorMessage(err)}`);
     } finally {
       setIsExecutingCmd(false);
       loadAudit();
@@ -134,10 +134,10 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
         message: `Патч успешно применен на ${selectedDevice} (${res.applied_lines.length} строк).`,
       });
       setCliOutput((prev) => `${prev}\n\n[EMERGENCY PATCH APPLIED on ${selectedDevice}]:\n${res.output}`);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setPatchResult({
         status: 'error',
-        message: `Сбой применения патча: ${err.message || String(err)}`,
+        message: `Сбой применения патча: ${getErrorMessage(err)}`,
       });
     } finally {
       setIsApplyingPatch(false);
@@ -152,8 +152,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     try {
       const res = await api.softResetFabric();
       setResetLog(`[МЯГКИЙ СБРОС ЗАВЕРШЕН]: ${res.message}\nДетали: ${res.details}`);
-    } catch (err: any) {
-      setResetLog(`[ОШИБКА МЯГКОГО СБРОСА]: ${err.message || String(err)}`);
+    } catch (err: unknown) {
+      setResetLog(`[ОШИБКА МЯГКОГО СБРОСА]: ${getErrorMessage(err)}`);
     } finally {
       setIsSoftResetting(false);
     }
@@ -166,8 +166,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     try {
       const res = await api.hardResetFabric();
       setResetLog(`[ХАРД-СБРОС ЗАВЕРШЕН]: ${res.message}\n\nЛог:\n${res.details}`);
-    } catch (err: any) {
-      setResetLog(`[ОШИБКА ХАРД-СБРОСА]: ${err.message || String(err)}`);
+    } catch (err: unknown) {
+      setResetLog(`[ОШИБКА ХАРД-СБРОСА]: ${getErrorMessage(err)}`);
     } finally {
       setIsHardResetting(false);
     }

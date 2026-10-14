@@ -1,6 +1,6 @@
 import React from 'react';
-import { translations, type Locale } from '../i18n';
-import { TAB_DEFINITIONS, type TabItem } from '../constants';
+import { translations, type Locale } from '../../i18n';
+import { TAB_DEFINITIONS, type TabItem } from '../../constants';
 
 export type { TabItem };
 

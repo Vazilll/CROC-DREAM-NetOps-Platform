@@ -11,9 +11,9 @@ import {
   Terminal,
   FileDown,
 } from 'lucide-react';
-import { api } from '../api';
-import type { DriftReportItem } from '../api';
-import { translations, type Locale } from '../i18n';
+import { api } from '../../api';
+import type { DriftReportItem } from '../../api';
+import { translations, type Locale } from '../../i18n';
 
 interface DriftViewProps {
   locale?: Locale;

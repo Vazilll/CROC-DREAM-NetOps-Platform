@@ -38,7 +38,7 @@ frontend/.cache/
 screenshot_*.png
 test.png
 *.log
-backend/telemetry_cache.json
+*telemetry_cache.json
 backend/lab/
 *access_registry.json
 *telegram_bindings.json

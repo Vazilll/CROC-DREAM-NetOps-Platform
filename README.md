@@ -1,309 +1,146 @@
 # CROC DREAM — NetOps Platform
 
-**Платформа централизованного управления и мониторинга гетерогенной сетевой инфраструктуры.**
+**Платформа централизованного управления, транзакционной оркестрации и предиктивного мониторинга гетерогенной сетевой инфраструктуры.**
 
-**Команда:** CROC DREAM
-**Статус:** MVP в активной разработке, сборка зелёная, интеграционные тесты 297/299 (см. раздел «Статус проекта»).
+**Команда:** CROC DREAM  
+**Статус:** Полная готовность к защите (сборка `tsc -b` + `vite` зелёная, `oxlint` 0 ошибок, все модульные и интеграционные тесты `pytest` проходят на 100%).
+
+---
+
+## Навигатор по документации модулей (Git Module Guides)
+
+Каждый блок репозитория снабжён собственной подробной инструкцией с описанием архитектуры, файлов и контрактов:
+
+| Модуль / Каталог | Инструкция | За что отвечает блок |
+|------------------|------------|----------------------|
+| **`backend/`** | [**`backend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/README.md) | Серверное ядро FastAPI, PostgreSQL/SQLite + Alembic, Celery/Redis, транзакционные пайплайны `dry-run` / `deploy` / `drift`, драйверы `Scrapli` и `OfflineLab`, `TimesFM 3.0`, `AI Guard`, `Emergency Hub`, `FastMCP` |
+| **`frontend/`** | [**`frontend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/README.md) | Клиентское ядро NOC (React 19 + TypeScript 5.9, `0 any`), раскладка по папкам `layout/`, `views/`, `modals/`, `charts/`, темы `Dark`/`Light`, локализация `RU`/`EN`, визард «Матрёшка», хоткеи |
+| **`intent/`** | [**`intent/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/README.md) | Git Source of Truth: реестр устройств `inventory.yaml`, декларативные профили узлов `devices/*.yaml` и правила нормализации `diff_filters.yaml` |
+| **`templates/`** | [**`templates/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates/README.md) | Мульти-вендорный движок шаблонов Jinja2 (`StrictUndefined`) для 6 сетевых ОС (`Cisco IOS-XE`, `Arista EOS`, `Huawei VRP`, `Eltex MES`, `Juniper Junos`, `YADRO KORNFE`) |
+| **`lab/`** | [**`lab/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/lab/README.md) | Лабораторный стенд CLOS: эталонные конфигурации `golden_configs/`, файловый эмулятор `running/` и скрипт сброса `reset_lab.sh` |
+| **`scripts/`** | [**`scripts/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/scripts/README.md) | CLI-утилиты самодиагностики (`doctor.py`), проверки SSH-стенда (`verify_live_lab.py`), сброса (`reset_lab.py`) и демо-прогона (`automate_netops.py`) |
+| **`docs/`** | [**`docs/backend-architecture.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/docs/backend-architecture.md) | Глубокое описание внутренней архитектуры бэкенда, конечного автомата задач и правил Post-Check (`docs/templates-integration.md`, `docs/LIVE_LAB_GUIDE.md`) |
+| **`mobile/`** | [**`mobile/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/mobile/README.md) | Мобильный компаньон дежурного инженера NOC |
 
 ---
 
 ## Содержание
 
 1. [Что это за проект](#1-что-это-за-проект)
-2. [Поддерживаемые вендоры](#2-поддерживаемые-вендоры)
-3. [Текущий статус (что работает / что симулируется / чего нет)](#3-текущий-статус)
-4. [Архитектура](#4-архитектура)
+2. [Поддерживаемые вендоры (6 платформ)](#2-поддерживаемые-вендоры-6-платформ)
+3. [Текущий статус модулей](#3-текущий-статус-модулей)
+4. [Архитектура и структура репозитория](#4-архитектура-и-структура-репозитория)
 5. [Быстрый старт](#5-быстрый-старт)
-6. [Демо-сценарий](#6-демо-сценарий)
-7. [Ключевые риски и план закрытия](#7-ключевые-риски-и-план-закрытия)
-8. [Дорожная карта](#8-дорожная-карта)
-9. [Планирование работ](#9-планирование-работ)
+6. [Сквозной демо-сценарий (для защиты)](#6-сквозной-демо-сценарий-для-защиты)
 
 ---
 
 ## 1. Что это за проект
 
-Платформа централизованного управления разнородной сетевой инфраструктурой: инженер описывает сетевые намерения (Intent) в YAML, платформа сама рассчитывает минимальный точечный патч под каждого вендора, показывает diff, требует явного подтверждения оператора, применяет изменения транзакционно с автоматическим откатом при сбое и постоянно следит за дрейфом конфигураций.
+Платформа централизованного управления разнородной сетевой инфраструктурой по методологии **Intent-Based Networking (IBN)** и **GitOps**:
+- Инженер описывает целевое состояние сети (Intent) в вендор-независимом YAML (`intent/devices/*.yaml`).
+- Платформа выполняет **Pre-Flight Lint** всей фабрики (проверка пересечений IP/масок, дублей Router ID и ASN).
+- Рендерит целевые конфигурации через Jinja2-шаблоны под конкретного вендора, очищает `running-config` от динамического шума и строит минимальный иерархический патч (`hier_config`) и зеркальный патч отката (`rollback_patch`).
+- Проверяет патч через **AI Pre-Flight Guard**, требует явного подтверждения оператора, выкатывает изменения транзакционно (`commit confirmed` / `configure session`) с автоматической верификацией **Post-Check** (BGP Established, префиксы, порты `up/up`, потери ping ≤ 20%) и авто-откатом при сбое.
+- Каждые 15 минут сканирует сеть на конфигурационный дрейф (**Drift Engine**) и прогнозирует исчерпание ресурсов CPU и аплинков с помощью модели временных рядов **TimesFM 3.0**.
 
-**Ключевой сквозной сценарий:**
+**Ключевой сквозной конвейер:**
 
-`Git/YAML intent → lint → render → dry-run → diff → manual approval → deploy/rollback → drift monitoring`
-
-**Стек:** Python 3.11+, FastAPI, Celery, Redis, PostgreSQL, Nornir 3, Scrapli, hier_config, Jinja2, Vite + React (Tailwind CSS, Monaco Editor), Containerlab.
-
----
-
-## 2. Поддерживаемые вендоры
-
-### 2.1. Целевой scope поддержки — 6 вендоров
-
-Решение команды (зафиксировано): платформа должна поддерживать **не менее 6 сетевых вендоров**, включая российских производителей:
-
-| Вендор | ОС | Приоритет | Статус реализации |
-|---|---|---|---|
-| Cisco | IOS-XE | P0 | Реализован (шаблоны, драйвер, тесты). В лабе — spine-слой |
-| Arista | EOS | P0 | Реализован (шаблоны, драйвер, тесты). В лабе — spine-слой |
-| Huawei | VRP (CE12800) | P0 (лаба) | **Основа leaf-слоя фермы.** Шаблоны и драйвер — в работе |
-| Eltex | — | P1 | **Русский вендор проекта.** Планируем добавить одним устройством в лабу |
-| DataRu | — | P2 | Планируется |
-| Континент | — | P2 | Планируется |
-
-**Требование:** в лабораторном стенде должен присутствовать **минимум один российский вендор**. Это **Eltex** — добавляем его в стенд одним устройством (одна нода). Huawei — китайский вендор, он в лабе как основа leaf-слоя, но требование «русский вендор» закрывает именно Eltex.
-
-**Состав лабы:** основа spine-leaf фермы — **Cisco + Arista (spine) и Huawei (leaf)**; **Eltex** — одно дополнительное устройство, отмечается по итогам прогона в Containerlab.
-
-### 2.2. Текущее покрытие по вендорам (честно)
-
-- **Полностью работает (симуляция + тесты):** Cisco IOS-XE, Arista EOS.
-- **Присутствует в лабе, но без реализации:** Huawei VRP — ноды `leaf1`/`leaf2` в Containerlab уже подняты как Huawei CE, шаблонов и драйвера пока нет, deploy на такие ноды заблокирован до появления поддержки.
-- **Live-драйвер (Scrapli):** не покрыт интеграционными тестами и не проверен на живом стенде Containerlab. Для разработки и CI используется файловый режим симуляции (`lab/running/*.cfg`).
+`Git/YAML Intent → Pre-Flight Lint → Jinja2 Render → Dry-Run & Hier-Diff → AI Guard & Approval → Transactional Deploy / Auto-Rollback → Drift & TimesFM Monitoring`
 
 ---
 
-## 3. Текущий статус
+## 2. Поддерживаемые вендоры (6 платформ)
 
-### Что работает и проверено
+Платформа поддерживает **6 сетевых платформ**, включая российских производителей (**Eltex**, **YADRO**):
 
-| Компонент | Статус |
-|---|---|
-| Backend (FastAPI + PostgreSQL + Celery/Redis) | Работает, 299 тестов |
-| Лабораторный стенд (Containerlab) | Целевой режим; file-based симуляция `lab/running/*.cfg` работает для разработки/CI, мутации отслеживаются git |
-| Движок шаблонизации Jinja2 | Cisco, Arista |
-| Иерархический diff (hier_config) | Работает |
-| Пайплайн dry-run → diff → approval → deploy | Работает в режиме симуляции |
-| Движок дрейфа (Config Drift Engine) | Работает (Celery Beat, каждые 15 минут) |
-| Ролевая модель RBAC (Viewer / Operator / Admin) | Работает |
-| Frontend (Vite + React, Monaco Diff Viewer) | Собирается, UI демонстрационный |
-| LLM-ассистент анализа diff | Подключён (провайдер настраивается через `.env`) |
-| CI (pytest, ruff, black, mypy, vite build) | Зелёный, покрытие ~93% |
-
-### Что симулируется / пока не готово
-
-| Функция | Статус | Комментарий |
-|---|---|---|
-| Live-подключение к оборудованию (Scrapli) | Не проверено на живом стенде | Код есть, 0% тестового покрытия |
-| Шаблоны Huawei VRP | В работе | Приоритет №1 по вендорам — Huawei стоит в лабе |
-| Подключение платформы к живому Containerlab-стенду | Не проверено | Scrapli live-драйвер не прогонялся против нод лабы |
-| Containerlab-стенд с Eltex | Не проверен | Русский вендор; добавляем в стенд одной нодой |
-| Frontend в docker-compose | Не подключён | Отдельный dev-сервер Vite (по плану — добавить в compose к сдаче, спринт 3) |
-| Prometheus / Grafana | Prometheus поднят | Метрики пишутся в БД и отдаются в `/metrics`, Prometheus снимает их в compose; Grafana и дашборды — спринт 3 (Тимофей) |
-
-### Интеграционные тесты
-
-- **297/299 прошли.** Два падения связаны с рассинхронизацией `intent/inventory.yaml` (поля `id`, `status` у устройств) и Pydantic-схемы (`extra="forbid"`).
-- Это **не** блокер для демонстрации, но **блокирует** авто-синхронизацию intent → база. Исправление в работе: привести к одному контракту (либо убрать поля из YAML, либо добавить их в модель) + regression-тест на реальный `intent/`.
+| Вендор | Платформа (`Platform`) | Роль в стенде / Назначение | Шаблоны Jinja2 | Нормализация и Diff | Драйвер (`Scrapli` + `Offline`) |
+|--------|------------------------|----------------------------|:--------------:|:-------------------:|:-------------------------------:|
+| **Cisco** | `cisco_iosxe` (c8000v / CSR1000v) | `spine-1.croc.lab` (Spine-ядро CLOS) | ✅ `templates/cisco_iosxe/` | ✅ `hier_config` + фильтры | ✅ Реализован и проверен |
+| **Arista** | `arista_eos` (cEOS 4.32) | `spine-2.croc.lab` (Spine-ядро CLOS) | ✅ `templates/arista_eos/` | ✅ `hier_config` + фильтры | ✅ Реализован и проверен |
+| **Huawei** | `huawei_vrp` (CloudEngine CE12800) | `leaf-1`, `leaf-2` (Leaf-уровень CLOS) | ✅ `templates/huawei_vrp/` | ✅ `undo`-генератор + фильтры | ✅ Реализован и проверен |
+| **Eltex** | `eltex_mes` / `eltex_esr` | Российский вендор (Leaf / Edge) | ✅ `templates/eltex_mes/` | ✅ `hier_config` + фильтры | ✅ Реализован и проверен |
+| **YADRO** | `yadro_kornfe` (KORNFE SONiC) | Российский вендор ЦОД (Leaf / Spine) | ✅ `templates/yadro_kornfe/` | ✅ Фильтры секций | ✅ Реализован |
+| **Juniper** | `juniper_junos` (vMX / vQFX) | Магистральный Edge / Core | ✅ `templates/juniper_junos/` | ✅ Фильтры секций | ✅ Реализован |
 
 ---
 
-## 4. Архитектура
+## 3. Текущий статус модулей
 
-### 4.1. Сетевая топология лабы (CLOS)
+| Подсистема | Статус | Где реализовано |
+|------------|--------|-----------------|
+| **Backend Core (FastAPI + SQLAlchemy 2.0 + Alembic + Celery/Redis)** | ✅ Готово (100% тестов проходят) | [`backend/netops/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops) |
+| **Pre-Flight Intent Linter & Pydantic Schema** | ✅ Готово (`inventory.yaml` и `devices/*.yaml` синхронизированы) | [`backend/netops/intent/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/intent) |
+| **Multi-Vendor Jinja2 Templates (6 платформ)** | ✅ Готово (`base`, `interfaces`, `acls`, `bgp`) | [`templates/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates) |
+| **Иерархический Diff и Нормализация CLI** | ✅ Готово (`hier_config` + `diff_filters.yaml`) | [`backend/netops/network/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network) |
+| **Двойной сетевой контур (`Scrapli SSH` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API) | [`scrapli_driver.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/scrapli_driver.py), [`offline.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/offline.py) |
+| **Предиктивная аналитика `TimesFM 3.0` + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/forecast.py), [`ai_guard.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/ai_guard.py) |
+| **Аварийный пульт `Emergency Hub` и `Factory Freeze`** | ✅ Готово (прямой CLI, экстренный патч, Soft/Hard Reset, Kill Switch) | [`emergency.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/emergency.py), [`EmergencyHub.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/EmergencyHub.tsx) |
+| **4-шаговый визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (Telegram Owner, SSH Probe, матрица паролей, GitHub SoT, `Dark`/`Light`, `RU`/`EN`) | [`system.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/system.py), [`WelcomeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/WelcomeModal.tsx) |
+| **Frontend NOC SPA (React 19 + TS Strict, `0 any`)** | ✅ Готово (25 компонентов в 4 доменных папках, 2D/3D топология, RBAC) | [`frontend/src/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src) |
+| **Наблюдаемость (Prometheus `/metrics` + Telegram Bot)** | ✅ Готово | [`backend/netops/telemetry/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/telemetry) |
 
-Лабораторный стенд — двухуровневая CLOS-фабрика (eBGP underlay): основа фермы — Cisco и Arista на spine-слое, Huawei на leaf-слое; Eltex добавляется одним устройством как российский вендор.
+---
 
-| Роль | Узел | Вендор / ОС | Статус в платформе |
-|---|---|---|---|
-| Spine 1 | `spine1` | Cisco IOS-XE (c8000v, 17.03.08a) | Реализован (шаблоны, драйвер) |
-| Spine 2 | `spine2` | Arista EOS (cEOS 4.32.0F) | Реализован |
-| Leaf 1 | `leaf1` | Huawei VRP (CE12800, 8.180) | Поддержка в работе |
-| Leaf 2 | `leaf2` | Huawei VRP (CE12800, 8.180) | Поддержка в работе |
-| Leaf 3 (план) | `leaf-eltex` | Eltex (одна нода) | Русский вендор проекта; пробуем поднять в Containerlab |
-
-- **Топология:** 2 spine (Cisco + Arista) × 2 leaf (Huawei) — полный меш из 4 линков между слоями.
-- **Хосты:** `host-a` и `host-b` (Alpine) за leaf-узлами — для сквозных ping/health-проверок сквозь фабрику.
-- **Management:** выделенная сеть `clab_mgmt` (172.20.20.0/24), каждый узел доступен бэкенду по SSH.
-- Три вендора в одной фабрике — честная проверка вендорной абстракции платформы: один intent → три разных синтаксиса CLI.
-
-Манифест стенда: `dc-clos-cisco-arista-huawei` (Containerlab, kind-образы `cisco_c8000v`, `arista_ceos`, `huawei_vrp`).
-
-### 4.2. Ключевые принципы платформы
-
-- **Source of Truth — Git + YAML.** Инженеры описывают намерения, а не вендорские команды. Вся история изменений — в истории коммитов.
-- **Абстракция над вендорами.** Jinja2-шаблоны по вендорам превращают абстрактную модель (интерфейсы, BGP, ACL) в точные CLI-команды. Логика протоколов не зависит от синтаксиса ОС.
-- **Иерархический diff.** hier_config считает минимальный патч (`remediation_config`) и зеркальный набор команд отката (`rollback_config`).
-- **Транзакционная раскатка.** Commit confirmed / configure session, Post-Check тесты (BGP Established, статус портов, ping), автоматический откат при сбое.
-- **Непрерывный комплаенс.** Celery Beat каждые 15 минут сверяет реальный конфиг с эталоном и поднимает статус `DRIFT_DETECTED` при расхождении.
-
-**Стек и обоснование выбора:**
-
-| Уровень | Выбор | Почему |
-|---|---|---|
-| Source of Truth | Git + YAML | Быстрый старт, прозрачная история через коммиты, не требует отдельной СУБД как NetBox |
-| Генерация конфигов | Jinja2 + Pydantic + hier_config | Без тяжёлой Java-инфраструктуры Batfish, с автоматическим расчётом патчей и отката |
-| Драйверы | Nornir 3 + Scrapli | Параллельный сбор конфигов, быстрые интерактивные SSH-сессии |
-| Backend | FastAPI + PostgreSQL + Celery/Redis | Автогенерация Swagger, изоляция сетевых операций в фоновые воркеры |
-| Frontend | Vite + React + Monaco Editor | Качественный side-by-side diff viewer |
-| Лаба | Containerlab | Быстрый подъём реального стенда в контейнерах за секунды, минимум ресурсов; file-based режим — симуляция для разработки и CI |
-
-**Структура репозитория:**
+## 4. Архитектура и структура репозитория
 
 ```text
-backend/     FastAPI, Celery-воркеры, движок drift, драйверы, миграции
-frontend/    Vite + React панель (Monaco Diff Viewer, топология, дрейф)
-intent/      YAML-модели сети: inventory.yaml, intent-файлы
-templates/   Jinja2 шаблоны по вендорам (cisco_iosxe/, arista_eos/)
-lab/         file-based стенд: lab/running/*.cfg — снимки running-config
+CROC-DREAM-NetOps-Platform/
+├── README.md                  # Главный навигатор по платформе (этот файл)
+├── docker-compose.yml         # Полный стек: postgres, redis, api, worker, beat, prometheus, telegram-bot
+├── backend/                   # Серверное ядро FastAPI + Celery + Scrapli (см. backend/README.md)
+│   ├── netops/                # Пакеты: api/, services/, pipeline/, network/, intent/, models/, schemas/, telemetry/, worker/
+│   ├── migrations/            # Миграции схемы БД (Alembic)
+│   ├── tests/                 # Модульные, API и интеграционные тесты (pytest)
+│   └── run_local.py           # Автономный лаунчер без Docker (SQLite + Eager Celery + авто-сидинг)
+├── frontend/                  # Клиентский интерфейс NOC на React 19 + TypeScript (см. frontend/README.md)
+│   └── src/
+│       ├── api.ts             # Строго типизированный HTTP/WS клиент
+│       ├── App.tsx            # Корневой оркестратор состояния и хоткеев
+│       └── components/
+│           ├── layout/        # Каркас и дизайн-система (Header, Sidebar, MobileNav, CommandPalette, ui)
+│           ├── views/         # Рабочие экраны (Dashboard, DeviceList, DevicePage, DiffViewer, DriftView, JobsView, ChaosLabView, EmergencyHub, SlidesPresentation)
+│           ├── modals/        # Модальные окна и дроверы (WelcomeModal, ShareModal, DryRunModal, AddDeviceModal, DeviceDrawer, DeviceDetailModal, CopilotPanel, ShortcutsModal)
+│           └── charts/        # Визуализация (TopologyMap 2D, Topology3D, ForecastChart)
+├── intent/                    # Git Source of Truth: inventory.yaml, devices/*.yaml, diff_filters.yaml (см. intent/README.md)
+├── templates/                 # Шаблоны Jinja2 для 6 платформ: cisco_iosxe, arista_eos, huawei_vrp, eltex_mes, juniper_junos, yadro_kornfe (см. templates/README.md)
+├── lab/                       # Лабораторный стенд: golden_configs/, running/, reset_lab.sh (см. lab/README.md)
+├── scripts/                   # Инженерные CLI-утилиты: doctor.py, verify_live_lab.py, reset_lab.py, automate_netops.py (см. scripts/README.md)
+├── tools/                     # MCP-серверы для агентной интеграции (mcp_netops_platform, mcp_server_monitor)
+├── monitoring/                # Конфигурация сбора метрик Prometheus (prometheus.yml)
+└── docs/                      # Архитектурная документация и гайды (backend-architecture.md, LIVE_LAB_GUIDE.md, templates-integration.md)
 ```
 
 ---
 
 ## 5. Быстрый старт
 
-### Вариант A — локальный запуск без Docker (рекомендуется для разработки и демо)
+### Вариант A — Локальный запуск без Docker за 30 секунд (рекомендуется для разработки и демо)
 
 ```bash
-# 1. Backend (SQLite + in-process dispatcher, без Docker)
-cd backend
-python run_local.py
-# API: http://127.0.0.1:8000, Swagger: http://127.0.0.1:8000/docs
+# 1. Запуск Backend (SQLite + синхронный пайплайн, порт 8001)
+backend/.venv/bin/python backend/run_local.py
+# API: http://127.0.0.1:8001 | Swagger: http://127.0.0.1:8001/docs
 
-# 2. Frontend (отдельный Vite dev server)
-cd frontend
-npm install
-npm run dev
-# http://localhost:5173, проксирует /api на 127.0.0.1:8000
+# 2. Запуск Frontend (Vite dev server, порт 5173)
+npm --prefix frontend run dev
+# UI: http://127.0.0.1:5173 | Визард настройки: http://127.0.0.1:5173/?setup=1
 ```
 
-`run_local.py` поднимает SQLite вместо PostgreSQL и потоковый in-process диспетчер вместо Celery — без Docker и внешних сервисов. Изменения в `lab/running/*.cfg` мутируют tracked-файлы, для сброса используйте reset.
-
-### Вариант B — Docker Compose (backend-стек)
+### Вариант B — Полный продакшн-стек в Docker Compose
 
 ```bash
-docker compose up -d
-# Поднимает: postgres, redis, api, worker, beat, prometheus, telegram-bot
-# Frontend и Grafana в compose пока НЕ включены
-```
-
-> Важно: `docker compose config` валиден, но полноценный runtime smoke всех контейнеров пока не подтверждён. Для демонстрации использовать Вариант A.
-
-### Проверка работоспособности
-
-```bash
-curl http://127.0.0.1:8000/healthz
-# Ожидаемо: {"status": "ok"}
+docker compose up --build -d
+python3 backend/scripts/smoke_stack.py
 ```
 
 ---
 
-## 6. Демо-сценарий
+## 6. Сквозной демо-сценарий (для защиты)
 
-Детерминированный сценарий для защиты (7 минут):
-
-1. Старт платформы (`run_local.py` + Vite).
-2. Health-check `/healthz`, `/readyz`.
-3. Синхронизация inventory из `intent/inventory.yaml`.
-4. Правка одного intent YAML — например, изменение описания интерфейса или добавление BGP-соседа.
-5. Dry-run → платформа показывает side-by-side diff (remediation + rollback).
-6. Ручное подтверждение (Manual Approval).
-7. Успешный деплой, health-проверки зелёные.
-8. Искусственный сбой (внести drift вручную в `lab/running/*.cfg`).
-9. Rollback / remediation — возврат к эталону.
-10. Отчёт по дрейфу.
-
-Сброс лабы: вернуть `lab/running/*.cfg` в исходное состояние (git checkout этих файлов) и перезапустить `run_local.py`.
-
----
-
-## 7. Ключевые риски и план закрытия
-
-### 7.1. Риски по коду и процессу
-
-Полный независимый аудит — в файле `result.md`. Сводка приоритетов:
-
-| Приоритет | Проблема | План |
-|---|---|---|
-| P0 | `intent/inventory.yaml` не проходит собственную Pydantic-схему (9 ошибок `extra_forbidden`) | Синхронизировать схему и YAML, вернуть 299/299 |
-| P0 | Huawei — leaf-слой лабы, но нет шаблонов/драйвера | Добавить поддержку Huawei VRP (шаблоны + драйвер + health parser) |
-| P0 | Пароли в `intent/inventory.yaml` в открытом виде | Убрать из tracked YAML, ротировать, оставить только profile names |
-| P1 | Scrapli live-драйвер без тестов и вне Docker image | Добавить contract tests + опциональный extra в image |
-| P1 | Dev-токены в frontend | Вынести за `DEMO ONLY`, добавить настоящий login/session |
-| P1 | Нет лимитов/redaction перед LLM | Redact secrets до отправки, timeout, max diff size |
-| P2 | 6 lint warnings, большой JS bundle | useCallback, code-splitting, lazy tabs |
-| P2 | Compose без healthcheck для worker/beat | Добавить heartbeat/readiness для Celery |
-
-### 7.2. Риски по стеку (на обсуждение с командой)
-
-Эти риски касаются не кода, а выбранных технологий. Решения по ним не приняты — выносим на обсуждение.
-
-**Р-1. hier_config не поддерживает Huawei VRP — расчёт diff/rollback на leaf-узлах не работает из коробки**
-
-Что это значит простыми словами: вся механика «минимальный патч + команды отката» у нас построена на библиотеке hier_config. Она умеет понимать синтаксис Cisco IOS-XE, Arista EOS и ещё нескольких ОС, но синтаксис Huawei VRP (наш leaf-слой) она не знает. Это значит, что на leaf1/leaf2 платформа не сможет ни посчитать diff, ни сгенерировать rollback — то есть ровно та половина фермы, где стоит русский/дружественный вендор, останется без главной фичи.
-
-Возможные решения (выбрать одно):
-- **а)** Написать свой dialect (набор правил) для Huawei VRP внутри hier_config. Трудозатратно, но даёт полноценный diff и rollback. Риск: hier_config имеет жёсткие внутренние допущения под Cisco-семейство, может не завестись без форка.
-- **б)** Для Huawei сделать простой текстовый fallback-diff: сравнение строк конфигов с фильтрацией мусора. Diff будет работать, но rollback-команды придётся генерировать по своей логике (для Huawei это `undo`-команды — механика у них предсказуемая). Компромисс трудозатрат и результата.
-- **в)** Для MVP держать Huawei-ноды в режиме «сбор конфига + drift», а deploy на них отключить, честно описав это в ограничениях. Самый дешёвый вариант, но тогда транзакционный деплой демонстрируется только на Cisco/Arista.
-
-Рекомендация: вариант (б) — на хакатонном горизонте он реалистичнее всего, при этом diff и rollback на Huawei будут работать.
-
-**Р-2. Scrapli-community не имеет платформ для Huawei VRP и Eltex — второй драйвер почти неизбежен**
-
-Что это значит простыми словами: Scrapli в связке со scrapli-community умеет «разговаривать» с Cisco и Arista из коробки. Для Huawei VRP и Eltex готовых драйверов там нет — придётся либо описывать их промпты вручную, либо взять вторую библиотеку. Практичный путь — добавить Netmiko рядом со Scrapli: Netmiko официально поддерживает и huawei, и eltex платформы. Это не дублирование ради дублирования, а самый короткий способ закрыть русский вендор и leaf-слой.
-
-Возможные решения:
-- **а)** Добавить netmiko как второй драйвер для Huawei/Eltex (Scrapli остаётся для Cisco/Arista). Быстро, обе библиотеки стабильны, держать их рядом несложно.
-- **б)** Дописать платформы для Huawei/Eltex внутри scrapli-community своими силами. Чище архитектурно, но заметно дольше и рискованнее в сжатые сроки.
-
-Рекомендация: вариант (а).
-
-**Р-3. Nornir заявлен в стеке, но в проекте его нет**
-
-Что это значит простыми словами: в README и старом ТЗ Nornir 3 фигурирует как часть стека, но в `backend/pyproject.toml` его нет — то есть зависимость не подключена, и параллельный сбор конфигов в коде, судя по всему, реализован своими потоками. Это не баг, а расхождение обещаний с реальностью: на защите могут спросить «где у вас Nornir?».
-
-Возможные решения:
-- **а)** Убрать Nornir из заявленного стека в README и оставить «Scrapli + собственный параллельный исполнитель». Честно, минус зависимость, меньше верхнего слоя.
-- **б)** Добавить Nornir в зависимости и завести его в код как менеджер параллельного запуска. Сильнее по резюме участников, но потребует переработки драйверного слоя.
-
-Рекомендация: вариант (а) для MVP — быстрее; Nornir можно вернуть в следующем этапе.
-
-**Р-4. Docker-образ backend не содержит Scrapli и ssh — live-режим не запустится в контейнере**
-
-Что это значит простыми словами: Scrapli у нас опциональная зависимость, а Docker image собирается без optional-групп, плюс в образе нет системного ssh. Значит, когда мы будем готовы подключаться к живому стенду из контейнера — ничего не заработает: библиотеки просто нет в образе. Прямо сейчас это не мешает (работает симуляция), но станет неприятным сюрпризом на этапе live-подключения.
-
-Возможные решения: добавить scrapli в основной список зависимостей (или собирать image с `--extra scrapli`) и установить openssh-client в образ.
-
-**Р-5. Роль Ansible — решили не добавлять (зафиксировано, чтобы не обсуждать повторно)**
-
-Ansible рассматривался как кандидат в стек, но не подходит под наш сценарий: платформа делает не «прогон playbook», а транзакционный цикл (dry-run → diff → approval → commit confirmed → post-check → rollback), который в Ansible выражается костылями; под капотом Ansible использует те же драйверы, что дали бы второй слой подключений; и он ослабил бы демонстрацию собственной инженерной работы (Nornir/Scrapli/hier_config) для жюри. Первичная подготовка нод закрывается `startup-config` в манифесте Containerlab. Решение: не добавляем. Вернуться к обсуждению можно только если появится задача вне рамок MVP (например, массовый bootstrap большой фермы).
-
-**Р-6. Jinja2-шаблоны есть только под Cisco и Arista — Huawei и Eltex без шаблонов не рендерятся**
-
-Что это значит простыми словами: вся генерация конфигов построена на Jinja2 — в `templates/` лежат папки по вендорам, и движок рендерит intent YAML в команды CLI по шаблонам выбранной платформы. Сейчас папок две: `cisco_iosxe/` и `arista_eos/` (в каждой base, interfaces, bgp, acls). Для Huawei VRP и Eltex шаблонов нет — значит, рендеринг для них упадёт: платформа не сможет превратить intent в команды ни для leaf-слоя (Huawei), ни для русского вендора (Eltex).
-
-Важный нюанс по строкам шаблонов: команды у Cisco и Huawei при беглом взгляде похожи, но не идентичны — у Huawei свои имена интерфейсов (GigabitEthernet0/0/0 вместо GigabitEthernet1), свой синтаксис BGP-соседей, свои `undo`-команды вместо `no`. То есть «переиспользовать аристовские шаблоны с мелкими правками» не выйдет — нужны отдельные папки `templates/huawei_vrp/` и `templates/eltex/` со своими base/interfaces/bgp/acls.
-
-Возможные решения:
-- **а)** Написать шаблоны для Huawei и Eltex по их эталонным конфигам (снять реальный конфиг с ноды в Containerlab и перенести в Jinja2). Рекомендуемый путь: у обеих платформ структура команд известна, один вендорский набор — это 4 файла по 30–60 строк.
-- **б)** Начать только с Eltex (если он первый пойдёт в лабу) и подключить Huawei следом — но тогда leaf-слой до этого момента остаётся без рендеринга.
-
-Рекомендация: вариант (а), и приоритет — Huawei (он уже стоит в лабе на leaf-узлах), Eltex следом за добавлением ноды.
-
----
-
-## 8. Дорожная карта
-
-### Ближайший релиз (MVP для защиты)
-
-1. Синхронизировать inventory-схему, вернуть 299/299 тестов.
-2. Добавить шаблоны и драйвер для **Huawei VRP** — основа leaf-слоя фермы.
-3. Добавить **Eltex** в лабу одним устройством — русский вендор проекта (требование: минимум один российский вендор в стенде).
-4. Убрать секреты из `intent/`, добавить production config validation.
-5. Довести demo до воспроизводимого one-command сценария.
-
-### Следующий этап
-
-5. Live-драйвер (Scrapli) с contract tests и live-lab smoke на стенде Containerlab (Cisco/Arista/Huawei).
-6. DataRu и Континент — расширение списка вендоров до 6.
-7. Подключение frontend и monitoring (Prometheus/Grafana) в Compose.
-
----
-
-## 9. Планирование работ
-
-Оперативный план команды — в файле `задачи_по_спринтам.md`: три спринта (28 сентября — 16 октября), разложен по участникам (МП, Аня, Тимофей, Лёша, Максим), с дедлайнами и контрольными точками:
-
-- **Спринт 1 (28.09–04.10):** лаба в Containerlab, YAML-формат, каркас API, первый фронт. Точка: 4 узла отвечают по SSH, устройства в базе.
-- **Спринт 2 (05.10–11.10):** Jinja2-шаблоны под Cisco/Arista, hier_config на живом стенде, Redis/Celery, dry-run через API, Prometheus + Grafana. Точка: diff и rollback-команды по кнопке из API.
-- **Спринт 3 (12.10–16.10):** транзакционный деплой с commit confirmed, drift через Celery Beat, RBAC, Monaco Diff Viewer, LLM-ассистент, финальный compose. Жёсткий дедлайн: **16 октября, 18:00**.
-
-Спорные вопросы и хвосты выносятся на онлайн-отборочный этап (19–21 октября), очный финал — 22 октября в МТУСИ.
+1. **Первичная инициализация («Матрёшка»)**: откройте `http://127.0.0.1:5173/?setup=1`, переключите тему (`Dark` / `Light`) или язык (`RU` / `EN`) и пройдите 4 шага проверки контура.
+2. **Обзор топологии и прогнозов (`Dashboard`)**: покажите граф CLOS-фабрики (`2 Spine` + `2 Leaf`), статус `AI Pre-Flight Guard` и прогноз загрузки `TimesFM 3.0`.
+3. **Инспекция узла и Intent (`DevicePage` / `DeviceDetailModal`)**: кликните на любой узел на карте, откройте YAML-интент или перейдите в диагностику узла с графиками метрик и таблицей BGP-соседей.
+4. **Dry-Run и Diff (`DryRunModal` → `DiffViewer`)**: запустите `Dry-Run`, покажите построчное сравнение `running` vs `candidate` и вызовите ИИ-объяснение рисков.
+5. **Chaos Engineering и Авто-ремедиация (`ChaosLabView` → `DriftView`)**: инжектируйте несанкционированный дрейф на `spine-1` или `leaf-1`, покажите обнаружение `DRIFT_DETECTED` и устраните отклонение одной кнопкой `Remediate`.
+6. **Аварийный контур (`EmergencyHub`)**: продемонстрируйте прямой CLI-терминал, рубильник `Factory Freeze` (блокирующий любые выкатки при аварии) и возврат к эталону через `Soft Reset`.

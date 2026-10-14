@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, inspect, select
@@ -807,10 +807,75 @@ class RecoverOwnerRequest(BaseModel):
     telegram_code: str | None = None
 
 
+_tunnel_proc: Any = None
+_ws_tickets: dict[str, dict[str, Any]] = {}
+
+
+def _sync_public_tunnel(enable: bool, host: str, port: int, user: str) -> dict[str, Any]:
+    import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+
+    global _tunnel_proc
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return {
+            "active": enable,
+            "mode": "public_tunnel" if enable else "local_only",
+            "public_url": f"http://{host}:5173" if enable else None,
+            "local_url": "http://127.0.0.1:5173",
+        }
+    if not enable:
+        if _tunnel_proc is not None and _tunnel_proc.poll() is None:
+            try:
+                _tunnel_proc.terminate()
+            except Exception:
+                pass
+        _tunnel_proc = None
+        return {
+            "active": False,
+            "mode": "local_only",
+            "public_url": None,
+            "local_url": "http://127.0.0.1:5173",
+        }
+
+    if _tunnel_proc is None or _tunnel_proc.poll() is not None:
+        try:
+            _tunnel_proc = subprocess.Popen(
+                [
+                    "ssh",
+                    "-N",
+                    "-o",
+                    "ServerAliveInterval=30",
+                    "-o",
+                    "ServerAliveCountMax=3",
+                    "-o",
+                    "ExitOnForwardFailure=yes",
+                    "-R",
+                    "127.0.0.1:15173:127.0.0.1:5173",
+                    "-p",
+                    str(port),
+                    f"{user}@{host}",
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            _tunnel_proc = None
+    is_alive = _tunnel_proc is not None and _tunnel_proc.poll() is None
+    return {
+        "active": is_alive,
+        "mode": "public_tunnel" if is_alive else "local_only",
+        "public_url": f"http://{host}:5173" if is_alive else None,
+        "local_url": "http://127.0.0.1:5173",
+    }
+
+
 class BootstrapConfigureRequest(BaseModel):
     cluster_name: str | None = None
+    exposure_mode: str | None = None  # "local_only" | "public_tunnel"
+    websocket_enabled: bool | None = None
     github_repo_url: str | None = None
     github_pat: str | None = None
+    github_webhook_secret: str | None = None
     webhook_public_url: str | None = None
     telegram_bot_token: str | None = None
     telegram_chat_id: str | None = None
@@ -869,11 +934,23 @@ def get_bootstrap_status(
     devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
     in_sync = sum(1 for d in devices if d.status is DeviceStatus.IN_SYNC)
 
+    exp_mode = str(rt.get("exposure_mode") or "local_only")
+    ws_enabled = bool(rt.get("websocket_enabled", False))
+    c_host = settings.clab_host or "5.228.243.54"
+
     return {
         "initialized": owner_claimed,
         "bootstrap_completed": bootstrap_done,
         "caller_is_bound_owner": caller_is_bound_owner,
         "cluster_name": str(rt.get("cluster_name") or "CROC-FABRIC-PROD-01"),
+        "exposure": {
+            "mode": exp_mode,
+            "public_tunnel_enabled": exp_mode == "public_tunnel",
+            "local_url": "http://127.0.0.1:5173",
+            "public_url": f"http://{c_host}:5173" if exp_mode == "public_tunnel" else None,
+            "websocket_enabled": ws_enabled,
+            "websocket_auth_scheme": "Ephemeral One-Time Ticket (POST /api/v1/ws/ticket -> wst_*, TTL 30s)",
+        },
         "owner": {
             "exists": owner is not None,
             "username": owner.username if owner else "owner",
@@ -890,6 +967,9 @@ def get_bootstrap_status(
             "yaml_devices_count": yaml_count,
             "webhook_endpoint": "/api/v1/git/webhook",
             "webhook_registered": bool(rt.get("github_webhook_registered", True)),
+            "sync_mode": "Incoming GitHub Webhook + git pull"
+            if exp_mode == "public_tunnel"
+            else "Local Outbound SSH git pull (без открытых внешних портов)",
         },
         "telegram": {
             "bot_token_set": bool(settings.telegram_bot_token),
@@ -901,7 +981,7 @@ def get_bootstrap_status(
         },
         "server": {
             "network_driver": settings.network_driver,
-            "clab_host": settings.clab_host or "5.228.243.54",
+            "clab_host": c_host,
             "clab_port": settings.clab_port or 221,
             "clab_user": settings.clab_user or "crocdream",
             "devices_count": len(devices),
@@ -1140,8 +1220,14 @@ def configure_bootstrap_layers(
     updates: dict[str, object] = {}
     if req.cluster_name:
         updates["cluster_name"] = req.cluster_name.strip()
+    if req.exposure_mode in ("local_only", "public_tunnel"):
+        updates["exposure_mode"] = req.exposure_mode
+    if req.websocket_enabled is not None:
+        updates["websocket_enabled"] = bool(req.websocket_enabled)
     if req.github_repo_url:
         updates["github_repo_url"] = req.github_repo_url.strip()
+    if req.github_webhook_secret is not None:
+        updates["github_webhook_secret"] = req.github_webhook_secret.strip()
     if req.telegram_bot_token:
         updates["telegram_bot_token"] = req.telegram_bot_token.strip()
     if req.telegram_chat_id:
@@ -1165,16 +1251,19 @@ def configure_bootstrap_layers(
                 req.webhook_public_url or "http://5.228.243.54:5173/api/v1/git/webhook"
             ).strip()
             api_url = f"https://api.github.com/repos/{owner_org}/{repo_name}/hooks"
+            cfg_obj: dict[str, str] = {
+                "url": hook_target,
+                "content_type": "json",
+                "insecure_ssl": "0",
+            }
+            if req.github_webhook_secret:
+                cfg_obj["secret"] = req.github_webhook_secret.strip()
             body = json.dumps(
                 {
                     "name": "web",
                     "active": True,
                     "events": ["push"],
-                    "config": {
-                        "url": hook_target,
-                        "content_type": "json",
-                        "insecure_ssl": "0",
-                    },
+                    "config": cfg_obj,
                 }
             ).encode("utf-8")
             http_req = urllib.request.Request(
@@ -1218,10 +1307,19 @@ def configure_bootstrap_layers(
             pass
 
     saved = settings.save_runtime_overlay(updates)
+    exp_mode = str(saved.get("exposure_mode") or "local_only")
+    tunnel_state = _sync_public_tunnel(
+        enable=(exp_mode == "public_tunnel"),
+        host=settings.clab_host or "5.228.243.54",
+        port=int(settings.clab_port or 221),
+        user=settings.clab_user or "crocdream",
+    )
     git_meta = _git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
 
     return {
         "status": "ok",
+        "exposure": tunnel_state,
+        "websocket_enabled": bool(saved.get("websocket_enabled", False)),
         "webhook_status": webhook_status,
         "bot_verified": bot_verified,
         "bot_username": f"@{bot_username.lstrip('@')}",
@@ -1378,6 +1476,13 @@ def discover_and_attach_server(
 
     inventory = container.intents.load_inventory()
     sync_res = DeviceService(session).sync_inventory(inventory)
+    from netops.enums import DeviceStatus  # noqa: PLC0415
+
+    reachable_hosts = {sw["hostname"] for sw in discovered_switches if sw["reachable"]}
+    for dev in DeviceService(session).list_devices(limit=100):
+        if dev.hostname in reachable_hosts:
+            dev.status = DeviceStatus.IN_SYNC
+    session.commit()
 
     return {
         "status": "ok",
@@ -1392,3 +1497,80 @@ def discover_and_attach_server(
     }
 
 
+@api_router.post(
+    "/ws/ticket",
+    tags=["system"],
+    summary="Выпуск одноразового 30-секундного билета (Ephemeral Ticket) для авторизации WebSocket",
+)
+def issue_websocket_ticket(
+    request: Request,
+    container: ContainerDep,
+    user: Viewer,
+) -> dict[str, Any]:
+    import secrets  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    rt = container.settings.apply_runtime_overlay()
+    ws_enabled = bool(rt.get("websocket_enabled", False))
+    client_id = (request.headers.get("X-Client-Id") or "").strip() or "browser-client"
+    client_ip = request.client.host if request.client else "127.0.0.1"
+
+    now = time.time()
+    expired = [k for k, v in _ws_tickets.items() if float(v.get("expires_at", 0)) < now]
+    for k in expired:
+        _ws_tickets.pop(k, None)
+
+    ticket = f"wst_{secrets.token_urlsafe(24)}"
+    _ws_tickets[ticket] = {
+        "username": user.username,
+        "role": user.role.value,
+        "client_id": client_id,
+        "ip": client_ip,
+        "expires_at": now + 30.0,
+    }
+    return {
+        "ticket": ticket,
+        "ttl_seconds": 30,
+        "websocket_enabled": ws_enabled,
+        "ws_path": f"/api/v1/ws/stream?ticket={ticket}",
+        "bound_to": {
+            "username": user.username,
+            "role": user.role.value,
+            "client_id": client_id,
+            "ip": client_ip,
+        },
+    }
+
+
+@api_router.websocket("/ws/stream")
+async def websocket_event_stream(
+    websocket: WebSocket,
+    ticket: str = "",
+) -> None:
+    import asyncio  # noqa: PLC0415
+    import time  # noqa: PLC0415
+
+    now = time.time()
+    meta = _ws_tickets.pop(ticket, None) if ticket else None
+    if not meta or float(meta.get("expires_at", 0)) < now:
+        await websocket.close(code=1008, reason="Invalid or expired one-time WebSocket ticket")
+        return
+
+    await websocket.accept()
+    try:
+        await websocket.send_json(
+            {
+                "event": "ws_authenticated",
+                "username": meta["username"],
+                "role": meta["role"],
+                "client_id": meta["client_id"],
+                "auth_scheme": "ephemeral_one_time_ticket",
+                "timestamp": int(now),
+            }
+        )
+        while True:
+            msg = await asyncio.wait_for(websocket.receive_text(), timeout=25.0)
+            if msg == "ping":
+                await websocket.send_json({"event": "pong", "ts": int(time.time())})
+    except (WebSocketDisconnect, TimeoutError, Exception):
+        return

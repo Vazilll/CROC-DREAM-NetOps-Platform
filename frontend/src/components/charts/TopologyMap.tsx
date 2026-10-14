@@ -1,11 +1,11 @@
 import React, { useMemo, useState, useEffect, Suspense } from 'react';
 import { ExternalLink, Play, X, Layers, Network, Box, Cpu } from 'lucide-react';
-import { api } from '../api';
-import type { Device, ForecastAlert } from '../api';
-import type { Locale } from '../i18n';
-import { StatusBadge } from './ui';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
-import { DeviceDetailModal } from './DeviceDetailModal';
+import { api } from '../../api';
+import type { Device, ForecastAlert } from '../../api';
+import type { Locale } from '../../i18n';
+import { StatusBadge } from '../layout/ui';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
+import { DeviceDetailModal } from '../modals/DeviceDetailModal';
 
 const LazyTopology3D = React.lazy(() =>
   import('./Topology3D').then((m) => ({ default: m.Topology3D }))

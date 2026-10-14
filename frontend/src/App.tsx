@@ -1,30 +1,30 @@
 import { Suspense, lazy, useEffect, useMemo, useState, useCallback } from 'react';
-import { api } from './api';
+import { api, getErrorMessage } from './api';
 import type { Device, JobSummary, UserRole } from './api';
-import { Header } from './components/Header';
-import type { AppTheme } from './components/Header';
-import { Sidebar } from './components/Sidebar';
-import { Dashboard } from './components/Dashboard';
-import { CommandPalette } from './components/CommandPalette';
-import { MobileNav } from './components/MobileNav';
+import { Header } from './components/layout/Header';
+import type { AppTheme } from './components/layout/Header';
+import { Sidebar } from './components/layout/Sidebar';
+import { Dashboard } from './components/views/Dashboard';
+import { CommandPalette } from './components/layout/CommandPalette';
+import { MobileNav } from './components/layout/MobileNav';
 import { translations } from './i18n';
 import type { Locale } from './i18n';
 import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
 
 // Lazy-loaded secondary views and overlays to isolate heavy dependencies and code-split bundles
-const DevicePage = lazy(() => import('./components/DevicePage').then((m) => ({ default: m.DevicePage })));
-const DeviceList = lazy(() => import('./components/DeviceList').then((m) => ({ default: m.DeviceList })));
-const JobsView = lazy(() => import('./components/JobsView').then((m) => ({ default: m.JobsView })));
-const DiffViewer = lazy(() => import('./components/DiffViewer').then((m) => ({ default: m.DiffViewer })));
-const DriftView = lazy(() => import('./components/DriftView').then((m) => ({ default: m.DriftView })));
-const ChaosLabView = lazy(() => import('./components/ChaosLabView').then((m) => ({ default: m.ChaosLabView })));
-const EmergencyHub = lazy(() => import('./components/EmergencyHub').then((m) => ({ default: m.EmergencyHub })));
-const SlidesPresentation = lazy(() => import('./components/SlidesPresentation').then((m) => ({ default: m.SlidesPresentation })));
-const CopilotPanel = lazy(() => import('./components/CopilotPanel').then((m) => ({ default: m.CopilotPanel })));
-const DryRunModal = lazy(() => import('./components/DryRunModal').then((m) => ({ default: m.DryRunModal })));
-const WelcomeModal = lazy(() => import('./components/WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
-const ShareModal = lazy(() => import('./components/ShareModal').then((m) => ({ default: m.ShareModal })));
-const ShortcutsModal = lazy(() => import('./components/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })));
+const DevicePage = lazy(() => import('./components/views/DevicePage').then((m) => ({ default: m.DevicePage })));
+const DeviceList = lazy(() => import('./components/views/DeviceList').then((m) => ({ default: m.DeviceList })));
+const JobsView = lazy(() => import('./components/views/JobsView').then((m) => ({ default: m.JobsView })));
+const DiffViewer = lazy(() => import('./components/views/DiffViewer').then((m) => ({ default: m.DiffViewer })));
+const DriftView = lazy(() => import('./components/views/DriftView').then((m) => ({ default: m.DriftView })));
+const ChaosLabView = lazy(() => import('./components/views/ChaosLabView').then((m) => ({ default: m.ChaosLabView })));
+const EmergencyHub = lazy(() => import('./components/views/EmergencyHub').then((m) => ({ default: m.EmergencyHub })));
+const SlidesPresentation = lazy(() => import('./components/views/SlidesPresentation').then((m) => ({ default: m.SlidesPresentation })));
+const CopilotPanel = lazy(() => import('./components/modals/CopilotPanel').then((m) => ({ default: m.CopilotPanel })));
+const DryRunModal = lazy(() => import('./components/modals/DryRunModal').then((m) => ({ default: m.DryRunModal })));
+const WelcomeModal = lazy(() => import('./components/modals/WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
+const ShareModal = lazy(() => import('./components/modals/ShareModal').then((m) => ({ default: m.ShareModal })));
+const ShortcutsModal = lazy(() => import('./components/modals/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })));
 
 function LoadingFallback() {
   return (
@@ -95,6 +95,10 @@ export function App() {
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
+      if (params.get('setup') || params.get('welcome')) {
+        localStorage.removeItem('netops_onboarding_done');
+        return true;
+      }
       if (params.get('token')) {
         return false;
       }
@@ -132,6 +136,20 @@ export function App() {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.className = theme === 'dark' ? 'theme-dark dark' : 'theme-light';
   }, [theme]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('token')) return;
+    api
+      .getBootstrapStatus()
+      .then((st) => {
+        if (st && st.bootstrap_completed === false) {
+          localStorage.removeItem('netops_onboarding_done');
+          setWelcomeModalOpen(true);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Global window keydown listener with priority Escape order, ?, and Ctrl+K
   useEffect(() => {
@@ -220,7 +238,7 @@ export function App() {
       const data = await api.getDevices();
       setDevices((prev) => (areDevicesEqual(prev, data) ? prev : data));
       setApiHealthy((prev) => (prev ? prev : true));
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load devices', err);
       setApiHealthy(false);
     }
@@ -233,7 +251,7 @@ export function App() {
       if (data.length > 0) {
         setSelectedJobId((current) => current || data[0].id);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load jobs', err);
     }
   }, []);
@@ -262,9 +280,9 @@ export function App() {
             setUserRole(me.role);
             localStorage.setItem('netops_user_role', me.role);
           }
-        } catch (authErr: any) {
+        } catch (authErr: unknown) {
           if (active) {
-            showToast(authErr.message || 'Ошибка авторизации токена', 'error');
+            showToast(getErrorMessage(authErr, 'Ошибка авторизации токена'), 'error');
             api.setRole('viewer');
             setUserRole('viewer');
           }
@@ -278,7 +296,7 @@ export function App() {
           setSelectedJobId((current) => current || jbs[0].id);
         }
         setApiHealthy(true);
-      } catch (err: any) {
+      } catch (err: unknown) {
         if (!active) return;
         console.error('Failed initial load', err);
       } finally {
@@ -322,8 +340,8 @@ export function App() {
       setActiveTab('jobs');
       showToast(`Задача ${res.job_id.slice(0, 8)} поставлена в очередь!`, 'success');
       await fetchJobs();
-    } catch (err: any) {
-      showToast(`Ошибка запуска Dry-Run: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка запуска Dry-Run: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchJobs, showToast]);
 
@@ -335,8 +353,8 @@ export function App() {
       setActiveTab('jobs');
       showToast(`Деплой ${res.job_id.slice(0, 8)} запущен!`, 'success');
       await fetchJobs();
-    } catch (err: any) {
-      showToast(`Ошибка деплоя: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка деплоя: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchJobs, showToast, userRole]);
 
@@ -349,8 +367,8 @@ export function App() {
       setActiveTab('jobs');
       showToast('Внеочередной скан дрейфа запущен!', 'success');
       await fetchJobs();
-    } catch (err: any) {
-      showToast(`Ошибка сканирования дрейфа: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка сканирования дрейфа: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchJobs, showToast]);
 
@@ -362,8 +380,8 @@ export function App() {
       setActiveTab('jobs');
       showToast('Устранение дрейфа поставлено в очередь!', 'success');
       await fetchJobs();
-    } catch (err: any) {
-      showToast(`Ошибка устранения дрейфа: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка устранения дрейфа: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchJobs, showToast]);
 
@@ -376,8 +394,8 @@ export function App() {
         'success'
       );
       await fetchDevices();
-    } catch (err: any) {
-      showToast(`Ошибка синхронизации инвентаря: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка синхронизации инвентаря: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchDevices, showToast]);
 
@@ -389,8 +407,8 @@ export function App() {
       } else {
         showToast('Pre-flight lint успешен: все модели Pydantic и связность валидны!', 'success');
       }
-    } catch (err: any) {
-      showToast(`Ошибка линтинга: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`Ошибка линтинга: ${getErrorMessage(err)}`, 'error');
     }
   }, [showToast]);
 
@@ -402,8 +420,8 @@ export function App() {
       if (returnToList) {
         setActiveTab('devices');
       }
-    } catch (err: any) {
-      showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${err.message}`, 'error');
+    } catch (err: unknown) {
+      showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${getErrorMessage(err)}`, 'error');
     }
   }, [fetchDevices, locale, showToast]);
 
@@ -657,6 +675,8 @@ export function App() {
             onClose={handleWelcomeClose}
             locale={locale}
             setLocale={handleSetLocale}
+            theme={theme}
+            setTheme={handleSetTheme}
           />
         )}
 

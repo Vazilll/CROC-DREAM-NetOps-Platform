@@ -12,18 +12,18 @@ import {
   Zap,
   Trash2,
 } from 'lucide-react';
-import { api } from '../api';
-import type { Device, UserRole } from '../api';
-import { translations, type Locale } from '../i18n';
+import { api, getErrorMessage } from '../../api';
+import type { Device, UserRole } from '../../api';
+import { translations, type Locale } from '../../i18n';
 import {
   OperStatusBadge,
   StatusBadge,
   ManagementModeBadge,
   Sparkline,
   StateTimeline,
-} from './ui';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
-import { AddDeviceModal } from './AddDeviceModal';
+} from '../layout/ui';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
+import { AddDeviceModal } from '../modals/AddDeviceModal';
 
 interface DeviceListProps {
   devices: Device[];
@@ -106,8 +106,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
         await api.deleteDevice(id);
         await onRefresh();
       }
-    } catch (err: any) {
-      alert(`${t.deleteError}: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`${t.deleteError}: ${getErrorMessage(err)}`);
     }
   };
 
@@ -121,7 +121,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
         if (res.status === 'fulfilled') {
           succeeded.push(selected[idx]);
         } else {
-          failed.push(res.reason?.message || 'Error');
+          failed.push(getErrorMessage(res.reason, 'Error'));
         }
       });
       setSelected((prev) => prev.filter((id) => !succeeded.includes(id)));
@@ -129,8 +129,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       if (failed.length > 0) {
         alert(`${t.deleteError}: ${failed.length} / ${selected.length} ${locale === 'en' ? 'failed' : 'не удалось удалить'}`);
       }
-    } catch (err: any) {
-      alert(`${t.deleteError}: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`${t.deleteError}: ${getErrorMessage(err)}`);
     }
   };
 
@@ -146,18 +146,13 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           (!operStatus || (d.oper_status ?? 'UP') === operStatus)
       )
       .sort((a, b) => {
-        let x: any;
-        let y: any;
         if (sort.key === 'management_ip') {
-          x = ipKey(a.management_ip);
-          y = ipKey(b.management_ip);
-        } else if (sort.key === 'oper_status') {
-          x = a.oper_status ?? 'UP';
-          y = b.oper_status ?? 'UP';
-        } else {
-          x = a[sort.key];
-          y = b[sort.key];
+          const x = ipKey(a.management_ip);
+          const y = ipKey(b.management_ip);
+          return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
         }
+        const x = String(sort.key === 'oper_status' ? (a.oper_status ?? 'UP') : a[sort.key]);
+        const y = String(sort.key === 'oper_status' ? (b.oper_status ?? 'UP') : b[sort.key]);
         return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
       });
   }, [devices, query, platform, role, status, operStatus, sort]);
@@ -374,8 +369,8 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                             try {
                               await api.promoteDevice(d.id);
                               onRefresh();
-                            } catch (err: any) {
-                              alert(`Ошибка активации управления: ${err.message}`);
+                            } catch (err: unknown) {
+                              alert(`Ошибка активации управления: ${getErrorMessage(err)}`);
                             } finally {
                               setPromotingId(null);
                             }

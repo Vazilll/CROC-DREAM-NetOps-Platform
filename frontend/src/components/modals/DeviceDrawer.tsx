@@ -8,16 +8,16 @@ import {
   ExternalLink,
   Maximize2,
 } from 'lucide-react';
-import { api } from '../api';
-import type { DeviceDetail, UserRole } from '../api';
-import { StatusBadge, Sparkline } from './ui';
-import { PLATFORM_NAMES } from '../constants';
+import { api } from '../../api';
+import type { DeviceDetail, UserRole } from '../../api';
+import { StatusBadge, Sparkline } from '../layout/ui';
+import { PLATFORM_NAMES } from '../../constants';
 
 interface DeviceDrawerProps {
   deviceId: number | null;
   onClose: () => void;
   userRole: UserRole;
-  onOpenDiff?: (jobIdOrDeviceId?: any) => void;
+  onOpenDiff?: (jobId?: string) => void;
   onRunDryRun?: (ids: number[]) => void;
   onOpenFullPage?: (id: number) => void;
 }
@@ -181,7 +181,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                     <button
                       onClick={() => {
                         onClose();
-                        onOpenDiff(device?.id);
+                        onOpenDiff();
                       }}
                       className="px-2.5 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.12] border border-white/[0.1] text-zinc-200 text-xs font-mono flex items-center gap-1.5 transition-colors cursor-pointer"
                     >
@@ -357,7 +357,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                         <button
                           onClick={() => {
                             onClose();
-                            onOpenDiff(device.id);
+                            onOpenDiff();
                           }}
                           className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 font-mono text-[11px] cursor-pointer"
                         >

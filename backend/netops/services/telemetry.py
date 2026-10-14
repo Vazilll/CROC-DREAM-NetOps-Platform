@@ -34,7 +34,7 @@ from pathlib import Path
 # Live metric cache: hostname -> metric_name -> list of recent floats
 _LIVE_METRIC_CACHE: Dict[str, Dict[str, List[float]]] = {}
 _CACHE_LOCK = threading.Lock()
-_CACHE_FILE = Path(__file__).resolve().parent.parent.parent / "telemetry_cache.json"
+_CACHE_FILE = Path(__file__).resolve().parents[3] / "lab" / "running" / "telemetry_cache.json"
 
 try:
     if _CACHE_FILE.exists():

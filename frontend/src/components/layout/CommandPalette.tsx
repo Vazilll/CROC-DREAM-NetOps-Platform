@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { Device } from '../api';
-import { TAB_DEFINITIONS } from '../constants';
-import { translations, type Locale } from '../i18n';
+import type { Device } from '../../api';
+import { TAB_DEFINITIONS } from '../../constants';
+import { translations, type Locale } from '../../i18n';
 
 interface Props {
   open: boolean;

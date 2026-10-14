@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Flame, RotateCcw, AlertTriangle, Check, ShieldAlert } from 'lucide-react';
-import { api } from '../api';
-import { translations, type Locale } from '../i18n';
+import { api } from '../../api';
+import { translations, type Locale } from '../../i18n';
 
 interface ChaosLabViewProps {
   locale?: Locale;

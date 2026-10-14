@@ -25,18 +25,23 @@ Celery через Redis. Все сетевые операции идут в во
 
 ```
 backend/netops/
-├── api/              HTTP-слой: роутеры, зависимости, обработка ошибок
+├── api/              HTTP/WS-слой: роутеры, зависимости, обработка ошибок
 │   ├── app.py        сборка FastAPI, CORS, контейнер зависимостей
-│   ├── deps.py       сессия БД, аутентификация по токену, проверка роли
+│   ├── deps.py       сессия БД, аутентификация по токену, проверка роли и скоупов
 │   ├── errors.py     исключения домена → коды HTTP
-│   └── routes/       devices, jobs, drift, users, system
+│   └── routes/       devices, jobs, drift, insights, emergency, system, users
 ├── schemas/          Pydantic-модели запросов и ответов API
 ├── services/         Прикладная логика: что можно делать и при каких условиях
 │   ├── jobs.py       создание задач, проверки конфликтов, постановка в очередь
 │   ├── devices.py    CRUD устройств, импорт инвентаря
 │   ├── drift.py      отчёт по дрейфу
-│   ├── users.py      пользователи и токены
-│   └── llm.py        пояснение диффа моделью (необязательно)
+│   ├── users.py      пользователи, роли, TTL-токены и скоупы
+│   ├── forecast.py   прогнозирование временных рядов TimesFM 3.0 (p10/p50/p90, ETA SLA)
+│   ├── ai_guard.py   Pre-Flight проверка безопасности изменений перед деплоем
+│   ├── freeze.py     глобальная аварийная заморозка изменений (Factory Freeze)
+│   ├── telemetry.py  парсинг живых CLI-метрик CPU/RAM/Uplink по SSH и кэш
+│   ├── notifier.py   диспетчер уведомлений Telegram, реестр доступов и привязки
+│   └── llm.py        пояснение диффа моделью и чат-ассистент NetOps Copilot
 ├── pipeline/         Выполнение задач в воркере
 │   ├── runner.py     берёт задачу по id, блокирует строку, выбирает пайплайн
 │   ├── pipelines.py  четыре пайплайна: dry-run, deploy, скан и устранение дрейфа
@@ -45,24 +50,26 @@ backend/netops/
 │   └── recorder.py   статусы задачи и журнал шагов
 ├── network/          Работа с оборудованием и конфигами
 │   ├── base.py       протоколы: коллектор, деплойер, health-проба, дифф, рендер
-│   ├── offline.py    файловый стенд для разработки и CI
-│   ├── scrapli_driver.py  живой драйвер по SSH
-│   ├── rendering.py  Jinja2 со StrictUndefined
+│   ├── offline.py    файловый стенд для разработки и CI (lab/running/)
+│   ├── scrapli_driver.py  живой драйвер по SSH (Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex)
+│   ├── rendering.py  Jinja2 со StrictUndefined (templates/<platform>/*.j2)
 │   ├── normalization.py   фильтры диффа по правилам из diff_filters.yaml
 │   ├── diff_filters.yaml  правила Ани: что отбрасывать, что сравнивать
 │   ├── diff.py       расчёт патчей наката и отката через hier_config
 │   └── health.py     правила Health-Check: что считать аварией
 ├── intent/           Источник правды: YAML-репозиторий
 │   ├── models.py     схема inventory.yaml и devices/<hostname>.yaml
-│   ├── repository.py чтение и сбор ошибок
-│   └── lint.py       проверки по фабрике: дубли router-id и адресов
-├── models/           Таблицы SQLAlchemy
+│   ├── repository.py чтение и запись файлов в intent/
+│   ├── lint.py       проверки по фабрике: дубли router-id и адресов
+│   └── netbox.py     синхронизация топологии с форматом NetBox
+├── models/           Таблицы SQLAlchemy (Device, Job, ConfigSnapshot, DriftRecord, MetricSample, User)
 ├── telemetry/        Метрики и телеграм-бот
 │   ├── metrics.py    каталог метрик и вывод в формате Prometheus
 │   ├── collector.py  сбор из базы и со стенда, запись замеров
 │   └── bot.py        бот: оповещения и команды
 ├── worker/           Celery: приложение, расписание, задачи
 ├── db/               Движок, сессии, базовый класс, ожидание базы при старте
+├── mcp_server.py     FastMCP-сервер для управления платформой из внешних ИИ-агентов
 ├── settings.py       Все настройки из переменных NETOPS_*
 ├── enums.py          Платформы, роли, статусы устройств и задач
 └── toolchain.py      Сборка набора инструментов под текущий драйвер

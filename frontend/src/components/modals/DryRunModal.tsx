@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Play, X, GitBranch, CheckCircle2, AlertTriangle, Server, Network } from 'lucide-react';
-import { api, type Device } from '../api';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
-import { translations, type Locale } from '../i18n';
+import { api, type Device } from '../../api';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
+import { translations, type Locale } from '../../i18n';
 
 export interface DryRunModalProps {
   open: boolean;

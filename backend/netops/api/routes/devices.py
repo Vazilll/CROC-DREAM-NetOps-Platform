@@ -627,7 +627,7 @@ def device_emergency_action(
                 detail=f"SSH ошибка при выполнении '{data.action}' на {device.hostname}: {exc}",
             ) from exc
 
-    audit_path = Path("lab/running/emergency_audit.jsonl")
+    audit_path = Path(__file__).resolve().parents[4] / "lab" / "running" / "emergency_audit.jsonl"
     audit_path.parent.mkdir(parents=True, exist_ok=True)
     entry = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

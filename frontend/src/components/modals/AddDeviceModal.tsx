@@ -14,9 +14,9 @@ import {
   Radio,
   Zap,
 } from 'lucide-react';
-import { api } from '../api';
-import type { Device, DeviceProbeResult, Platform, DeviceRole, UserRole } from '../api';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
+import { api, getErrorMessage } from '../../api';
+import type { Device, DeviceProbeResult, Platform, DeviceRole, UserRole } from '../../api';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 
 interface AddDeviceModalProps {
   isOpen: boolean;
@@ -102,8 +102,8 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
         setRole(res.detected_role);
       }
       setStep(2);
-    } catch (err: any) {
-      setProbeError(err.message || 'Ошибка SSH-пробы оборудования');
+    } catch (err: unknown) {
+      setProbeError(getErrorMessage(err, 'Ошибка SSH-пробы оборудования'));
     } finally {
       setProbing(false);
     }
@@ -151,12 +151,12 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
               lldp_neighbors: probeResult.lldp_neighbors,
             })
           : null,
-      } as any);
+      });
 
       onSuccess(newDev);
       handleClose();
-    } catch (err: any) {
-      setProbeError(err.message || 'Ошибка создания устройства в инвентаре');
+    } catch (err: unknown) {
+      setProbeError(getErrorMessage(err, 'Ошибка создания устройства в инвентаре'));
     } finally {
       setSaving(false);
     }

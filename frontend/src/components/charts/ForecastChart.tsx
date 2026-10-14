@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback } from 'react';
-import type { Forecast, ForecastEvent } from '../api';
+import type { Forecast, ForecastEvent } from '../../api';
 
 const W = 820;
 const H = 250;

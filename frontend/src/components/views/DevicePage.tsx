@@ -20,17 +20,23 @@ import {
   Trash2,
   FileDown,
 } from 'lucide-react';
-import { api } from '../api';
-import type { DeviceDetail, Forecast, UserRole, DeviceEmergencyAction } from '../api';
-import type { Locale } from '../i18n';
-import { ForecastChart } from './ForecastChart';
+import { api, getErrorMessage } from '../../api';
+import type {
+  DeviceDetail,
+  DeviceHardwareSpecs,
+  Forecast,
+  UserRole,
+  DeviceEmergencyAction,
+} from '../../api';
+import type { Locale } from '../../i18n';
+import { ForecastChart } from '../charts/ForecastChart';
 import {
   Panel,
   StatusBadge,
   OperStatusBadge,
   ManagementModeBadge,
-} from './ui';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../constants';
+} from '../layout/ui';
+import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 
 interface Props {
   deviceId: number;
@@ -203,10 +209,10 @@ export const DevicePage: React.FC<Props> = ({
   const canAdmin = userRole === 'admin' || userRole === 'owner';
 
   // Parse hardware specs
-  let specs: any = null;
+  let specs: DeviceHardwareSpecs | null = null;
   if (device.hardware_specs) {
     try {
-      specs = JSON.parse(device.hardware_specs);
+      specs = JSON.parse(device.hardware_specs) as DeviceHardwareSpecs;
     } catch {
       // fallback
     }
@@ -217,8 +223,8 @@ export const DevicePage: React.FC<Props> = ({
     try {
       const updated = await api.promoteDevice(device.id);
       setDevice((prev) => (prev ? { ...prev, management_mode: updated.management_mode } : null));
-    } catch (err: any) {
-      alert(`Ошибка перевода в управление: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Ошибка перевода в управление: ${getErrorMessage(err)}`);
     } finally {
       setPromoting(false);
     }
@@ -240,8 +246,11 @@ export const DevicePage: React.FC<Props> = ({
       });
       setEmergencyResult(res);
       fetchDevice();
-    } catch (err: any) {
-      setEmergencyResult({ status: 'ERROR', message: err.message || 'Ошибка выполнения действия' });
+    } catch (err: unknown) {
+      setEmergencyResult({
+        status: 'ERROR',
+        message: getErrorMessage(err, 'Ошибка выполнения действия'),
+      });
     } finally {
       setEmergencyExecuting(false);
     }
@@ -287,12 +296,12 @@ export const DevicePage: React.FC<Props> = ({
           time,
         },
       ]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setTerminalOutput((prev) => [
         ...prev,
         {
           command: cmd,
-          output: `[SSH ERROR] ${err.message || 'Ошибка соединения с узлом'}`,
+          output: `[SSH ERROR] ${getErrorMessage(err, 'Ошибка соединения с узлом')}`,
           time,
         },
       ]);
@@ -313,10 +322,10 @@ export const DevicePage: React.FC<Props> = ({
       const prompt = `Контекст устройства: ${device.hostname} (${device.platform}, ${device.role}, IP: ${device.management_ip}, режим: ${device.management_mode}). Запрос: ${userMsg}`;
       const reply = await api.askCopilot(prompt);
       setCopilotHistory((prev) => [...prev, { role: 'assistant', text: reply.answer }]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       setCopilotHistory((prev) => [
         ...prev,
-        { role: 'assistant', text: `Ошибка получения ответа: ${err.message}` },
+        { role: 'assistant', text: `Ошибка получения ответа: ${getErrorMessage(err)}` },
       ]);
     } finally {
       setCopilotLoading(false);
@@ -447,8 +456,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                       await api.deleteDevice(device.id);
                       onBack();
                     }
-                  } catch (err: any) {
-                    alert(`Ошибка удаления: ${err.message}`);
+                  } catch (err: unknown) {
+                    alert(`Ошибка удаления: ${getErrorMessage(err)}`);
                   }
                 }
               }}

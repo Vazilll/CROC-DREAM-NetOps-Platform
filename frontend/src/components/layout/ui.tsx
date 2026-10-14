@@ -1,6 +1,6 @@
 import React, { useEffect, useId } from 'react';
 import { X, CheckCircle2, AlertTriangle, RotateCw, Clock } from 'lucide-react';
-import type { DeviceStatus, OperStatus } from '../api';
+import type { DeviceStatus, OperStatus } from '../../api';
 
 const STATUS: Record<string, { label: string; dot: string; text: string; bg: string; border: string }> = {
   IN_SYNC: {

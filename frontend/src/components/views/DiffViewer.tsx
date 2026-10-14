@@ -12,10 +12,10 @@ import {
   Check,
   Zap,
 } from 'lucide-react';
-import { api } from '../api';
-import type { JobDiff, DeviceDiff, JobSummary, RiskExplanation } from '../api';
-import { translations, type Locale } from '../i18n';
-import type { AppTheme } from './Header';
+import { api } from '../../api';
+import type { JobDiff, DeviceDiff, JobSummary, RiskExplanation } from '../../api';
+import { translations, type Locale } from '../../i18n';
+import type { AppTheme } from '../layout/Header';
 
 interface PlainDiffProps {
   original: string;

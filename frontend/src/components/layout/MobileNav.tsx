@@ -17,9 +17,9 @@ import {
   X,
   Share2,
 } from 'lucide-react';
-import { translations, type Locale } from '../i18n';
+import { translations, type Locale } from '../../i18n';
 import type { AppTheme } from './Header';
-import type { UserRole } from '../api';
+import type { UserRole } from '../../api';
 
 interface MobileNavProps {
   activeTab: string;

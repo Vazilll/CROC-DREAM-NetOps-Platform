@@ -725,6 +725,180 @@ export interface IntegrationsStatus {
   };
 }
 
+/**
+ * Parsed hardware and telemetry specifications JSON stored on a Device record.
+ */
+export interface DeviceHardwareSpecs {
+  os_version?: string;
+  cpu_cores?: number | string;
+  cpu_model?: string;
+  ram_gb?: number | string;
+  disk_gb?: number | string;
+  uptime?: string;
+  serial?: string;
+  interfaces?: Array<{
+    name: string;
+    ip?: string;
+    status?: string;
+  }>;
+  containers?: Array<{
+    name: string;
+    image: string;
+    status: string;
+    ports?: string;
+  }>;
+  lldp_neighbors?: Array<{
+    local_port: string;
+    neighbor: string;
+    remote_port: string;
+  }>;
+}
+
+/**
+ * Public 4-layer Matryoshka bootstrap status returned by `GET /api/v1/system/bootstrap/status`.
+ */
+export interface BootstrapStatusResponse {
+  initialized: boolean;
+  bootstrap_completed: boolean;
+  caller_is_bound_owner: boolean;
+  cluster_name: string;
+  exposure: {
+    mode: 'local_only' | 'public_tunnel';
+    public_tunnel_enabled: boolean;
+    local_url: string;
+    public_url: string | null;
+    websocket_enabled: boolean;
+    websocket_auth_scheme: string;
+  };
+  owner: {
+    exists: boolean;
+    username: string;
+    bound_client_id: string | null;
+    bound_ip: string | null;
+    telegram_linked: boolean;
+    telegram_username?: string | null;
+    telegram_chat_id?: string | null;
+  };
+  github: GitStatusInfo & {
+    yaml_devices_count: number;
+    webhook_endpoint: string;
+    webhook_registered: boolean;
+    sync_mode: string;
+  };
+  telegram: {
+    bot_token_set: boolean;
+    configured: boolean;
+    bot_username: string;
+    chat_ids: number[];
+    deep_link_claim: string;
+    deep_link_recover: string;
+  };
+  server: {
+    network_driver: string;
+    clab_host: string;
+    clab_port: number;
+    clab_user: string;
+    devices_count: number;
+    in_sync_count: number;
+    devices: Array<{
+      hostname: string;
+      platform: string;
+      role: string;
+      ip: string;
+      status: string;
+    }>;
+  };
+  ai: {
+    groq_configured: boolean;
+    gemini_configured: boolean;
+    ollama_url: string;
+  };
+}
+
+/**
+ * Response payload from `POST /api/v1/system/bootstrap/recover-owner`.
+ */
+export interface RecoverOwnerResponse {
+  status: string;
+  sent?: boolean;
+  message?: string;
+  username?: string;
+  role?: UserRole;
+  token?: string;
+  bound_client_id?: string;
+  bound_ip?: string;
+}
+
+/**
+ * Response payload from `POST /api/v1/system/bootstrap/configure`.
+ */
+export interface BootstrapConfigureResponse {
+  status: string;
+  exposure: {
+    active: boolean;
+    mode: 'local_only' | 'public_tunnel';
+    public_url: string | null;
+    local_url: string;
+  };
+  websocket_enabled: boolean;
+  webhook_status: string;
+  bot_verified: boolean;
+  bot_username: string;
+  deep_link_claim: string;
+  git: GitStatusInfo;
+  runtime_keys: string[];
+}
+
+/**
+ * Individual switch or node discovered during Step 4 server probe.
+ */
+export interface DiscoveredSwitchItem {
+  hostname: string;
+  platform: string;
+  role: string;
+  endpoint: string;
+  reachable: boolean;
+}
+
+/**
+ * Response payload from `POST /api/v1/system/bootstrap/discover-server`.
+ */
+export interface ServerDiscoveryResponse {
+  status: 'ok' | 'error' | string;
+  mode?: 'ssh' | 'offline';
+  message?: string;
+  server_reachable?: boolean;
+  discovered_containers?: Array<{
+    name: string;
+    image: string;
+    status: string;
+    ports: string;
+  }>;
+  discovered_switches?: DiscoveredSwitchItem[];
+  synced_total?: number;
+  created?: number;
+  updated?: number;
+}
+
+/**
+ * Safely extracts a human-readable error message from an unknown exception value.
+ */
+export function getErrorMessage(err: unknown, fallback = 'Unexpected error'): string {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (typeof err === 'string' && err.trim()) {
+    return err;
+  }
+  if (err && typeof err === 'object' && 'message' in err) {
+    const msg = (err as { message?: unknown }).message;
+    if (typeof msg === 'string' && msg.trim()) {
+      return msg;
+    }
+  }
+  return fallback;
+}
+
 // ============================================================================
 // API Client Implementation
 // ============================================================================
@@ -918,7 +1092,15 @@ export class NetOpsApiClient {
    * @returns Promise resolving to created Device entity
    * @throws {Error} If validation fails or hostname already exists
    */
-  async createDevice(data: Partial<Device> & { auth_profile?: string }): Promise<Device> {
+  async createDevice(
+    data: Partial<Device> & {
+      auth_profile?: string;
+      username?: string;
+      password?: string;
+      proxy_jump?: string | null;
+      hardware_specs?: string | null;
+    }
+  ): Promise<Device> {
     return this.request<Device>('/devices', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1564,8 +1746,8 @@ export class NetOpsApiClient {
     this.setToken(ROLE_TOKENS[role]);
   }
 
-  async getBootstrapStatus(): Promise<any> {
-    return this.request<any>('/system/bootstrap/status');
+  async getBootstrapStatus(): Promise<BootstrapStatusResponse> {
+    return this.request<BootstrapStatusResponse>('/system/bootstrap/status');
   }
 
   async claimOwnerBootstrap(data: {
@@ -1592,8 +1774,8 @@ export class NetOpsApiClient {
     action: 'request_telegram_code' | 'verify';
     recovery_key?: string;
     telegram_code?: string;
-  }): Promise<any> {
-    return this.request('/system/bootstrap/recover-owner', {
+  }): Promise<RecoverOwnerResponse> {
+    return this.request<RecoverOwnerResponse>('/system/bootstrap/recover-owner', {
       method: 'POST',
       body: JSON.stringify(data),
     });
@@ -1601,8 +1783,11 @@ export class NetOpsApiClient {
 
   async configureBootstrapLayers(data: {
     cluster_name?: string;
+    exposure_mode?: 'local_only' | 'public_tunnel';
+    websocket_enabled?: boolean;
     github_repo_url?: string;
     github_pat?: string;
+    github_webhook_secret?: string;
     webhook_public_url?: string;
     telegram_bot_token?: string;
     telegram_chat_id?: string;
@@ -1610,10 +1795,21 @@ export class NetOpsApiClient {
     gemini_api_key?: string;
     ollama_url?: string;
     bootstrap_completed?: boolean;
-  }): Promise<any> {
-    return this.request('/system/bootstrap/configure', {
+  }): Promise<BootstrapConfigureResponse> {
+    return this.request<BootstrapConfigureResponse>('/system/bootstrap/configure', {
       method: 'POST',
       body: JSON.stringify(data),
+    });
+  }
+
+  async requestWsTicket(): Promise<{
+    ticket: string;
+    ttl_seconds: number;
+    websocket_enabled: boolean;
+    ws_path: string;
+  }> {
+    return this.request('/ws/ticket', {
+      method: 'POST',
     });
   }
 
@@ -1626,8 +1822,8 @@ export class NetOpsApiClient {
     switch_password_huawei?: string;
     switch_password_arista?: string;
     switch_password_cisco?: string;
-  }): Promise<any> {
-    return this.request('/system/bootstrap/discover-server', {
+  }): Promise<ServerDiscoveryResponse> {
+    return this.request<ServerDiscoveryResponse>('/system/bootstrap/discover-server', {
       method: 'POST',
       body: JSON.stringify(data),
     });

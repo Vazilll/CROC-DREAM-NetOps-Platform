@@ -7,10 +7,10 @@ import {
   RefreshCw,
   FileDown,
 } from 'lucide-react';
-import { api } from '../api';
-import type { JobDetail, JobSummary } from '../api';
-import { translations, type Locale } from '../i18n';
-import { JobStatusBadge } from './ui';
+import { api } from '../../api';
+import type { JobDetail, JobSummary } from '../../api';
+import { translations, type Locale } from '../../i18n';
+import { JobStatusBadge } from '../layout/ui';
 
 interface JobsViewProps {
   jobs: JobSummary[];
@@ -40,7 +40,7 @@ export const JobsView: React.FC<JobsViewProps> = ({
   useEffect(() => {
     if (!selectedJobId) return;
 
-    let timer: any = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
     let isMounted = true;
 
     const fetchDetail = async () => {
