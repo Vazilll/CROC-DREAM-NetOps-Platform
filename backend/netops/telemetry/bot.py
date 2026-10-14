@@ -9,7 +9,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from netops.db import build_engine, build_session_factory
@@ -226,9 +226,13 @@ def _status_text(session: Session) -> str:
     return "\n".join(lines)
 
 
+# Берём последнюю проверку по каждому устройству, а не всю историю: иначе команда покажет
+# давно устранённый дрейф.
 def _drift_text(session: Session) -> str:
+    latest = select(func.max(DriftRecord.id).label("id")).group_by(DriftRecord.device_id).subquery()
     records = session.scalars(
         select(DriftRecord)
+        .join(latest, DriftRecord.id == latest.c.id)
         .where(DriftRecord.status != DriftStatus.IN_SYNC)
         .order_by(DriftRecord.checked_at.desc())
         .limit(MAX_ROWS)

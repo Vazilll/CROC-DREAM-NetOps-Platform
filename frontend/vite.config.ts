@@ -43,11 +43,11 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-      '/healthz': 'http://127.0.0.1:8001',
-      '/readyz': 'http://127.0.0.1:8001',
+      '/healthz': 'http://127.0.0.1:8000',
+      '/readyz': 'http://127.0.0.1:8000',
     },
   },
   preview: {
@@ -56,11 +56,11 @@ export default defineConfig({
     allowedHosts: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
-      '/healthz': 'http://127.0.0.1:8001',
-      '/readyz': 'http://127.0.0.1:8001',
+      '/healthz': 'http://127.0.0.1:8000',
+      '/readyz': 'http://127.0.0.1:8000',
     },
   },
 })

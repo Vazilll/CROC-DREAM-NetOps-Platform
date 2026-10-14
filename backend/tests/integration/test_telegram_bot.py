@@ -272,3 +272,16 @@ def test_same_job_error_is_not_repeated(
 
     assert len(api.sent) == 1
     assert "2 of 4 device(s) failed" in api.sent[0][1]
+
+
+def test_drift_command_shows_only_current_state(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    device = devices["leaf-1.croc.lab"]
+    _drift(session, device, DriftStatus.DRIFT_DETECTED, unauthorized_lines=["interface Lo99"])
+    _drift(session, device, DriftStatus.IN_SYNC)
+
+    api = FakeTelegram([_command("/drift")])
+    _bot(session_factory, api).poll_once()
+
+    assert "Дрейфа нет" in api.texts()
