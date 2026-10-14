@@ -1,10 +1,10 @@
 # CROC DREAM NetOps Platform — весь стек одной командой:
 #
-#   docker compose up --build
+#   docker compose up -d --build
 #
-# API и Swagger: http://localhost:8000/docs
-# Настройки бэкенда (токены, SSH-профили) — в backend/.env, пример в backend/.env.example.
-# Порты и каталоги с данными переопределяются переменными ниже (например, в ./.env).
+# Веб-консоль (React + Nginx): http://localhost:5173
+# API и Swagger:               http://localhost:8000/docs
+# Prometheus UI:               http://localhost:9090/targets
 name: netops
 
 x-backend: &backend
@@ -19,12 +19,14 @@ x-backend: &backend
     NETOPS_INTENT_REPO_PATH: /data/intent
     NETOPS_TEMPLATES_PATH: /data/templates
     NETOPS_OFFLINE_LAB_PATH: /data/lab
+    NETOPS_PROMETHEUS_URL: ${NETOPS_PROMETHEUS_URL:-http://prometheus:9090}
+    NETOPS_API_TOKENS: '{"dev-owner-token": {"username": "owner", "role": "owner"}, "dev-admin-token": {"username": "admin", "role": "admin"}, "dev-operator-token": {"username": "operator", "role": "operator"}, "dev-viewer-token": {"username": "viewer", "role": "viewer"}, "croc-admin-token": {"username": "admin", "role": "admin"}, "croc-demo-jury": {"username": "jury", "role": "viewer"}}'
   volumes:
-    - ${INTENT_REPO:-./intent}:/data/intent:ro
+    - ${INTENT_REPO:-./intent}:/data/intent
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
+    - ./monitoring:/data/monitoring:ro
   restart: unless-stopped
-  # Воркер и Beat стартуют, когда API healthy: база доступна и миграции применены.
   depends_on:
     api:
       condition: service_healthy
@@ -40,7 +42,6 @@ services:
     volumes: [postgres-data:/var/lib/postgresql/data]
     restart: unless-stopped
     healthcheck:
-      # Проверка по TCP: при первом старте временный сервер слушает только сокет.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 5432 -U netops -d netops"]
       interval: 5s
       timeout: 5s
@@ -56,7 +57,6 @@ services:
       interval: 5s
       retries: 10
 
-  # При старте API применяет миграции, затем запускает сервер.
   api:
     <<: *backend
     command: sh -c "alembic upgrade head && exec uvicorn netops.main:app --host 0.0.0.0 --port 8000"
@@ -80,23 +80,22 @@ services:
     <<: *backend
     command: celery -A netops.worker.tasks beat --loglevel=INFO --schedule=/tmp/celerybeat-schedule
 
-  # Бот оповещает о дрейфе и упавших задачах и отвечает на команды (/status, /drift).
-  # Без NETOPS_TELEGRAM_BOT_TOKEN и NETOPS_TELEGRAM_CHAT_IDS просто простаивает.
   telegram-bot:
     <<: *backend
     command: python -m netops.telemetry.bot
 
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    ports: ["${NODE_EXPORTER_PORT:-9100}:9100"]
+    restart: unless-stopped
+
   snmp-exporter:
     image: prom/snmp-exporter:v0.26.0
-    ports:
-      - "9116:9116"
-    networks:
-      - default
-      - clab_mgmt
+    ports: ["${SNMP_EXPORTER_PORT:-9116}:9116"]
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v3.15.0
+    image: prom/prometheus:v2.54.1
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=15d
@@ -104,13 +103,11 @@ services:
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    networks:
-      - default
     restart: unless-stopped
     depends_on:
       - snmp-exporter
+      - node-exporter
 
-  # nginx отдаёт собранный интерфейс и проксирует /api на бэкенд.
   frontend:
     build: ./frontend
     image: netops-frontend
@@ -120,14 +117,6 @@ services:
       api:
         condition: service_healthy
 
-  # Сюда добавится Grafana поверх Prometheus. 
-
 volumes:
   postgres-data:
   prometheus-data:
-
-networks:
-  default:
-  clab_mgmt:
-    external: true
-    name: clab_mgmt

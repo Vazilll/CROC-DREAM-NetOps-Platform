@@ -43,6 +43,20 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        import os  # noqa: PLC0415
+
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                rt = settings.apply_runtime_overlay()
+                settings.offline_lab_path.mkdir(parents=True, exist_ok=True)
+                if rt.get("bootstrap_completed"):
+                    from netops.services import DeviceService  # noqa: PLC0415
+
+                    snapshot = container.intents.load()
+                    with container.session_factory() as session:
+                        DeviceService(session).sync_inventory(snapshot.inventory)
+            except Exception:
+                pass
         yield
         engine.dispose()
 
@@ -57,7 +71,7 @@ def create_app(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["*"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "X-Client-Id"],
     )
     register_error_handlers(app)
     app.include_router(system.router)
