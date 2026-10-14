@@ -809,6 +809,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     if (!ownerToken) {
       api.setToken('dev-owner-token');
     }
+    if (exposureMode !== 'local_only' && serverHost.trim()) {
+      localStorage.setItem('netops_share_base_url', `http://${serverHost.trim()}:5173`);
+    }
     localStorage.setItem('netops_user_role', 'owner');
     localStorage.setItem('netops_cluster_name', clusterName.trim() || 'CROC-FABRIC-PROD-01');
     localStorage.setItem('netops_onboarding_done', 'true');
@@ -1593,28 +1596,39 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           {w.step4.discoveredNodesCount} {discoveryResult.synced_total}
                         </span>
                       </span>
+                      {discoveryResult.discovered_containers && (
+                        <span className="text-[10px] font-mono text-[var(--text-secondary)]">
+                          Docker: {discoveryResult.discovered_containers.length}
+                        </span>
+                      )}
                     </div>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      {discoveryResult.discovered_switches.map((sw: DiscoveredSwitchItem) => (
-                        <div
-                          key={sw.hostname}
-                          className="rounded border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
-                        >
-                          <span className="text-[var(--text-primary)] font-semibold truncate">
-                            {sw.hostname}
-                          </span>
-                          <span
-                            className={
-                              sw.reachable
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-amber-600 dark:text-amber-400'
-                            }
+                    {discoveryResult.discovered_switches.length > 0 ? (
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {discoveryResult.discovered_switches.map((sw: DiscoveredSwitchItem) => (
+                          <div
+                            key={sw.hostname}
+                            className="rounded border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
                           >
-                            {sw.reachable ? 'SSH OK' : 'SYNC'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                            <span className="text-[var(--text-primary)] font-semibold truncate">
+                              {sw.hostname}
+                            </span>
+                            <span
+                              className={
+                                sw.reachable
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-rose-500 dark:text-rose-400'
+                              }
+                            >
+                              {sw.reachable ? 'SSH OK' : 'OFFLINE'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
+                        SSH-сервер доступен, но активных SSH-портов коммутаторов (Containerlab) не обнаружено.
+                      </div>
+                    )}
                   </div>
                 )}
 

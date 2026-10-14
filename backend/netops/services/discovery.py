@@ -442,7 +442,7 @@ def discover_live_switch_via_ssh(
 ) -> dict[str, Any] | None:
     """Probe TCP banner, connect via SSH, extract live identity, running-config, and brownfield intent."""
     reachable, banner = _probe_tcp_banner(host, port)
-    if not reachable:
+    if not reachable or not banner:
         return None
 
     profiles = load_platform_profiles(getattr(settings, "intent_repo_path", None))
