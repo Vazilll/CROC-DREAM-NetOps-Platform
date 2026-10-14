@@ -453,6 +453,7 @@ def _git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
 
 def _git_pull_repo(repo_path: Path) -> str:
     import os  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
 
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return "pytest-local"
