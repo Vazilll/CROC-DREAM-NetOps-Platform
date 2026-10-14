@@ -326,9 +326,10 @@ def main() -> None:
     if "--no-beat" not in sys.argv:
         _start_beat(settings, session_factory, dispatcher)
 
+    host = os.environ.get("NETOPS_HOST", "0.0.0.0")
     port = int(os.environ.get("NETOPS_PORT", "8001"))
-    logger.info("Starting local NetOps API server on http://127.0.0.1:%s ...", port)
-    uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
+    logger.info("Starting local NetOps API server on http://%s:%s ...", host, port)
+    uvicorn.run(app, host=host, port=port, log_level="info")
 
 
 if __name__ == "__main__":
