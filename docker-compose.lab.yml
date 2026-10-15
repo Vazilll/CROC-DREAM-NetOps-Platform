@@ -1,0 +1,27 @@
+# Оверлей для машины, где запущен Containerlab: подключает snmp-exporter к сети стенда,
+# чтобы опрашивать устройства по SNMP, и нацеливает платформу на живые узлы.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.lab.yml up -d --build
+#
+# Сеть clab_mgmt создаёт сам Containerlab, поэтому в базовом compose её нет: без стенда
+# внешняя сеть не найдётся и ни один контейнер не поднимется.
+services:
+  snmp-exporter:
+    networks: [default, clab_mgmt]
+
+  api: &live
+    environment:
+      NETOPS_NETWORK_DRIVER: scrapli
+      NETOPS_INTENT_REPO_PATH: /data/intent-live
+    volumes:
+      - ${INTENT_LIVE:-./intent-live}:/data/intent-live:ro
+      - ${TEMPLATES:-./templates}:/data/templates:ro
+
+  worker: *live
+  beat: *live
+  telegram-bot: *live
+
+networks:
+  clab_mgmt:
+    external: true
+    name: clab_mgmt

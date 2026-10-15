@@ -86,13 +86,11 @@ services:
     <<: *backend
     command: python -m netops.telemetry.bot
 
+  # На машине со стендом поднимать с оверлеем: docker compose -f docker-compose.yml \
+  #   -f docker-compose.lab.yml up -d — он подключает экспортёр к сети Containerlab.
   snmp-exporter:
     image: prom/snmp-exporter:v0.26.0
-    ports:
-      - "9116:9116"
-    networks:
-      - default
-      - clab_mgmt
+    ports: ["${SNMP_EXPORTER_PORT:-9116}:9116"]
     restart: unless-stopped
 
   prometheus:
@@ -104,8 +102,6 @@ services:
     volumes:
       - prometheus-data:/prometheus
       - ./monitoring:/etc/prometheus:ro
-    networks:
-      - default
     restart: unless-stopped
     depends_on:
       - snmp-exporter
@@ -120,14 +116,8 @@ services:
       api:
         condition: service_healthy
 
-  # Сюда добавится Grafana поверх Prometheus. 
+  # Сюда добавится Grafana поверх Prometheus.
 
 volumes:
   postgres-data:
   prometheus-data:
-
-networks:
-  default:
-  clab_mgmt:
-    external: true
-    name: clab_mgmt

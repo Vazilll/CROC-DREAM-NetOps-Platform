@@ -18,10 +18,12 @@ dependencies = [
     "uvicorn[standard]>=0.30",
 ]
 
+# Живой стенд: ставится как uv sync --extra scrapli, в образе уже включено.
 [project.optional-dependencies]
 scrapli = [
     "scrapli>=2024.7.30",
     "scrapli-community>=2024.7.30",
+    "paramiko>=3.4",
 ]
 
 [dependency-groups]
@@ -80,7 +82,14 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "hier_config.*", "kombu.*", "scrapli.*", "scrapli_community.*"]
+module = [
+    "celery.*",
+    "hier_config.*",
+    "kombu.*",
+    "paramiko.*",
+    "scrapli.*",
+    "scrapli_community.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

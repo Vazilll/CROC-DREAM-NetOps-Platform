@@ -9,8 +9,11 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import re
+import time
 from collections.abc import Mapping, Sequence
-from typing import Any
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 from netops.enums import Platform
 from netops.network.base import (
@@ -25,6 +28,114 @@ from netops.network.base import (
 
 logger = logging.getLogger(__name__)
 
+# Имена платформ для фабрики Scrapli: первые две из ядра, остальные из scrapli-community.
+SCRAPLI_PLATFORMS: Mapping[Platform, str] = MappingProxyType(
+    {
+        Platform.CISCO_IOSXE: "cisco_iosxe",
+        Platform.ARISTA_EOS: "arista_eos",
+        Platform.HUAWEI_VRP: "huawei_vrp",
+        Platform.ELTEX_ESR: "eltex_esr",
+    }
+)
+
+# Транзакционное применение описано в ТЗ для Cisco (commit confirmed) и Arista
+# (configure session). Для остальных платформ его ещё нет, и молча «применить» нельзя.
+TRANSACTIONAL_PLATFORMS = frozenset({Platform.CISCO_IOSXE, Platform.ARISTA_EOS})
+
+
+@dataclass(frozen=True, slots=True)
+class _ShellResult:
+    result: str
+    failed: bool = False
+
+
+# Минимальная замена Scrapli: те же методы send_command и send_configs, но поверх
+# интерактивной shell-сессии paramiko. Нужна там, где нет системного ssh — например,
+# внутри нашего Docker-образа.
+class _ParamikoShell:
+    _PAGER_OFF: ClassVar[Mapping[Platform, tuple[str, ...]]] = {
+        Platform.CISCO_IOSXE: ("terminal length 0",),
+        Platform.ARISTA_EOS: ("enable", "terminal length 0"),
+        Platform.HUAWEI_VRP: ("screen-length 0 temporary",),
+    }
+    _CONFIG_MODE: ClassVar[Mapping[Platform, tuple[str, str]]] = {
+        Platform.CISCO_IOSXE: ("configure terminal", "end"),
+        Platform.ARISTA_EOS: ("configure terminal", "end"),
+        Platform.HUAWEI_VRP: ("system-view", "return"),
+    }
+
+    def __init__(self, target: DeviceTarget, *, timeout: int = 15) -> None:
+        self._target = target
+        self._timeout = timeout
+        self._client: Any = None
+        self._shell: Any = None
+
+    def __enter__(self) -> _ParamikoShell:
+        import paramiko  # noqa: PLC0415
+
+        self._client = paramiko.SSHClient()
+        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self._client.connect(
+            self._target.host,
+            port=self._target.port,
+            username=self._target.credentials.username,
+            password=self._target.credentials.password,
+            look_for_keys=False,
+            allow_agent=False,
+            timeout=self._timeout,
+        )
+        self._shell = self._client.invoke_shell()
+        self._drain()
+        for command in self._PAGER_OFF.get(self._target.platform, ()):
+            self._write(command)
+        self._drain()
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        if self._client is not None:
+            self._client.close()
+
+    def send_command(self, command: str) -> _ShellResult:
+        self._write(command)
+        return _ShellResult(self._read())
+
+    def send_configs(self, lines: Sequence[str]) -> _ShellResult:
+        enter, leave = self._CONFIG_MODE.get(self._target.platform, ("configure terminal", "end"))
+        self._write(enter)
+        for line in lines:
+            self._write(line)
+        self._write(leave)
+        return _ShellResult(self._read())
+
+    def _write(self, command: str) -> None:
+        if self._shell is None:
+            raise RuntimeError("SSH-сессия не открыта")
+        self._shell.send(f"{command}\n")
+        time.sleep(0.1)
+
+    def _read(self) -> str:
+        if self._shell is None:
+            raise RuntimeError("SSH-сессия не открыта")
+        deadline = time.monotonic() + self._timeout
+        chunks: list[str] = []
+        while time.monotonic() < deadline:
+            if self._shell.recv_ready():
+                chunks.append(self._shell.recv(8192).decode("utf-8", errors="ignore"))
+                time.sleep(0.1)
+                continue
+            if chunks:
+                time.sleep(0.2)
+                if not self._shell.recv_ready():
+                    break
+            else:
+                time.sleep(0.2)
+        return "".join(chunks)
+
+    def _drain(self) -> None:
+        time.sleep(0.5)
+        while self._shell is not None and self._shell.recv_ready():
+            self._shell.recv(8192)
+
 
 class ScrapliNetworkDriver:
     """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli."""
@@ -33,15 +144,18 @@ class ScrapliNetworkDriver:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
 
+    # Драйвер выбирает фабрика Scrapli по имени платформы: Cisco и Arista — из ядра,
+    # Huawei VRP и Eltex ESR — из scrapli-community. Scrapli ходит через системный ssh;
+    # если его в окружении нет, работаем обычной shell-сессией через paramiko.
     def _get_connection(self, target: DeviceTarget) -> Any:
         try:
-            from scrapli.driver.core import EOSDriver, IOSXEDriver  # noqa: PLC0415
+            from scrapli import Scrapli  # noqa: PLC0415
         except ImportError:
-            raise RuntimeError("Scrapli is not installed in the environment.") from None
-
-        driver_cls = IOSXEDriver if target.platform == Platform.CISCO_IOSXE else EOSDriver
+            logger.info("Scrapli не установлен, подключаемся через paramiko")
+            return _ParamikoShell(target, timeout=self.timeout_socket)
         creds = target.credentials
-        return driver_cls(
+        return Scrapli(
+            platform=SCRAPLI_PLATFORMS[target.platform],
             host=target.host,
             port=target.port,
             auth_username=creds.username,
@@ -83,6 +197,11 @@ class ScrapliNetworkDriver:
         ]
         if not lines:
             return
+        if target.platform not in TRANSACTIONAL_PLATFORMS:
+            raise RuntimeError(
+                f"Транзакционное применение для {target.platform.value} не реализовано: "
+                "нужны commit/rollback этой платформы, иначе откат не гарантирован"
+            )
 
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
