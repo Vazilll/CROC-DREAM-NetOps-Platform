@@ -8,6 +8,7 @@ import {
   Shield,
   Share2,
   HelpCircle,
+  SlidersHorizontal,
 } from 'lucide-react';
 import type { UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
@@ -162,14 +163,18 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Role & Cluster Session Badge */}
+        {/* Cluster Settings & Role Button */}
         {onOpenWelcomeModal && (
           <button
             onClick={onOpenWelcomeModal}
             className={`${ghostBtn} font-mono`}
             title={t.openWelcome}
           >
-            <Shield className="w-3 h-3 text-[var(--text-muted)]" />
+            <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <span className="hidden md:inline text-[11px] text-[var(--text-secondary)]">
+              {locale === 'en' ? 'Setup ·' : 'Настройки ·'}
+            </span>
+            <Shield className="w-3 h-3 text-emerald-500" />
             <span className="capitalize font-medium text-[var(--text-primary)] hidden xs:inline">
               {userRole}
             </span>

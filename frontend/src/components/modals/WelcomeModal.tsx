@@ -291,6 +291,132 @@ const WIZARD_COPY: Record<Locale, WizardCopy> = {
   },
 };
 
+const KNOWN_LLM_URLS = new Set([
+  '',
+  'https://api.groq.com/openai/v1',
+  'https://generativelanguage.googleapis.com/v1beta/openai/',
+  'https://api.deepseek.com/v1',
+  'https://openrouter.ai/api/v1',
+  'http://localhost:11434/v1',
+  'https://api.openai.com/v1',
+  'https://api.hcnsec.cn/v1',
+]);
+
+const KNOWN_LLM_MODELS = new Set([
+  '',
+  'llama-3.3-70b-versatile',
+  'gemini-2.0-flash',
+  'deepseek-chat',
+  'deepseek/deepseek-chat',
+  'qwen2.5-coder:7b',
+  'gpt-4o-mini',
+  'MiMo-V2.6-Flash',
+]);
+
+export function inferLlmProviderDefaults(
+  name: string,
+  apiKey: string,
+  baseUrl: string,
+  model: string,
+  forceFallback = false
+): { base_url: string; model: string } {
+  const n = name.trim().toLowerCase();
+  const k = apiKey.trim();
+  let inferredUrl = '';
+  let inferredModel = '';
+
+  if (n.includes('groq') || k.startsWith('gsk_')) {
+    inferredUrl = 'https://api.groq.com/openai/v1';
+    inferredModel = 'llama-3.3-70b-versatile';
+  } else if (n.includes('gemini') || n.includes('google') || k.startsWith('AIza')) {
+    inferredUrl = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    inferredModel = 'gemini-2.0-flash';
+  } else if (n.includes('openrouter') || k.startsWith('sk-or-')) {
+    inferredUrl = 'https://openrouter.ai/api/v1';
+    inferredModel = 'deepseek/deepseek-chat';
+  } else if (n.includes('deepseek')) {
+    inferredUrl = 'https://api.deepseek.com/v1';
+    inferredModel = 'deepseek-chat';
+  } else if (n.includes('ollama') || n.includes('local') || n.includes('qwen')) {
+    inferredUrl = 'http://localhost:11434/v1';
+    inferredModel = 'qwen2.5-coder:7b';
+  } else if (n.includes('mimo') || n.includes('xiaomi') || n.includes('hcnsec')) {
+    inferredUrl = 'https://api.hcnsec.cn/v1';
+    inferredModel = 'MiMo-V2.6-Flash';
+  } else if (n.includes('openai') || n.includes('gpt') || k.startsWith('sk-')) {
+    inferredUrl = 'https://api.openai.com/v1';
+    inferredModel = 'gpt-4o-mini';
+  } else if (forceFallback && (n.length > 0 || k.length > 0)) {
+    inferredUrl = 'https://api.hcnsec.cn/v1';
+    inferredModel = 'MiMo-V2.6-Flash';
+  }
+
+  const curUrl = baseUrl.trim();
+  const curModel = model.trim();
+  const nextUrl =
+    inferredUrl && (curUrl === '' || KNOWN_LLM_URLS.has(curUrl)) ? inferredUrl : curUrl;
+  const nextModel =
+    inferredModel && (curModel === '' || KNOWN_LLM_MODELS.has(curModel))
+      ? inferredModel
+      : curModel;
+
+  return {
+    base_url: nextUrl || (forceFallback ? 'https://api.hcnsec.cn/v1' : curUrl),
+    model: nextModel || (forceFallback ? 'MiMo-V2.6-Flash' : curModel),
+  };
+}
+
+const LLM_PRESETS: Array<{
+  label: string;
+  name: string;
+  base_url: string;
+  model: string;
+  timeout_seconds: number;
+}> = [
+  {
+    label: '+ Groq',
+    name: 'Groq',
+    base_url: 'https://api.groq.com/openai/v1',
+    model: 'llama-3.3-70b-versatile',
+    timeout_seconds: 2.5,
+  },
+  {
+    label: '+ Gemini',
+    name: 'Gemini',
+    base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+    model: 'gemini-2.0-flash',
+    timeout_seconds: 3.0,
+  },
+  {
+    label: '+ DeepSeek',
+    name: 'DeepSeek',
+    base_url: 'https://api.deepseek.com/v1',
+    model: 'deepseek-chat',
+    timeout_seconds: 3.5,
+  },
+  {
+    label: '+ OpenRouter',
+    name: 'OpenRouter',
+    base_url: 'https://openrouter.ai/api/v1',
+    model: 'deepseek/deepseek-chat',
+    timeout_seconds: 3.5,
+  },
+  {
+    label: '+ Ollama',
+    name: 'Ollama',
+    base_url: 'http://localhost:11434/v1',
+    model: 'qwen2.5-coder:7b',
+    timeout_seconds: 4.0,
+  },
+  {
+    label: '+ MiMo',
+    name: 'MiMo',
+    base_url: 'https://api.hcnsec.cn/v1',
+    model: 'MiMo-V2.6-Flash',
+    timeout_seconds: 2.5,
+  },
+];
+
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   isOpen,
   onClose,
@@ -299,7 +425,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   theme,
   setTheme,
 }) => {
-  const [phase, setPhase] = useState<'welcome' | 'wizard'>('welcome');
+  const [phase, setPhase] = useState<'welcome' | 'wizard'>(() =>
+    typeof window !== 'undefined' && localStorage.getItem('netops_onboarding_done') === 'true'
+      ? 'wizard'
+      : 'welcome'
+  );
   const [prevIsOpen, setPrevIsOpen] = useState(isOpen);
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
 
@@ -313,6 +443,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [telegramCodeInput, setTelegramCodeInput] = useState('');
   const [recoveryStatusMsg, setRecoveryStatusMsg] = useState('');
   const [claimingOwner, setClaimingOwner] = useState(false);
+  const [clusterInitialized, setClusterInitialized] = useState(false);
+  const [bootstrapCompleted, setBootstrapCompleted] = useState(false);
+  const [callerIsBoundOwner, setCallerIsBoundOwner] = useState(true);
+  const [hasPopulatedDb, setHasPopulatedDb] = useState(false);
+  const [canTransferOwnerFlag, setCanTransferOwnerFlag] = useState(false);
 
   // Step 2: GitHub SoT (Private/Public Repo + PAT + Target Branch; auto-commit and sync always ON)
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
@@ -335,13 +470,16 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [telegramSavedMsg, setTelegramSavedMsg] = useState('');
 
   // Step 4: AI Cluster Cascade
-  const [llmCascade, setLlmCascade] = useState<LlmCascadeConfig[]>([]);
+  const [llmCascade, setLlmCascade] = useState<LlmCascadeConfig[]>([
+    { name: '', base_url: '', model: '', api_key: '', timeout_seconds: 2.5 },
+  ]);
   const [llmConfigRaw, setLlmConfigRaw] = useState('');
-  const [showLlmPasteBox, setShowLlmPasteBox] = useState(true);
+  const [showLlmPasteBox, setShowLlmPasteBox] = useState(false);
   const [savingAi, setSavingAi] = useState(false);
   const [aiSavedMsg, setAiSavedMsg] = useState('');
+  const [aiMsgError, setAiMsgError] = useState(false);
 
-  // Step 5: Server (Host & Password only on initial setup)
+  // Step 5: Server (Host & Password)
   const [serverHost, setServerHost] = useState('');
   const [serverPort, setServerPort] = useState(221);
   const [serverUser, setServerUser] = useState('crocdream');
@@ -361,43 +499,55 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   if (isOpen !== prevIsOpen) {
     setPrevIsOpen(isOpen);
     if (isOpen) {
-      setPhase('welcome');
+      const doneBefore =
+        typeof window !== 'undefined' && localStorage.getItem('netops_onboarding_done') === 'true';
+      setPhase(doneBefore ? 'wizard' : 'welcome');
     }
   }
 
   const t = translations[locale];
   const w = WIZARD_COPY[locale];
 
+  const applyBootstrapStatusToState = (st: Awaited<ReturnType<typeof api.getBootstrapStatus>>) => {
+    setClusterInitialized(Boolean(st.initialized));
+    setBootstrapCompleted(Boolean(st.bootstrap_completed));
+    setCallerIsBoundOwner(st.caller_is_bound_owner !== false);
+    setHasPopulatedDb(Boolean(st.has_populated_db || (st.server?.devices_count ?? 0) > 0));
+    setCanTransferOwnerFlag(Boolean(st.can_transfer_owner));
+
+    if (st.cluster_name) setClusterName(st.cluster_name);
+    if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
+      setExposureMode(st.exposure.mode);
+    }
+    if (st.github?.repo_connected) {
+      if (st.github.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
+      if (st.github.branch) setGithubBranch(st.github.branch);
+    }
+    if (st.telegram?.bot_token_set) {
+      setTelegramBotConfigured(true);
+      if (st.telegram.bot_username) setTelegramBotUsername(st.telegram.bot_username);
+    }
+    if (st.telegram?.deep_link_recover) setTelegramRecoverLink(st.telegram.deep_link_recover);
+    setTelegramLinked(Boolean(st.owner?.telegram_linked));
+    setTelegramLinkedUser(st.owner?.telegram_username || '');
+    setTelegramChatId(st.owner?.telegram_chat_id || '');
+    if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
+    if (st.server?.clab_host) setServerHost(st.server.clab_host);
+    if (st.server?.clab_port) setServerPort(st.server.clab_port);
+    if (st.server?.clab_user) setServerUser(st.server.clab_user);
+    if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
+      setLlmCascade(st.ai.cascade);
+    }
+
+    if (st.initialized && !st.caller_is_bound_owner) {
+      setRecoverMode(true);
+    }
+  };
+
   const refreshBootstrapStatus = async () => {
     try {
       const st = await api.getBootstrapStatus();
-      if (st.cluster_name) setClusterName(st.cluster_name);
-      if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
-        setExposureMode(st.exposure.mode);
-      }
-      if (st.github?.repo_connected) {
-        if (st.github.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
-        if (st.github.branch) setGithubBranch(st.github.branch);
-      }
-      if (st.telegram?.bot_token_set) {
-        setTelegramBotConfigured(true);
-        if (st.telegram.bot_username) setTelegramBotUsername(st.telegram.bot_username);
-      }
-      if (st.telegram?.deep_link_recover) setTelegramRecoverLink(st.telegram.deep_link_recover);
-      setTelegramLinked(Boolean(st.owner?.telegram_linked));
-      setTelegramLinkedUser(st.owner?.telegram_username || '');
-      setTelegramChatId(st.owner?.telegram_chat_id || '');
-      if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
-      if (st.server?.clab_host) setServerHost(st.server.clab_host);
-      if (st.server?.clab_port) setServerPort(st.server.clab_port);
-      if (st.server?.clab_user) setServerUser(st.server.clab_user);
-      if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
-        setLlmCascade(st.ai.cascade);
-      }
-
-      if (st.initialized && !st.caller_is_bound_owner) {
-        setRecoverMode(true);
-      }
+      applyBootstrapStatusToState(st);
     } catch {
       // fallback to defaults
     }
@@ -406,6 +556,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     let active = true;
+
+    const doneBefore =
+      typeof window !== 'undefined' && localStorage.getItem('netops_onboarding_done') === 'true';
 
     const step1Timer = setTimeout(() => {
       if (active) setPreload((p) => ({ ...p, step: Math.max(p.step, 2) }));
@@ -428,33 +581,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       const inSync = devs.filter((d) => d.status === 'IN_SYNC').length;
 
       if (bootRes.status === 'fulfilled' && bootRes.value) {
-        const st = bootRes.value;
-        if (st.cluster_name) setClusterName(st.cluster_name);
-        if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
-          setExposureMode(st.exposure.mode);
-        }
-        if (st.github?.repo_connected) {
-          if (st.github.github_repo_url) setGithubRepoUrl(st.github.github_repo_url);
-          if (st.github.branch) setGithubBranch(st.github.branch);
-        }
-        if (st.telegram?.bot_token_set) {
-          setTelegramBotConfigured(true);
-          if (st.telegram.bot_username) setTelegramBotUsername(st.telegram.bot_username);
-        }
-        if (st.telegram?.deep_link_recover) setTelegramRecoverLink(st.telegram.deep_link_recover);
-        setTelegramLinked(Boolean(st.owner?.telegram_linked));
-        setTelegramLinkedUser(st.owner?.telegram_username || '');
-        setTelegramChatId(st.owner?.telegram_chat_id || '');
-        if (st.owner?.recovery_key) setOwnerToken(st.owner.recovery_key);
-        if (st.server?.clab_host) setServerHost(st.server.clab_host);
-        if (st.server?.clab_port) setServerPort(st.server.clab_port);
-        if (st.server?.clab_user) setServerUser(st.server.clab_user);
-        if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
-          setLlmCascade(st.ai.cascade);
-        }
-        if (st.initialized && !st.caller_is_bound_owner) {
-          setRecoverMode(true);
-        }
+        applyBootstrapStatusToState(bootRes.value);
       }
 
       setPreload({
@@ -467,9 +594,12 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       });
     });
 
-    const transitionTimer = setTimeout(() => {
-      if (active) setPhase('wizard');
-    }, 1800);
+    const transitionTimer = setTimeout(
+      () => {
+        if (active) setPhase('wizard');
+      },
+      doneBefore ? 0 : 1800
+    );
 
     return () => {
       active = false;
@@ -510,6 +640,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   }, [telegramBotToken, isOpen, wizardStep]);
 
   if (!isOpen) return null;
+
+  const showTransferOwnerBtn =
+    canTransferOwnerFlag ||
+    ((clusterInitialized || bootstrapCompleted) && (hasPopulatedDb || preload.devicesCount > 0)) ||
+    (!callerIsBoundOwner && clusterInitialized);
 
   // Step 1 Action: Claim Owner or Recover Owner
   const handleClaimOwner = async () => {
@@ -659,54 +794,161 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const parseLlmConfigText = (rawText: string): LlmCascadeConfig[] => {
     const trimmed = rawText.trim();
     if (!trimmed) return [];
+
+    // 1. Try JSON object or array
     try {
       const parsed = JSON.parse(trimmed);
       const arr = Array.isArray(parsed) ? parsed : [parsed];
-      return arr
-        .filter((x) => x && typeof x === 'object' && (x.base_url || x.model || x.api_key))
-        .map((x) => ({
-          name: String(x.name || x.provider || ''),
-          base_url: String(x.base_url || ''),
-          model: String(x.model || ''),
-          api_key: String(x.api_key || x.token || ''),
-          timeout_seconds: Number(x.timeout_seconds || 2.0),
-        }));
+      const mapped = arr
+        .filter((x) => x && typeof x === 'object' && (x.name || x.provider || x.base_url || x.model || x.api_key || x.token))
+        .map((x) => {
+          const rawName = String(x.name || x.provider || '');
+          const rawKey = String(x.api_key || x.token || '');
+          const inferred = inferLlmProviderDefaults(
+            rawName || 'LLM',
+            rawKey,
+            String(x.base_url || ''),
+            String(x.model || ''),
+            true
+          );
+          return {
+            name: rawName || 'LLM',
+            base_url: inferred.base_url,
+            model: inferred.model,
+            api_key: rawKey,
+            timeout_seconds: Number(x.timeout_seconds || 2.5),
+          };
+        });
+      if (mapped.length > 0) return mapped;
     } catch {
-      return [];
+      // Fall through to .env or raw key parsing
     }
+
+    // 2. Support .env lines (e.g. GROQ_API_KEY=gsk_..., GEMINI_API_KEY=AIza...) or raw API keys
+    const results: LlmCascadeConfig[] = [];
+    const lines = trimmed
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter((l) => l && !l.startsWith('#'));
+
+    for (const line of lines) {
+      const envMatch = line.match(/^([A-Za-z0-9_.-]+)\s*=\s*["']?([^"']+)["']?$/);
+      if (envMatch) {
+        const envKey = envMatch[1];
+        const envVal = envMatch[2].trim();
+        const providerHint = envKey.replace(/_?(API_KEY|TOKEN|KEY|URL)$/i, '') || 'LLM';
+        const inferred = inferLlmProviderDefaults(providerHint, envVal, '', '', true);
+        results.push({
+          name: providerHint,
+          base_url: inferred.base_url,
+          model: inferred.model,
+          api_key: envVal.startsWith('http') ? '' : envVal,
+          timeout_seconds: 2.5,
+        });
+        continue;
+      }
+
+      if (/^(gsk_|AIza|sk-or-|sk-)[A-Za-z0-9_-]{8,}/.test(line)) {
+        const inferred = inferLlmProviderDefaults('', line, '', '', true);
+        const autoName = line.startsWith('gsk_')
+          ? 'Groq'
+          : line.startsWith('AIza')
+            ? 'Gemini'
+            : line.startsWith('sk-or-')
+              ? 'OpenRouter'
+              : 'OpenAI';
+        results.push({
+          name: autoName,
+          base_url: inferred.base_url,
+          model: inferred.model,
+          api_key: line,
+          timeout_seconds: 2.5,
+        });
+      }
+    }
+
+    return results;
   };
 
   const handleApplyLlmConfig = () => {
     const parsed = parseLlmConfigText(llmConfigRaw);
     if (parsed.length === 0) {
-      setAiSavedMsg('Не удалось распознать JSON-конфиг');
+      setAiMsgError(true);
+      setAiSavedMsg(
+        locale === 'en'
+          ? 'Could not parse JSON, .env line, or API key'
+          : 'Укажите JSON, строку .env (GROQ_API_KEY=...) или API-ключ (gsk_..., AIza..., sk-...)'
+      );
       return;
     }
-    setLlmCascade((prev) => [...prev, ...parsed]);
+    setLlmCascade((prev) => {
+      const nonEmpty = prev.filter(
+        (p) => p.name.trim() || p.base_url.trim() || p.model.trim() || (p.api_key || '').trim()
+      );
+      return [...nonEmpty, ...parsed];
+    });
     setLlmConfigRaw('');
     setShowLlmPasteBox(false);
-    setAiSavedMsg(`Добавлено в каскад: ${parsed.length}`);
+    setAiMsgError(false);
+    setAiSavedMsg(
+      locale === 'en' ? `Added to cascade: ${parsed.length}` : `Добавлено в каскад: ${parsed.length}`
+    );
+  };
+
+  const handleMoveCascadeRow = (index: number, direction: -1 | 1) => {
+    setLlmCascade((prev) => {
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const copy = [...prev];
+      const [moved] = copy.splice(index, 1);
+      copy.splice(targetIndex, 0, moved);
+      return copy;
+    });
   };
 
   // Step 4 Action: Save AI Cluster Cascade
   const handleSaveAiCluster = async () => {
     setSavingAi(true);
     setAiSavedMsg('');
+    setAiMsgError(false);
     try {
       const extraFromPaste = parseLlmConfigText(llmConfigRaw);
-      const finalCascade = [...llmCascade, ...extraFromPaste];
-      if (extraFromPaste.length > 0) {
-        setLlmCascade(finalCascade);
-        setLlmConfigRaw('');
+      const combined = [...llmCascade, ...extraFromPaste]
+        .filter(
+          (p) => p.name.trim() || p.base_url.trim() || p.model.trim() || (p.api_key || '').trim()
+        )
+        .map((p, idx) => {
+          const fallbackName = p.name.trim() || `LLM-${idx + 1}`;
+          const inferred = inferLlmProviderDefaults(
+            fallbackName,
+            p.api_key || '',
+            p.base_url || '',
+            p.model || '',
+            true
+          );
+          return {
+            name: fallbackName,
+            base_url: inferred.base_url,
+            model: inferred.model,
+            api_key: (p.api_key || '').trim(),
+            timeout_seconds: Number(p.timeout_seconds) > 0 ? Number(p.timeout_seconds) : 2.5,
+          };
+        });
+
+      if (combined.length > 0) {
+        setLlmCascade(combined);
       }
+      setLlmConfigRaw('');
+
       await api.configureBootstrapLayers({
-        llm_cascade: finalCascade,
+        llm_cascade: combined,
         auto_commit_on_diff: true,
         websocket_enabled: true,
       });
       await refreshBootstrapStatus();
       setWizardStep(5);
     } catch (err: unknown) {
+      setAiMsgError(true);
       setAiSavedMsg(getErrorMessage(err, 'Ошибка сохранения кластера ИИ'));
     } finally {
       setSavingAi(false);
@@ -1029,7 +1271,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         >
                           <div className="text-xs font-semibold">{w.step1.publicTunnelTitle}</div>
                           <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                            {serverHost || window.location.hostname}:5173
+                            {serverHost && serverHost !== 'localhost' && serverHost !== '127.0.0.1'
+                              ? `${serverHost}:5173 (${locale === 'en' ? 'external' : 'открыт снаружи'})`
+                              : locale === 'en'
+                                ? '0.0.0.0:5173 (external access)'
+                                : '0.0.0.0:5173 (открыт снаружи)'}
                           </div>
                         </button>
                       </div>
@@ -1061,13 +1307,17 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     )}
 
                     <div className="flex items-center justify-between pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setRecoverMode(true)}
-                        className="text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline cursor-pointer"
-                      >
-                        {w.step1.transferAccessBtn}
-                      </button>
+                      {showTransferOwnerBtn ? (
+                        <button
+                          type="button"
+                          onClick={() => setRecoverMode(true)}
+                          className="text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline cursor-pointer"
+                        >
+                          {w.step1.transferAccessBtn}
+                        </button>
+                      ) : (
+                        <span />
+                      )}
 
                       <button
                         type="button"
@@ -1081,7 +1331,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     </div>
                   </div>
                 ) : (
-                  /* COMPACT RECOVERY */
+                  /* COMPACT RECOVERY — EQUAL-LEVEL CARDS */
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
@@ -1097,29 +1347,47 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-stretch">
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex flex-col justify-between gap-2">
-                        <div className="flex items-center justify-between gap-1.5 flex-wrap">
-                          <span className="text-xs font-medium text-[var(--text-primary)]">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-stretch">
+                      {/* Card 1: Telegram Code */}
+                      <div className="flex flex-col justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 space-y-2.5 h-full">
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-medium text-[var(--text-primary)]">
                             {w.step1.recoverStep1Title}
-                          </span>
-                          <div className="flex gap-1.5">
-                            <button
-                              type="button"
-                              onClick={handleRequestTelegramRecoveryCode}
-                              className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-primary)] cursor-pointer"
-                            >
-                              {w.step1.requestCodeBtn}
-                            </button>
-                            <a
-                              href={telegramRecoverLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="px-2 py-0.5 rounded bg-emerald-500/15 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"
-                            >
-                              <span>{w.step1.botLinkBtn}</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
+                          </div>
+                          <div className="flex items-center justify-between gap-1.5 min-h-[24px]">
+                            {telegramLinked ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={handleRequestTelegramRecoveryCode}
+                                  className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-primary)] cursor-pointer"
+                                >
+                                  {w.step1.requestCodeBtn}
+                                </button>
+                                <a
+                                  href={telegramRecoverLink}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-2 py-0.5 rounded bg-emerald-500/15 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"
+                                >
+                                  <span>{w.step1.botLinkBtn}</span>
+                                  <ExternalLink className="w-3 h-3" />
+                                </a>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setRecoverMode(false);
+                                  setWizardStep(3);
+                                }}
+                                className="px-2 py-0.5 rounded border border-amber-500/30 bg-amber-500/10 text-[10px] font-mono text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 cursor-pointer"
+                              >
+                                {locale === 'en'
+                                  ? 'Connect Telegram (Step 3) →'
+                                  : 'Подключить Telegram (Шаг 3) →'}
+                              </button>
+                            )}
                           </div>
                         </div>
                         <input
@@ -1131,14 +1399,33 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         />
                       </div>
 
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex flex-col justify-between gap-2">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="text-xs font-medium text-[var(--text-primary)]">
+                      {/* Card 2: Recovery Key */}
+                      <div className="flex flex-col justify-between rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 space-y-2.5 h-full">
+                        <div className="space-y-1.5">
+                          <div className="text-xs font-medium text-[var(--text-primary)]">
                             {w.step1.recoverStep2Title}
-                          </span>
-                          <span className="px-2 py-0.5 rounded bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-muted)]">
-                            KEY
-                          </span>
+                          </div>
+                          <div className="flex items-center justify-between gap-1.5 min-h-[24px]">
+                            <span className="text-[10px] font-mono text-[var(--text-muted)] truncate">
+                              {locale === 'en'
+                                ? 'Key crk_owner_... from Step 1'
+                                : 'Ключ crk_owner_... из Шага 1'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard
+                                  ?.readText()
+                                  .then((txt) => {
+                                    if (txt) setRecoveryKeyInput(txt.trim());
+                                  })
+                                  .catch(() => {});
+                              }}
+                              className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-primary)] cursor-pointer shrink-0"
+                            >
+                              {locale === 'en' ? 'Paste' : 'Вставить'}
+                            </button>
+                          </div>
                         </div>
                         <input
                           type="text"
@@ -1331,14 +1618,21 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             )}
 
-            {/* ==================== STEP 4: AI CLUSTER ==================== */}
+            {/* ==================== STEP 4: AI CLUSTER CASCADE ==================== */}
             {wizardStep === 4 && (
               <div className="space-y-3 animate-fade-in">
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)]/60 p-3 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] font-mono font-semibold text-[var(--text-primary)]">
-                      {locale === 'en' ? 'LLM Cascade' : 'Каскад LLM'} ({llmCascade.length})
-                    </span>
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] font-mono font-semibold text-[var(--text-primary)]">
+                        {locale === 'en' ? 'LLM Cascade' : 'Каскад LLM'} ({llmCascade.length})
+                      </span>
+                      <span className="text-[10px] font-mono text-[var(--text-muted)]">
+                        {llmCascade.length > 0
+                          ? `${llmCascade.map((_, i) => `#${i + 1}`).join(' → ')} → Rule-Engine`
+                          : 'Rule-Engine'}
+                      </span>
+                    </div>
                     <div className="flex items-center gap-1.5">
                       <button
                         type="button"
@@ -1363,15 +1657,46 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                               base_url: '',
                               model: '',
                               api_key: '',
-                              timeout_seconds: 2.0,
+                              timeout_seconds: 2.5,
                             },
                           ])
                         }
                         className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 cursor-pointer"
                       >
-                        {locale === 'en' ? '+ Provider' : '+ Провайдер'}
+                        {locale === 'en' ? '+ Custom Provider' : '+ Свой провайдер'}
                       </button>
                     </div>
+                  </div>
+
+                  {/* Quick 1-click preset pills */}
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {LLM_PRESETS.map((preset) => (
+                      <button
+                        key={preset.name}
+                        type="button"
+                        onClick={() =>
+                          setLlmCascade((prev) => {
+                            const hasEmptyFirst =
+                              prev.length === 1 &&
+                              !prev[0].name.trim() &&
+                              !prev[0].base_url.trim() &&
+                              !prev[0].model.trim() &&
+                              !(prev[0].api_key || '').trim();
+                            const row: LlmCascadeConfig = {
+                              name: preset.name,
+                              base_url: preset.base_url,
+                              model: preset.model,
+                              api_key: '',
+                              timeout_seconds: preset.timeout_seconds,
+                            };
+                            return hasEmptyFirst ? [row] : [...prev, row];
+                          })
+                        }
+                        className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-emerald-500/40 bg-[var(--bg-card)] hover:bg-emerald-500/10 text-[10px] font-mono text-[var(--text-secondary)] hover:text-emerald-600 dark:hover:text-emerald-400 cursor-pointer transition-colors"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
                   </div>
 
                   {showLlmPasteBox && (
@@ -1381,7 +1706,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         value={llmConfigRaw}
                         onChange={(e) => setLlmConfigRaw(e.target.value)}
                         placeholder={
-                          '{\n  "name": "",\n  "model": "",\n  "base_url": "",\n  "api_key": ""\n}'
+                          'GROQ_API_KEY=gsk_...\nGEMINI_API_KEY=AIza...\n{"name":"Groq","api_key":"gsk_..."}'
                         }
                         className={`${inputClass} leading-relaxed resize-y`}
                       />
@@ -1398,24 +1723,84 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                   )}
 
                   {llmCascade.length > 0 && (
-                    <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                       {llmCascade.map((item, idx) => (
                         <div
                           key={idx}
                           className="rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] p-1.5 flex items-center gap-1.5"
                         >
+                          <div className="flex flex-col items-center gap-0.5 shrink-0">
+                            <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 text-[10px] font-mono font-bold">
+                              #{idx + 1}
+                            </span>
+                            <div className="flex items-center gap-0.5">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveCascadeRow(idx, -1)}
+                                disabled={idx === 0}
+                                className="px-1 text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 cursor-pointer"
+                                title={locale === 'en' ? 'Move up' : 'Выше в каскаде'}
+                              >
+                                ↑
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveCascadeRow(idx, 1)}
+                                disabled={idx === llmCascade.length - 1}
+                                className="px-1 text-[10px] font-mono text-[var(--text-muted)] hover:text-[var(--text-primary)] disabled:opacity-30 cursor-pointer"
+                                title={locale === 'en' ? 'Move down' : 'Ниже в каскаде'}
+                              >
+                                ↓
+                              </button>
+                            </div>
+                          </div>
+
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1">
                             <input
                               type="text"
                               value={item.name}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const newName = e.target.value;
                                 setLlmCascade((prev) =>
-                                  prev.map((p, i) =>
-                                    i === idx ? { ...p, name: e.target.value } : p
-                                  )
-                                )
-                              }
-                              placeholder={locale === 'en' ? 'Provider' : 'Провайдер'}
+                                  prev.map((p, i) => {
+                                    if (i !== idx) return p;
+                                    const inferred = inferLlmProviderDefaults(
+                                      newName,
+                                      p.api_key || '',
+                                      p.base_url || '',
+                                      p.model || '',
+                                      false
+                                    );
+                                    return {
+                                      ...p,
+                                      name: newName,
+                                      base_url: inferred.base_url,
+                                      model: inferred.model,
+                                    };
+                                  })
+                                );
+                              }}
+                              onBlur={() => {
+                                setLlmCascade((prev) =>
+                                  prev.map((p, i) => {
+                                    if (i !== idx) return p;
+                                    if (!p.name.trim() && !(p.api_key || '').trim()) return p;
+                                    const inferred = inferLlmProviderDefaults(
+                                      p.name,
+                                      p.api_key || '',
+                                      p.base_url || '',
+                                      p.model || '',
+                                      true
+                                    );
+                                    return {
+                                      ...p,
+                                      base_url: inferred.base_url,
+                                      model: inferred.model,
+                                    };
+                                  })
+                                );
+                              }}
+                              placeholder={locale === 'en' ? 'Name (e.g. Groq)' : 'Имя (напр. Groq)'}
                               className={inputClass}
                             />
                             <input
@@ -1428,7 +1813,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder={locale === 'en' ? 'Model' : 'Модель'}
+                              placeholder={locale === 'en' ? 'Model (auto)' : 'Модель (авто)'}
                               className={inputClass}
                             />
                             <input
@@ -1441,19 +1826,45 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Base URL"
+                              placeholder="Base URL (auto)"
                               className={inputClass}
                             />
                             <input
                               type="password"
                               value={item.api_key || ''}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const newKey = e.target.value;
                                 setLlmCascade((prev) =>
-                                  prev.map((p, i) =>
-                                    i === idx ? { ...p, api_key: e.target.value } : p
-                                  )
-                                )
-                              }
+                                  prev.map((p, i) => {
+                                    if (i !== idx) return p;
+                                    const inferred = inferLlmProviderDefaults(
+                                      p.name,
+                                      newKey,
+                                      p.base_url || '',
+                                      p.model || '',
+                                      false
+                                    );
+                                    const autoName =
+                                      p.name.trim() ||
+                                      (newKey.startsWith('gsk_')
+                                        ? 'Groq'
+                                        : newKey.startsWith('AIza')
+                                          ? 'Gemini'
+                                          : newKey.startsWith('sk-or-')
+                                            ? 'OpenRouter'
+                                            : newKey.startsWith('sk-')
+                                              ? 'OpenAI'
+                                              : '');
+                                    return {
+                                      ...p,
+                                      name: autoName,
+                                      api_key: newKey,
+                                      base_url: inferred.base_url,
+                                      model: inferred.model,
+                                    };
+                                  })
+                                );
+                              }}
                               placeholder="API Key"
                               className={inputClass}
                             />
@@ -1475,7 +1886,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 </div>
 
                 {aiSavedMsg && (
-                  <div className="text-xs font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
+                  <div
+                    className={`text-xs font-mono rounded px-3 py-1.5 border ${
+                      aiMsgError
+                        ? 'text-rose-600 dark:text-rose-400 bg-rose-500/10 border-rose-500/20'
+                        : 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                    }`}
+                  >
                     {aiSavedMsg}
                   </div>
                 )}

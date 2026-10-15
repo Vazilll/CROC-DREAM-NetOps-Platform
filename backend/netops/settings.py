@@ -247,13 +247,32 @@ class Settings(BaseSettings):
                 self.llm_cascade = [
                     item for item in data["llm_cascade"] if isinstance(item, dict)
                 ]
+            for int_field in (
+                "metrics_interval_seconds",
+                "drift_scan_interval_seconds",
+                "commit_confirm_timeout_seconds",
+            ):
+                if data.get(int_field) is not None and int_field not in explicit:
+                    try:
+                        setattr(self, int_field, int(data[int_field]))
+                    except (TypeError, ValueError):
+                        pass
+            if (
+                data.get("max_ping_loss_percent") is not None
+                and "max_ping_loss_percent" not in explicit
+            ):
+                try:
+                    self.max_ping_loss_percent = float(data["max_ping_loss_percent"])
+                except (TypeError, ValueError):
+                    pass
             return data
         except Exception:
             return {}
 
-
     def save_runtime_overlay(self, updates: dict[str, object]) -> dict[str, object]:
         import json  # noqa: PLC0415
+        import os  # noqa: PLC0415
+        import tempfile  # noqa: PLC0415
 
         rt_file = self.offline_lab_path / "runtime_settings.json"
         rt_file.parent.mkdir(parents=True, exist_ok=True)
@@ -268,9 +287,20 @@ class Settings(BaseSettings):
         for k, v in updates.items():
             if v is not None:
                 existing[k] = v
-        rt_file.write_text(
-            json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8"
+        payload = json.dumps(existing, ensure_ascii=False, indent=2)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(rt_file.parent), prefix=".runtime_settings_", suffix=".tmp"
         )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp_path, rt_file)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            rt_file.write_text(payload, encoding="utf-8")
         self.apply_runtime_overlay()
         return existing
 

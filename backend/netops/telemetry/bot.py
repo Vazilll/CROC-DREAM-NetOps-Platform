@@ -136,7 +136,7 @@ def ensure_user_token(
 
     tokens = load_user_tokens(settings)
     existing = tokens.get(user.username)
-    if existing and user.token_sha256 == hash_token(existing):
+    if existing and user.token_sha256:
         return existing
     if settings is not None:
         token = f"croc-{user.username}-{user.role.value}-{user.id or 1}"

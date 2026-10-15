@@ -54,6 +54,30 @@ def _subscribers_files(settings: Settings) -> list[Path]:
     return [_runtime_dir(settings) / "telegram_subscribers.json"]
 
 
+def _atomic_write_json(path: Path, data: Any) -> None:
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(data, indent=2, ensure_ascii=False)
+        fd, tmp_path = tempfile.mkstemp(
+            dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(payload)
+            os.replace(tmp_path, path)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            path.write_text(payload, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _tokens_file(settings: Settings | None = None) -> Path:
     return _runtime_dir(settings) / "user_tokens.json"
 
@@ -74,12 +98,7 @@ def load_user_tokens(settings: Settings | None = None) -> dict[str, str]:
 def save_user_token(username: str, token: str, settings: Settings | None = None) -> None:
     current = load_user_tokens(settings)
     current[username] = token
-    path = _tokens_file(settings)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
+    _atomic_write_json(_tokens_file(settings), current)
 
 
 def _tg_bindings_file(settings: Settings | None = None) -> Path:
@@ -109,12 +128,7 @@ def save_telegram_binding(
     current = load_telegram_bindings(settings)
     key = str(chat_id)
     current[key] = {**current.get(key, {}), "chat_id": chat_id, **info}
-    path = _tg_bindings_file(settings)
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(current, indent=2, ensure_ascii=False), encoding="utf-8")
-    except Exception:
-        pass
+    _atomic_write_json(_tg_bindings_file(settings), current)
 
 
 def _registry_files(settings: Settings | None = None) -> list[Path]:
@@ -157,11 +171,7 @@ def save_access_registry(registry: dict[str, Any], settings: Settings | None = N
 
     registry["updated_at"] = datetime.now(timezone.utc).isoformat()
     for path in _registry_files(settings):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(registry, indent=2, ensure_ascii=False), encoding="utf-8")
-        except Exception:
-            pass
+        _atomic_write_json(path, registry)
 
 
 def record_security_event(

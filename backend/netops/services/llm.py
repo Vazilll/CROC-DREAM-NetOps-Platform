@@ -168,23 +168,96 @@ def _sync_http_request(
         return response.read().decode("utf-8")
 
 
+def normalize_llm_cascade_item(item: dict[str, Any], idx: int = 0) -> dict[str, Any]:
+    """Auto-resolve base_url, model, api_key, and name for any custom LLM cascade item."""
+    raw_name = str(item.get("name") or "").strip()
+    raw_url = str(item.get("base_url") or "").strip()
+    raw_model = str(item.get("model") or "").strip()
+    raw_key = str(item.get("api_key") or item.get("token") or "").strip()
+    hint_nu = f"{raw_name} {raw_url}".lower()
+    hint_num = f"{hint_nu} {raw_model}".lower()
+
+    if raw_key.startswith("gsk_") or "groq" in hint_nu:
+        def_title, def_url, def_model, def_key = (
+            "Groq",
+            "https://api.groq.com/openai/v1",
+            "qwen/qwen3.8-27b",
+            raw_key,
+        )
+    elif raw_key.startswith("AIza") or "gemini" in hint_nu or "google" in hint_nu:
+        def_title, def_url, def_model, def_key = (
+            "Google-Gemini",
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "gemini-2.5-flash",
+            raw_key,
+        )
+    elif raw_key.startswith("sk-or-") or "openrouter" in hint_nu:
+        def_title, def_url, def_model, def_key = (
+            "OpenRouter",
+            "https://openrouter.ai/api/v1",
+            "deepseek/deepseek-chat-v3-0324:free",
+            raw_key,
+        )
+    elif "deepseek" in hint_num:
+        def_title, def_url, def_model, def_key = (
+            "DeepSeek",
+            "https://api.deepseek.com/v1",
+            "deepseek-chat",
+            raw_key,
+        )
+    elif "ollama" in hint_nu or "11434" in hint_nu or "local" in hint_nu:
+        def_title, def_url, def_model, def_key = (
+            "Local-Ollama",
+            "http://127.0.0.1:11434/v1",
+            "qwen2.5:7b",
+            raw_key or "ollama",
+        )
+    elif "openai" in hint_num or "gpt" in hint_num:
+        def_title, def_url, def_model, def_key = (
+            "OpenAI",
+            "https://api.openai.com/v1",
+            "gpt-4o-mini",
+            raw_key,
+        )
+    else:
+        def_title, def_url, def_model, def_key = (
+            f"Provider-{idx + 1}" if raw_name == "" else "MiMo",
+            "https://api.hcnsec.cn/v1",
+            "MiMo-V2.6-Flash",
+            raw_key,
+        )
+
+    try:
+        timeout = float(item.get("timeout_seconds") or 2.5)
+    except (TypeError, ValueError):
+        timeout = 2.5
+
+    return {
+        "name": raw_name or def_title,
+        "base_url": raw_url or def_url,
+        "model": raw_model or def_model,
+        "api_key": def_key,
+        "timeout_seconds": timeout,
+    }
+
+
 def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]]:
     """Configured providers in cascade order: (name, base_url, token, model, timeout)."""
+    if "PYTEST_CURRENT_TEST" not in os.environ or "offline_lab_path" in settings.model_fields_set:
+        settings.apply_runtime_overlay()
     candidates: list[tuple[str, str, str, str, float]] = []
     seen_urls: set[str] = set()
     for idx, entry in enumerate(getattr(settings, "llm_cascade", None) or []):
         if not isinstance(entry, dict):
             continue
-        base_url = str(entry.get("base_url") or "").strip()
-        model_name = str(entry.get("model") or "").strip()
-        api_key = str(entry.get("api_key") or entry.get("token") or "ollama").strip()
-        name = str(entry.get("name") or f"Provider-{idx + 1}").strip()
+        norm = normalize_llm_cascade_item(entry, idx)
+        base_url = norm["base_url"]
+        model_name = norm["model"]
+        api_key = norm["api_key"] or "ollama"
+        name = norm["name"]
+        timeout = float(norm["timeout_seconds"])
         if not base_url or not model_name:
             continue
-        try:
-            timeout = float(entry.get("timeout_seconds") or 2.5)
-        except (TypeError, ValueError):
-            timeout = 2.5
         candidates.append((name, base_url, api_key, model_name, max(timeout, 1.0)))
         seen_urls.add(f"{base_url}:{model_name}")
 

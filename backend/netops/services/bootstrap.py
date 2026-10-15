@@ -27,6 +27,7 @@ from netops.models import Device, User
 from netops.security import generate_token, hash_token
 from netops.services.devices import DeviceService
 from netops.services.git_sot import git_connect_remote, git_repo_metadata
+from netops.services.llm import normalize_llm_cascade_item
 from netops.services.notifier import (
     load_user_tokens,
     resolve_telegram_targets,
@@ -34,6 +35,7 @@ from netops.services.notifier import (
     send_telegram_message,
 )
 from netops.services.telemetry import check_prometheus_status
+from netops.services.users import _is_expired
 from netops.settings import ApiPrincipal
 
 _tunnel_proc: Any = None
@@ -149,8 +151,10 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
     rt = settings.apply_runtime_overlay()
     client_id = (request.headers.get("X-Client-Id") or "").strip()
 
-    owner = _try_auto_bind_owner_from_telegram(session, settings)
-    rt = settings.apply_runtime_overlay()
+    owner = session.scalar(select(User).where(User.username == "owner"))
+    if owner is None or not owner.telegram_chat_id:
+        owner = _try_auto_bind_owner_from_telegram(session, settings)
+        rt = settings.apply_runtime_overlay()
     owner_bound_cid = owner.bound_client_id if owner else None
     bootstrap_done = bool(rt.get("bootstrap_completed"))
     owner_claimed = bool(owner and owner_bound_cid and bootstrap_done)
@@ -185,6 +189,7 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
 
     devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
     in_sync = sum(1 for d in devices if d.status is DeviceStatus.IN_SYNC)
+    has_populated_db = len(devices) > 0
 
     exp_mode = str(rt.get("exposure_mode") or "local_only")
     ws_enabled = True
@@ -202,6 +207,8 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
         "initialized": owner_claimed,
         "bootstrap_completed": bootstrap_done,
         "caller_is_bound_owner": caller_is_bound_owner,
+        "has_populated_db": has_populated_db,
+        "can_transfer_owner": bool(owner_claimed and has_populated_db),
         "cluster_name": str(rt.get("cluster_name") or "CROC-FABRIC-PROD-01"),
         "exposure": {
             "mode": exp_mode,
@@ -239,7 +246,6 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
             "deep_link_claim": f"https://t.me/{bot_username}?start={owner_tok_for_link}",
             "deep_link_recover": f"https://t.me/{bot_username}?start=recover_owner",
         },
-
         "server": {
             "network_driver": settings.network_driver,
             "clab_host": c_host,
@@ -262,7 +268,17 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
             "groq_configured": bool(settings.groq_api_key),
             "gemini_configured": bool(settings.gemini_api_key),
             "ollama_url": settings.ollama_url or "",
-            "cascade": list(getattr(settings, "llm_cascade", None) or []),
+            "cascade": [
+                normalize_llm_cascade_item(c, idx)
+                for idx, c in enumerate(getattr(settings, "llm_cascade", None) or [])
+                if isinstance(c, dict)
+            ],
+        },
+        "metrics_config": {
+            "metrics_interval_seconds": settings.metrics_interval_seconds,
+            "drift_scan_interval_seconds": settings.drift_scan_interval_seconds,
+            "commit_confirm_timeout_seconds": settings.commit_confirm_timeout_seconds,
+            "max_ping_loss_percent": settings.max_ping_loss_percent,
         },
         "prometheus": (
             check_prometheus_status(settings.prometheus_url)
@@ -365,6 +381,13 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
         raise HTTPException(status_code=404, detail="Профиль owner ещё не инициализирован")
 
     if req.action == "request_telegram_code":
+        if not owner.telegram_chat_id:
+            owner = _try_auto_bind_owner_from_telegram(session, settings) or owner
+        if not owner.telegram_chat_id:
+            discovered = resolve_telegram_targets(settings, discover=True)
+            if discovered:
+                owner.telegram_chat_id = str(discovered[0])
+                session.commit()
         code = f"{secrets.randbelow(900000) + 100000}"
         owner.verification_code = code
         owner.verification_expires_at = utcnow() + timedelta(minutes=15)
@@ -400,7 +423,9 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
         for c in candidates
     )
     code_ok = any(
-        owner.verification_code and owner.verification_code == c
+        owner.verification_code
+        and owner.verification_code == c
+        and not _is_expired(owner.verification_expires_at)
         for c in candidates
     )
     if not key_ok and not code_ok:
@@ -532,14 +557,28 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
     if getattr(req, "prometheus_url", None) is not None:
         updates["prometheus_url"] = req.prometheus_url.strip()
     if getattr(req, "llm_cascade", None) is not None:
-        updates["llm_cascade"] = req.llm_cascade
-        for item in req.llm_cascade or []:
-            if isinstance(item, dict) and item.get("api_key"):
+        normalized_cascade = [
+            normalize_llm_cascade_item(item, idx)
+            for idx, item in enumerate(req.llm_cascade)
+            if isinstance(item, dict)
+        ]
+        updates["llm_cascade"] = normalized_cascade
+        for item in normalized_cascade:
+            if item.get("api_key"):
                 burl = str(item.get("base_url") or "").lower()
                 if "groq.com" in burl and not req.groq_api_key:
                     updates["groq_api_key"] = str(item["api_key"]).strip()
                 elif "googleapis.com" in burl and not req.gemini_api_key:
                     updates["gemini_api_key"] = str(item["api_key"]).strip()
+    for metric_field in (
+        "metrics_interval_seconds",
+        "drift_scan_interval_seconds",
+        "commit_confirm_timeout_seconds",
+        "max_ping_loss_percent",
+    ):
+        val = getattr(req, metric_field, None)
+        if val is not None:
+            updates[metric_field] = val
     if req.bootstrap_completed is not None:
         updates["bootstrap_completed"] = req.bootstrap_completed
 

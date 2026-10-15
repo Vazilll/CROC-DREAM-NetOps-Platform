@@ -757,10 +757,19 @@ export interface DeviceHardwareSpecs {
 /**
  * Public 4-layer Matryoshka bootstrap status returned by `GET /api/v1/system/bootstrap/status`.
  */
+export interface BootstrapMetricsConfig {
+  metrics_interval_seconds: number;
+  drift_scan_interval_seconds: number;
+  commit_confirm_timeout_seconds: number;
+  max_ping_loss_percent: number;
+}
+
 export interface BootstrapStatusResponse {
   initialized: boolean;
   bootstrap_completed: boolean;
   caller_is_bound_owner: boolean;
+  has_populated_db?: boolean;
+  can_transfer_owner?: boolean;
   cluster_name: string;
   exposure: {
     mode: 'local_only' | 'public_tunnel';
@@ -818,6 +827,7 @@ export interface BootstrapStatusResponse {
     ollama_url: string;
     cascade?: LlmCascadeConfig[];
   };
+  metrics_config?: BootstrapMetricsConfig;
 }
 
 export interface LlmCascadeConfig {
@@ -826,6 +836,29 @@ export interface LlmCascadeConfig {
   model: string;
   api_key?: string;
   timeout_seconds?: number;
+}
+
+export interface BootstrapConfigureRequest {
+  cluster_name?: string;
+  exposure_mode?: 'local_only' | 'public_tunnel';
+  websocket_enabled?: boolean;
+  github_repo_url?: string;
+  github_branch?: string;
+  auto_commit_on_diff?: boolean;
+  github_pat?: string;
+  github_webhook_secret?: string;
+  webhook_public_url?: string;
+  telegram_bot_token?: string;
+  telegram_chat_id?: string;
+  groq_api_key?: string;
+  gemini_api_key?: string;
+  ollama_url?: string;
+  llm_cascade?: LlmCascadeConfig[];
+  bootstrap_completed?: boolean;
+  metrics_interval_seconds?: number;
+  drift_scan_interval_seconds?: number;
+  commit_confirm_timeout_seconds?: number;
+  max_ping_loss_percent?: number;
 }
 
 /**
@@ -860,6 +893,7 @@ export interface BootstrapConfigureResponse {
   deep_link_claim: string;
   git: GitStatusInfo;
   runtime_keys: string[];
+  metrics_config?: BootstrapMetricsConfig;
 }
 
 /**
@@ -1794,24 +1828,7 @@ export class NetOpsApiClient {
     });
   }
 
-  async configureBootstrapLayers(data: {
-    cluster_name?: string;
-    exposure_mode?: 'local_only' | 'public_tunnel';
-    websocket_enabled?: boolean;
-    github_repo_url?: string;
-    github_branch?: string;
-    auto_commit_on_diff?: boolean;
-    github_pat?: string;
-    github_webhook_secret?: string;
-    webhook_public_url?: string;
-    telegram_bot_token?: string;
-    telegram_chat_id?: string;
-    groq_api_key?: string;
-    gemini_api_key?: string;
-    ollama_url?: string;
-    llm_cascade?: LlmCascadeConfig[];
-    bootstrap_completed?: boolean;
-  }): Promise<BootstrapConfigureResponse> {
+  async configureBootstrapLayers(data: BootstrapConfigureRequest): Promise<BootstrapConfigureResponse> {
     return this.request<BootstrapConfigureResponse>('/system/bootstrap/configure', {
       method: 'POST',
       body: JSON.stringify(data),

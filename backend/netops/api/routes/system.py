@@ -13,7 +13,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from netops.api.deps import ContainerDep, Operator, SessionDep, Viewer
 from netops.db import Base
-from netops.enums import DeviceStatus, IntentSource
+from netops.enums import DeviceStatus, IntentSource, UserRole
 from netops.intent.netbox import load_netbox_inventory
 from netops.models import ConfigSnapshot, Device, DriftRecord, Job, MetricSample, User
 from netops.schemas.intent import IntentIssueRead, IntentLintReport
@@ -221,6 +221,10 @@ class BootstrapConfigureRequest(BaseModel):
     ollama_url: str | None = None
     prometheus_url: str | None = None
     llm_cascade: list[dict[str, Any]] | None = None
+    metrics_interval_seconds: int | None = None
+    drift_scan_interval_seconds: int | None = None
+    commit_confirm_timeout_seconds: int | None = None
+    max_ping_loss_percent: float | None = None
     bootstrap_completed: bool | None = None
 
 
@@ -398,7 +402,31 @@ def github_webhook(
     payload: dict[str, Any],
     session: SessionDep,
     container: ContainerDep,
+    request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
+    rt = container.settings.apply_runtime_overlay()
+    secret = str(rt.get("github_webhook_secret") or "").strip()
+    sig_header = (
+        (request.headers.get("X-Hub-Signature-256") or "").strip()
+        if request is not None
+        else ""
+    )
+    if secret and sig_header:
+        import hashlib  # noqa: PLC0415
+        import hmac  # noqa: PLC0415
+        import json as _json  # noqa: PLC0415
+
+        raw_body = getattr(request, "_body", None) or _json.dumps(payload).encode("utf-8")
+        expected = (
+            "sha256="
+            + hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
+        )
+        if not hmac.compare_digest(expected, sig_header):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invalid X-Hub-Signature-256 webhook signature",
+            )
+
     ref = str(payload.get("ref") or "refs/heads/main")
     pusher = str((payload.get("pusher") or {}).get("name") or "github-webhook")
     pull_note = git_pull_repo(container.settings.intent_repo_path)
@@ -441,7 +469,7 @@ def github_webhook(
 def get_integrations_status(
     session: SessionDep,
     container: ContainerDep,
-    caller: Viewer,
+    user: Viewer,
 ) -> dict[str, Any]:
     settings = container.settings
     db_url = settings.database_url
@@ -485,16 +513,21 @@ def get_integrations_status(
         "bound_device_sessions": bound_count,
     }
 
-    is_privileged = caller.role in (UserRole.ADMIN, UserRole.OWNER)
-    registry = sync_access_registry(session, settings) if is_privileged else {}
-    raw_tokens = load_user_tokens(settings) if is_privileged else {}
-    user_tokens = (
-        raw_tokens
-        if caller.role == UserRole.OWNER
-        else {k: v for k, v in raw_tokens.items() if k != "owner"}
-    )
+    is_admin = user.role.grants(UserRole.ADMIN)
+    registry = sync_access_registry(session, settings) if is_admin else {}
+    raw_tokens = load_user_tokens(settings)
+    if user.role == UserRole.OWNER:
+        user_tokens = raw_tokens
+    elif is_admin:
+        user_tokens = {k: v for k, v in raw_tokens.items() if k != "owner"}
+    else:
+        user_tokens = {
+            k: (v if k == user.username else f"{v[:6]}...")
+            for k, v in raw_tokens.items()
+            if k != "owner"
+        }
     tg_bindings = load_telegram_bindings(settings)
-    all_users = [UserRead.model_validate(u).model_dump(mode="json") for u in db_users] if is_privileged else []
+    all_users = [UserRead.model_validate(u).model_dump(mode="json") for u in db_users] if is_admin else []
 
     return {
         "sessions": all_users,
