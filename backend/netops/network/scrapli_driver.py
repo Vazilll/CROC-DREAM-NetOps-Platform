@@ -270,6 +270,12 @@ class ScrapliNetworkDriver:
             if rollback_lines:
                 conn.send_configs(rollback_lines)
 
+    # Только команды чтения: список разрешённых начал проверяет вызывающая сторона.
+    def run_read_only(self, target: DeviceTarget, command: str) -> str:
+        with self._get_connection(target) as conn:
+            response = conn.send_command(command)
+        return str(response.result)
+
     # Откат на VRP: возвращаемся к состоянию до нашего commit. Если commit-id снять не
     # удалось, откатываем последнее изменение.
     def _rollback_huawei(self, target: DeviceTarget) -> None:
