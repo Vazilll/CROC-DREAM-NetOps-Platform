@@ -91,21 +91,41 @@ class _ParamikoShell:
 
         self._client = paramiko.SSHClient()
         self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self._client.connect(
-            self._target.host,
-            port=self._target.port,
-            username=self._target.credentials.username,
-            password=self._target.credentials.password,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=self._timeout,
-        )
+        try:
+            self._client.connect(
+                self._target.host,
+                port=self._target.port,
+                username=self._target.credentials.username,
+                password=self._target.credentials.password,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=self._timeout,
+                # Huawei CE отдаёт баннер не сразу, а cEOS иногда тянет аутентификацию.
+                banner_timeout=self._timeout * 2,
+                auth_timeout=self._timeout * 2,
+            )
+        except paramiko.BadAuthenticationType:
+            # Часть устройств (например, cEOS) принимает пароль только через
+            # keyboard-interactive, обычная парольная аутентификация им запрещена.
+            self._auth_interactive(paramiko)
         self._shell = self._client.invoke_shell()
         self._drain()
         for command in self._PAGER_OFF.get(self._target.platform, ()):
             self._write(command)
         self._drain()
         return self
+
+    def _auth_interactive(self, paramiko: Any) -> None:
+        password = self._target.credentials.password
+        transport = paramiko.Transport((self._target.host, self._target.port))
+        transport.banner_timeout = self._timeout * 2
+        transport.connect()
+        transport.auth_interactive(
+            self._target.credentials.username,
+            lambda title, instructions, prompts: [password for _ in prompts],
+        )
+        self._client = paramiko.SSHClient()
+        self._client._transport = transport
 
     def __exit__(self, *_: object) -> None:
         if self._client is not None:
