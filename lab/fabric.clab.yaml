@@ -35,7 +35,7 @@ topology:
       kind: huawei_vrp
       image: windddkz/huawei_vrp:ce12800-8.180
       mgmt-ipv4: 172.20.20.2
-      startup-config: golden_configs/leaf1.cfg
+      #startup-config: golden_configs/leaf1.cfg  -  с ним ломается, после запуска запускаем ./reset_lab.sh
       env:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:
@@ -47,7 +47,7 @@ topology:
       kind: huawei_vrp
       image: windddkz/huawei_vrp:ce12800-8.180
       mgmt-ipv4: 172.20.20.6
-      startup-config: golden_configs/leaf2.cfg
+      #startup-config: golden_configs/leaf2.cfg  -  с ним ломается, после запуска запускаем ./reset_lab.sh
       env:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:

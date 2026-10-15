@@ -1,4 +1,4 @@
-! Startup-config last modified at Thu Oct 15 08:15:31 2026 by root
+! Startup-config last modified at Thu Oct 15 20:42:12 2026 by root
 ! device: spine-2 (cEOSLab, EOS-4.32.0F-36401836.4320F (engineering build))
 !
 no aaa root
@@ -14,6 +14,7 @@ hostname spine-2
 snmp-server community public ro
 !
 spanning-tree mode mstp
+spanning-tree edge-port bpduguard default
 !
 system l1
    unsupported speed action error
@@ -52,6 +53,10 @@ ip access-list FABRIC-IN
 ip routing
 !
 ip route 0.0.0.0/0 172.20.20.1
+ip route 10.255.0.1/32 10.10.0.5 200
+ip route 10.255.0.2/32 10.10.0.7 200
+ip route 10.255.0.11/32 10.10.0.5 200
+ip route 10.255.0.11/32 10.10.0.7 200
 !
 ipv6 route ::/0 2001:172:20:20::1
 !
@@ -60,8 +65,16 @@ router bgp 65000
    no bgp default ipv4-unicast
    neighbor 10.10.0.5 remote-as 65001
    neighbor 10.10.0.5 description leaf1
+   neighbor 10.10.0.5 send-community extended
    neighbor 10.10.0.7 remote-as 65002
    neighbor 10.10.0.7 description leaf2
+   neighbor 10.10.0.7 send-community extended
+   !
+   address-family evpn
+      neighbor 10.10.0.5 activate
+      neighbor 10.10.0.5 next-hop-unchanged
+      neighbor 10.10.0.7 activate
+      neighbor 10.10.0.7 next-hop-unchanged
    !
    address-family ipv4
       neighbor 10.10.0.5 activate
