@@ -38,9 +38,25 @@ SCRAPLI_PLATFORMS: Mapping[Platform, str] = MappingProxyType(
     }
 )
 
-# Транзакционное применение описано в ТЗ для Cisco (commit confirmed) и Arista
-# (configure session). Для остальных платформ его ещё нет, и молча «применить» нельзя.
-TRANSACTIONAL_PLATFORMS = frozenset({Platform.CISCO_IOSXE, Platform.ARISTA_EOS})
+# Транзакции: Cisco — commit confirmed, Arista — configure session с таймером,
+# Huawei — двухэтапный commit с откатом на снятый заранее commit-id.
+# Для Eltex механизма пока нет, и молча «применить» нельзя.
+TRANSACTIONAL_PLATFORMS = frozenset(
+    {Platform.CISCO_IOSXE, Platform.ARISTA_EOS, Platform.HUAWEI_VRP}
+)
+
+ARISTA_SESSION = "NETOPS_DEPLOY"
+HUAWEI_COMMIT_LIST = "display configuration commit list"
+_COMMIT_ID = re.compile(r"\b(\d{6,})\b")
+
+
+# В выводе display configuration commit list самый свежий commit-id идёт первым.
+def _latest_commit_id(output: str) -> str | None:
+    for line in output.splitlines():
+        match = _COMMIT_ID.search(line)
+        if match:
+            return match.group(1)
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,21 +91,41 @@ class _ParamikoShell:
 
         self._client = paramiko.SSHClient()
         self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        self._client.connect(
-            self._target.host,
-            port=self._target.port,
-            username=self._target.credentials.username,
-            password=self._target.credentials.password,
-            look_for_keys=False,
-            allow_agent=False,
-            timeout=self._timeout,
-        )
+        try:
+            self._client.connect(
+                self._target.host,
+                port=self._target.port,
+                username=self._target.credentials.username,
+                password=self._target.credentials.password,
+                look_for_keys=False,
+                allow_agent=False,
+                timeout=self._timeout,
+                # Huawei CE отдаёт баннер не сразу, а cEOS иногда тянет аутентификацию.
+                banner_timeout=self._timeout * 2,
+                auth_timeout=self._timeout * 2,
+            )
+        except paramiko.BadAuthenticationType:
+            # Часть устройств (например, cEOS) принимает пароль только через
+            # keyboard-interactive, обычная парольная аутентификация им запрещена.
+            self._auth_interactive(paramiko)
         self._shell = self._client.invoke_shell()
         self._drain()
         for command in self._PAGER_OFF.get(self._target.platform, ()):
             self._write(command)
         self._drain()
         return self
+
+    def _auth_interactive(self, paramiko: Any) -> None:
+        password = self._target.credentials.password
+        transport = paramiko.Transport((self._target.host, self._target.port))
+        transport.banner_timeout = self._timeout * 2
+        transport.connect()
+        transport.auth_interactive(
+            self._target.credentials.username,
+            lambda title, instructions, prompts: [password for _ in prompts],
+        )
+        self._client = paramiko.SSHClient()
+        self._client._transport = transport
 
     def __exit__(self, *_: object) -> None:
         if self._client is not None:
@@ -143,6 +179,8 @@ class ScrapliNetworkDriver:
     def __init__(self, max_workers: int = 4, timeout_socket: int = 15) -> None:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
+        # Huawei: commit-id до изменения, чтобы было куда откатываться.
+        self._commit_ids: dict[str, str | None] = {}
 
     # Драйвер выбирает фабрика Scrapli по имени платформы: Cisco и Arista — из ядра,
     # Huawei VRP и Eltex ESR — из scrapli-community. Scrapli ходит через системный ssh;
@@ -208,25 +246,40 @@ class ScrapliNetworkDriver:
                 conn.send_configs(lines)
                 conn.send_command(f"commit confirmed {confirm_timeout}")
             elif target.platform == Platform.ARISTA_EOS:
-                session_name = "NETOPS_DEPLOY"
-                conn.send_command(f"configure session {session_name}")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_configs(lines)
                 conn.send_command(f"commit timer {confirm_timeout}")
+            else:
+                # VRP применяет изменения сразу по commit, таймера подтверждения нет.
+                # Поэтому до изменения запоминаем commit-id — на него и откатываемся.
+                self._commit_ids[target.hostname] = _latest_commit_id(
+                    conn.send_command(HUAWEI_COMMIT_LIST).result
+                )
+                conn.send_configs(lines)
+                conn.send_command("commit")
 
     def confirm(self, target: DeviceTarget) -> None:
+        # На VRP изменение уже зафиксировано commit, подтверждать нечего — просто
+        # забываем точку отката.
+        if target.platform is Platform.HUAWEI_VRP:
+            self._commit_ids.pop(target.hostname, None)
+            return
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_command("commit")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_command("commit")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
+        if target.platform is Platform.HUAWEI_VRP:
+            self._rollback_huawei(target)
+            return
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_command("abort")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_command("abort")
 
             rollback_lines = [
@@ -236,6 +289,26 @@ class ScrapliNetworkDriver:
             ]
             if rollback_lines:
                 conn.send_configs(rollback_lines)
+
+    # Только команды чтения: список разрешённых начал проверяет вызывающая сторона.
+    def run_read_only(self, target: DeviceTarget, command: str) -> str:
+        with self._get_connection(target) as conn:
+            response = conn.send_command(command)
+        return str(response.result)
+
+    # Откат на VRP: возвращаемся к состоянию до нашего commit. Если commit-id снять не
+    # удалось, откатываем последнее изменение.
+    def _rollback_huawei(self, target: DeviceTarget) -> None:
+        commit_id = self._commit_ids.pop(target.hostname, None)
+        command = (
+            f"rollback configuration to commit-id {commit_id}"
+            if commit_id
+            else "rollback configuration last 1"
+        )
+        with self._get_connection(target) as conn:
+            conn.send_command("system-view")
+            conn.send_command(command)
+            conn.send_command("commit")
 
     def snapshot(self, target: DeviceTarget, expected: HealthExpectations | None) -> HealthSnapshot:
         bgp_sessions: dict[str, BgpSessionState] = {}

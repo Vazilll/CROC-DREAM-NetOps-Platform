@@ -1,5 +1,6 @@
 from netops.models.device import Device
 from netops.models.drift import DriftRecord
+from netops.models.emergency import EmergencyAction
 from netops.models.job import ALLOWED_TRANSITIONS, Job, JobLog, JobTarget
 from netops.models.metric import MetricSample
 from netops.models.snapshot import ConfigSnapshot, sha256_hex
@@ -10,6 +11,7 @@ __all__ = [
     "ConfigSnapshot",
     "Device",
     "DriftRecord",
+    "EmergencyAction",
     "Job",
     "JobLog",
     "JobTarget",
