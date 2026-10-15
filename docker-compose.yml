@@ -25,6 +25,7 @@ x-backend: &backend
     - ${INTENT_REPO:-./intent}:/data/intent
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
+    - ./lab:/app/lab
     - ./monitoring:/data/monitoring:ro
   restart: unless-stopped
   depends_on:
@@ -101,7 +102,7 @@ services:
       - --storage.tsdb.retention.time=15d
     ports: ["${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring:/etc/prometheus:ro
       - ${OFFLINE_LAB:-./lab/running}:/app/lab/running:ro
       - prometheus-data:/prometheus
     restart: unless-stopped

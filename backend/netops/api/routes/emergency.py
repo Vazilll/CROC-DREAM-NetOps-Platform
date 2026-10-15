@@ -461,10 +461,13 @@ def hard_reset_containerlab(
         if cfg.clab_key_path and os.path.exists(cfg.clab_key_path):
             connect_kwargs["key_filename"] = cfg.clab_key_path
 
+        import shlex  # noqa: PLC0415
+
         client.connect(**connect_kwargs)
-        topo_path = cfg.clab_topology_path
+        q_user = shlex.quote(str(user))
+        q_topo = shlex.quote(str(cfg.clab_topology_path))
         # Fast reset via dedicated bash orchestrator if available (<10s, non-root)
-        cmd = f"test -f /home/{user}/clab-quickstart/reset_lab.sh && bash /home/{user}/clab-quickstart/reset_lab.sh {topo_path} || containerlab deploy -t {topo_path} --reconfigure"
+        cmd = f"test -f /home/{q_user}/clab-quickstart/reset_lab.sh && bash /home/{q_user}/clab-quickstart/reset_lab.sh {q_topo} || containerlab deploy -t {q_topo} --reconfigure"
         _stdin, stdout, _stderr = client.exec_command(cmd, timeout=120)
         out = stdout.read().decode("utf-8", errors="replace")
 

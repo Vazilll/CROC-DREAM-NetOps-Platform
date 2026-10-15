@@ -314,9 +314,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [recoveryStatusMsg, setRecoveryStatusMsg] = useState('');
   const [claimingOwner, setClaimingOwner] = useState(false);
 
-  // Step 2: GitHub SoT (SSH Repo + Target Branch; auto-commit and sync always ON)
+  // Step 2: GitHub SoT (Private/Public Repo + PAT + Target Branch; auto-commit and sync always ON)
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
   const [githubBranch, setGithubBranch] = useState('');
+  const [githubPat, setGithubPat] = useState('');
   const [savingGithub, setSavingGithub] = useState(false);
   const [githubSavedMsg, setGithubSavedMsg] = useState('');
 
@@ -584,7 +585,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     }
   };
 
-  // Step 2 Action: Connect SSH Git SoT (auto-commit and sync always enabled)
+  // Step 2 Action: Connect Git SoT (Private HTTPS w/ PAT or SSH; auto-commit and sync always enabled)
   const handleConnectGithubSsh = async (advanceOnSuccess = false) => {
     const targetUrl = githubRepoUrl.trim();
     if (!targetUrl) {
@@ -594,8 +595,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       }
       setGithubSavedMsg(
         locale === 'en'
-          ? 'Enter a GitHub repository URL (SSH or HTTPS)'
-          : 'Введите URL репозитория GitHub (SSH или HTTPS)'
+          ? 'Enter a GitHub repository URL (HTTPS or SSH)'
+          : 'Введите URL репозитория GitHub (HTTPS или SSH)'
       );
       return;
     }
@@ -608,12 +609,17 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         websocket_enabled: true,
         github_repo_url: targetUrl,
         github_branch: githubBranch.trim() || 'main',
+        github_pat: githubPat.trim() || undefined,
         auto_commit_on_diff: true,
       });
       const detectedBranch = res.git?.branch || githubBranch.trim() || 'main';
       const detectedCommit = res.git?.commit_short || 'HEAD';
       setGithubBranch(detectedBranch);
-      setGithubSavedMsg(`SSH подключён: ${targetUrl} → ветка ${detectedBranch}@${detectedCommit}`);
+      setGithubSavedMsg(
+        locale === 'en'
+          ? `Connected: ${targetUrl} → ${detectedBranch}@${detectedCommit}`
+          : `Подключён: ${targetUrl} → ${detectedBranch}@${detectedCommit}`
+      );
       if (advanceOnSuccess) {
         setTimeout(() => setWizardStep(3), 400);
       }
@@ -1091,28 +1097,30 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       </button>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 space-y-2">
-                        <div className="text-xs font-medium text-[var(--text-primary)]">
-                          {w.step1.recoverStep1Title}
-                        </div>
-                        <div className="flex gap-1.5">
-                          <button
-                            type="button"
-                            onClick={handleRequestTelegramRecoveryCode}
-                            className="px-2.5 py-1 rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[11px] font-mono text-[var(--text-primary)] cursor-pointer"
-                          >
-                            {w.step1.requestCodeBtn}
-                          </button>
-                          <a
-                            href={telegramRecoverLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-2.5 py-1 rounded bg-emerald-500/15 text-[11px] font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"
-                          >
-                            <span>{w.step1.botLinkBtn}</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-stretch">
+                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex flex-col justify-between gap-2">
+                        <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                          <span className="text-xs font-medium text-[var(--text-primary)]">
+                            {w.step1.recoverStep1Title}
+                          </span>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={handleRequestTelegramRecoveryCode}
+                              className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-primary)] cursor-pointer"
+                            >
+                              {w.step1.requestCodeBtn}
+                            </button>
+                            <a
+                              href={telegramRecoverLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="px-2 py-0.5 rounded bg-emerald-500/15 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 inline-flex items-center gap-1"
+                            >
+                              <span>{w.step1.botLinkBtn}</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
+                          </div>
                         </div>
                         <input
                           type="text"
@@ -1123,9 +1131,14 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         />
                       </div>
 
-                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 space-y-2">
-                        <div className="text-xs font-medium text-[var(--text-primary)]">
-                          {w.step1.recoverStep2Title}
+                      <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex flex-col justify-between gap-2">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-xs font-medium text-[var(--text-primary)]">
+                            {w.step1.recoverStep2Title}
+                          </span>
+                          <span className="px-2 py-0.5 rounded bg-[var(--bg-elevated)] text-[10px] font-mono text-[var(--text-muted)]">
+                            KEY
+                          </span>
                         </div>
                         <input
                           type="text"
@@ -1158,31 +1171,19 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
               </div>
             )}
 
-            {/* ==================== STEP 2: GITHUB (SSH + TARGET BRANCH ONLY) ==================== */}
+            {/* ==================== STEP 2: GITHUB (PRIVATE/PUBLIC + PAT + BRANCH) ==================== */}
             {wizardStep === 2 && (
               <div className="space-y-3.5 animate-fade-in">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)]">
-                      {w.step2.repoLabel}
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setGithubRepoUrl('git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git');
-                        if (!githubBranch) setGithubBranch('main');
-                      }}
-                      className="text-[10px] font-mono text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
-                    >
-                      git@github.com:Vazilll/...
-                    </button>
-                  </div>
+                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                    {w.step2.repoLabel}
+                  </label>
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={githubRepoUrl}
                       onChange={(e) => setGithubRepoUrl(e.target.value)}
-                      placeholder="git@github.com:Vazilll/CROC-DREAM-NetOps-Platform.git"
+                      placeholder="https://github.com/org/private-netops-sot.git"
                       className={inputClass}
                     />
                     <button
@@ -1191,22 +1192,36 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       disabled={savingGithub}
                       className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer transition-colors"
                     >
-                      {savingGithub ? '...' : 'SSH'}
+                      {savingGithub ? '...' : locale === 'en' ? 'Sync' : 'Синхр.'}
                     </button>
                   </div>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    {w.step2.branchLabel}
-                  </label>
-                  <input
-                    type="text"
-                    value={githubBranch}
-                    onChange={(e) => setGithubBranch(e.target.value)}
-                    placeholder="main"
-                    className={inputClass}
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                      {w.step2.githubTokenLabel}
+                    </label>
+                    <input
+                      type="password"
+                      value={githubPat}
+                      onChange={(e) => setGithubPat(e.target.value)}
+                      placeholder="ghp_... / github_pat_..."
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
+                      {w.step2.branchLabel}
+                    </label>
+                    <input
+                      type="text"
+                      value={githubBranch}
+                      onChange={(e) => setGithubBranch(e.target.value)}
+                      placeholder="main"
+                      className={inputClass}
+                    />
+                  </div>
                 </div>
 
                 {githubSavedMsg && (
@@ -1322,7 +1337,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)]/60 p-3 space-y-2.5">
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-[11px] font-mono font-semibold text-[var(--text-primary)]">
-                      Каскад LLM ({llmCascade.length})
+                      {locale === 'en' ? 'LLM Cascade' : 'Каскад LLM'} ({llmCascade.length})
                     </span>
                     <div className="flex items-center gap-1.5">
                       <button
@@ -1330,7 +1345,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         onClick={() => setShowLlmPasteBox((v) => !v)}
                         className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
                       >
-                        {showLlmPasteBox ? 'Скрыть' : '+ Импорт'}
+                        {showLlmPasteBox
+                          ? locale === 'en'
+                            ? 'Hide'
+                            : 'Скрыть'
+                          : locale === 'en'
+                            ? '+ Import'
+                            : '+ Импорт'}
                       </button>
                       <button
                         type="button"
@@ -1348,7 +1369,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         }
                         className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 cursor-pointer"
                       >
-                        + Провайдер
+                        {locale === 'en' ? '+ Provider' : '+ Провайдер'}
                       </button>
                     </div>
                   </div>
@@ -1370,7 +1391,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                           onClick={handleApplyLlmConfig}
                           className="px-2.5 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-[11px] font-mono font-semibold cursor-pointer shrink-0"
                         >
-                          Добавить
+                          {locale === 'en' ? 'Add' : 'Добавить'}
                         </button>
                       </div>
                     </div>
@@ -1394,7 +1415,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Провайдер"
+                              placeholder={locale === 'en' ? 'Provider' : 'Провайдер'}
                               className={inputClass}
                             />
                             <input
@@ -1407,7 +1428,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                                   )
                                 )
                               }
-                              placeholder="Модель"
+                              placeholder={locale === 'en' ? 'Model' : 'Модель'}
                               className={inputClass}
                             />
                             <input
@@ -1443,7 +1464,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                               setLlmCascade((prev) => prev.filter((_, i) => i !== idx))
                             }
                             className="px-1.5 py-1 text-xs font-mono text-rose-500 hover:text-rose-400 cursor-pointer shrink-0"
-                            title="Удалить"
+                            title={locale === 'en' ? 'Remove' : 'Удалить'}
                           >
                             ×
                           </button>
@@ -1498,7 +1519,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
                 <div>
                   <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    Пароль
+                    {locale === 'en' ? 'Password' : 'Пароль'}
                   </label>
                   <div className="flex gap-2">
                     <input
@@ -1563,7 +1584,9 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       </div>
                     ) : (
                       <div className="text-[11px] font-mono text-amber-600 dark:text-amber-400">
-                        Активных узлов Containerlab не обнаружено.
+                        {locale === 'en'
+                          ? 'No active Containerlab nodes found.'
+                          : 'Активных узлов Containerlab не обнаружено.'}
                       </div>
                     )}
                   </div>

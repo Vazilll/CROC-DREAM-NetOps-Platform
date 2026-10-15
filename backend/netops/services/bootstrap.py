@@ -214,7 +214,7 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
         "owner": {
             "exists": owner is not None,
             "username": owner.username if owner else "owner",
-            "bound_client_id": owner_bound_cid,
+            "bound_client_id": "bound" if owner_bound_cid else None,
             "bound_ip": owner.bound_ip if owner else None,
             "recovery_key": owner_tok if (not owner_claimed or caller_is_bound_owner) else None,
             "telegram_linked": owner_tg_linked,
@@ -302,7 +302,6 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
             and (
                 (saved_tok and provided_key == saved_tok)
                 or hash_token(provided_key) == owner.token_sha256
-                or provided_key == "dev-owner-token"
             )
         )
         if not key_valid:
@@ -345,7 +344,6 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
 
     sync_access_registry(session, settings)
     settings.api_tokens[token] = ApiPrincipal(username="owner", role=UserRole.OWNER)
-    settings.api_tokens["dev-owner-token"] = ApiPrincipal(username="owner", role=UserRole.OWNER)
     settings.save_runtime_overlay({"cluster_name": req.cluster_name.strip() or "CROC-FABRIC-PROD-01"})
 
     return {
@@ -399,7 +397,6 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
     key_ok = any(
         (saved_tok and c == saved_tok)
         or hash_token(c) == owner.token_sha256
-        or c == "dev-owner-token"
         for c in candidates
     )
     code_ok = any(
@@ -453,18 +450,26 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         updates["exposure_mode"] = req.exposure_mode
     if req.websocket_enabled is not None:
         updates["websocket_enabled"] = bool(req.websocket_enabled)
+    effective_pat = (
+        req.github_pat.strip()
+        if getattr(req, "github_pat", None) and req.github_pat.strip()
+        else str(rt.get("github_pat") or "").strip()
+    )
+    if getattr(req, "github_pat", None) and req.github_pat.strip():
+        updates["github_pat"] = req.github_pat.strip()
     git_connect_info: dict[str, Any] | None = None
     if req.github_repo_url:
         clean_repo_url = req.github_repo_url.strip()
         target_branch = (getattr(req, "github_branch", None) or "main").strip()
-        updates["github_repo_url"] = clean_repo_url
-        updates["github_branch"] = target_branch
-        updates["github_repo_connected"] = True
         git_connect_info = git_connect_remote(
-            settings.intent_repo_path, clean_repo_url, target_branch
+            settings.intent_repo_path,
+            clean_repo_url,
+            target_branch,
+            github_pat=effective_pat or None,
         )
-        if git_connect_info.get("branch"):
-            updates["github_branch"] = git_connect_info["branch"]
+        updates["github_repo_url"] = git_connect_info.get("remote_url") or clean_repo_url
+        updates["github_branch"] = git_connect_info.get("branch") or target_branch
+        updates["github_repo_connected"] = bool(git_connect_info.get("connected", True))
     if getattr(req, "auto_commit_on_diff", None) is not None:
         updates["auto_commit_on_diff"] = bool(req.auto_commit_on_diff)
     if req.github_webhook_secret is not None:

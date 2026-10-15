@@ -95,6 +95,7 @@ RUN rm -f /etc/nginx/sites-enabled/default && \
 
 # Local Prometheus config inside the all-in-one container
 RUN mkdir -p /etc/prometheus && \
+    cp /app/monitoring/alerts.yml /etc/prometheus/alerts.yml && \
     sed -e 's/api:8000/127.0.0.1:8000/g' \
         -e 's/snmp-exporter:9116/127.0.0.1:9116/g' \
         /app/monitoring/prometheus.yml > /etc/prometheus/prometheus.yml && \

@@ -441,7 +441,7 @@ def github_webhook(
 def get_integrations_status(
     session: SessionDep,
     container: ContainerDep,
-    _: Viewer,
+    caller: Viewer,
 ) -> dict[str, Any]:
     settings = container.settings
     db_url = settings.database_url
@@ -485,10 +485,16 @@ def get_integrations_status(
         "bound_device_sessions": bound_count,
     }
 
-    registry = sync_access_registry(session, settings)
-    user_tokens = load_user_tokens(settings)
+    is_privileged = caller.role in (UserRole.ADMIN, UserRole.OWNER)
+    registry = sync_access_registry(session, settings) if is_privileged else {}
+    raw_tokens = load_user_tokens(settings) if is_privileged else {}
+    user_tokens = (
+        raw_tokens
+        if caller.role == UserRole.OWNER
+        else {k: v for k, v in raw_tokens.items() if k != "owner"}
+    )
     tg_bindings = load_telegram_bindings(settings)
-    all_users = [UserRead.model_validate(u).model_dump(mode="json") for u in db_users]
+    all_users = [UserRead.model_validate(u).model_dump(mode="json") for u in db_users] if is_privileged else []
 
     return {
         "sessions": all_users,

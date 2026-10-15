@@ -48,3 +48,9 @@ backend/lab/
 *runtime_settings.json
 lab/running/emergency_audit.jsonl
 lab/running/freeze_state.json
+lab/running/*.json
+lab/running/*.jsonl
+intent/inventory.live.yaml
+intent/diffs/*.cfg
+backend/.env*
+!backend/.env.example
