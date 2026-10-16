@@ -30,12 +30,16 @@ cd /app/backend
 /app/backend/.venv/bin/alembic upgrade head
 cd /app
 
-# 4. Start Prometheus, Node Exporter & SNMP Exporter
-echo "[4/6] Starting Prometheus + Node Exporter + SNMP Exporter..."
+# 4. Start Prometheus, Node Exporter, SNMP Exporter & gnmic
+echo "[4/6] Starting Prometheus + Node Exporter + SNMP Exporter + gnmic..."
 mkdir -p /var/lib/prometheus /var/log/netops
 /usr/local/bin/node_exporter --web.listen-address="127.0.0.1:9100" > /var/log/netops/node_exporter.log 2>&1 &
 if [ -f /etc/snmp_exporter/snmp.yml ]; then
     /usr/local/bin/snmp_exporter --config.file=/etc/snmp_exporter/snmp.yml --web.listen-address="127.0.0.1:9116" > /var/log/netops/snmp_exporter.log 2>&1 &
+fi
+if [ -x /usr/local/bin/gnmic ] && [ -f /etc/gnmic/gnmic.yaml ]; then
+    GNMIC_USERNAME="${GNMIC_USERNAME:-admin}" GNMIC_PASSWORD="${GNMIC_PASSWORD:-admin}" \
+        /usr/local/bin/gnmic --config /etc/gnmic/gnmic.yaml subscribe > /var/log/netops/gnmic.log 2>&1 &
 fi
 /usr/local/bin/prometheus \
     --config.file=/etc/prometheus/prometheus.yml \

@@ -45,10 +45,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
+COPY --from=ghcr.io/openconfig/gnmic:0.49.0 /app/gnmic /usr/local/bin/gnmic
 COPY --from=prom-bin /bin/prometheus /usr/local/bin/prometheus
 COPY --from=node-exp-bin /bin/node_exporter /usr/local/bin/node_exporter
 COPY --from=snmp-exp-bin /bin/snmp_exporter /usr/local/bin/snmp_exporter
-COPY --from=snmp-exp-bin /etc/snmp_exporter/snmp.yml /etc/snmp_exporter/snmp.yml
 
 WORKDIR /app/backend
 COPY backend/pyproject.toml backend/uv.lock backend/README.md ./
@@ -61,9 +61,16 @@ WORKDIR /app
 COPY intent ./intent
 COPY templates ./templates
 COPY lab ./lab
-RUN rm -rf /app/lab/running/* && mkdir -p /app/lab/running && echo "[]" > /app/lab/running/prometheus_targets.json
+RUN rm -rf /app/lab/running/* && mkdir -p /app/lab/running && \
+    echo "[]" > /app/lab/running/prometheus_targets.json && \
+    echo "[]" > /app/lab/running/exporter_targets.json && \
+    echo "{}" > /app/lab/running/gnmic_targets.yaml
 COPY monitoring ./monitoring
 COPY scripts ./scripts
+RUN mkdir -p /etc/snmp_exporter /etc/gnmic && \
+    cp /app/monitoring/snmp.yml /etc/snmp_exporter/snmp.yml && \
+    cp /app/monitoring/gnmic/gnmic.yaml /etc/gnmic/gnmic.yaml && \
+    sed -i 's|/data/lab/gnmic_targets.yaml|/app/lab/running/gnmic_targets.yaml|g' /etc/gnmic/gnmic.yaml
 
 # Frontend static bundle + Nginx config on port 5173 (and 80)
 COPY --from=frontend-build /frontend/dist /usr/share/nginx/html
@@ -98,6 +105,8 @@ RUN mkdir -p /etc/prometheus && \
     cp /app/monitoring/alerts.yml /etc/prometheus/alerts.yml && \
     sed -e 's/api:8000/127.0.0.1:8000/g' \
         -e 's/snmp-exporter:9116/127.0.0.1:9116/g' \
+        -e 's/gnmic:9804/127.0.0.1:9804/g' \
+        -e '/remote_write:/,+1d' \
         /app/monitoring/prometheus.yml > /etc/prometheus/prometheus.yml && \
     printf '\n  - job_name: "node_exporter"\n    static_configs:\n      - targets: ["127.0.0.1:9100"]\n' >> /etc/prometheus/prometheus.yml
 

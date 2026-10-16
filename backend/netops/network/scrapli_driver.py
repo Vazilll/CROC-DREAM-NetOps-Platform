@@ -77,16 +77,44 @@ class _ParamikoConnAdapter:
         self._jump_client = None
         self.shell = None
 
+    def _resolve_clab_jump_defaults(self) -> tuple[str, str, int, str | None]:
+        import os  # noqa: PLC0415
+
+        user = os.getenv("NETOPS_CLAB_USER", "")
+        host = os.getenv("NETOPS_CLAB_HOST", "")
+        port_raw = os.getenv("NETOPS_CLAB_PORT", "")
+        pwd = os.getenv("NETOPS_CLAB_PASSWORD", "") or None
+        if not host and "PYTEST_CURRENT_TEST" not in os.environ:
+            try:
+                from netops.settings import get_settings  # noqa: PLC0415
+
+                s = get_settings()
+                host = s.clab_host or ""
+                user = user or s.clab_user or "crocdream"
+                port_raw = port_raw or str(s.clab_port or 221)
+                if not pwd and s.clab_password:
+                    pwd = s.clab_password.get_secret_value() or None
+            except Exception:
+                pass
+        return (
+            user or "crocdream",
+            host,
+            int(port_raw) if str(port_raw).isdigit() else 221,
+            pwd,
+        )
+
     def _open_jump_channel(self, paramiko_mod, jump_spec: str, dest_host: str, dest_port: int):
         import os  # noqa: PLC0415
 
-        user = os.getenv("NETOPS_CLAB_USER", "crocdream")
-        host = os.getenv("NETOPS_CLAB_HOST", "")
-        port = int(os.getenv("NETOPS_CLAB_PORT", "221"))
+        user, host, port, jump_pwd = self._resolve_clab_jump_defaults()
         if jump_spec and jump_spec != "auto":
             spec = jump_spec.strip()
             if "@" in spec:
-                user, spec = spec.split("@", 1)
+                u_part, spec = spec.split("@", 1)
+                if ":" in u_part:
+                    user, jump_pwd = u_part.split(":", 1)
+                else:
+                    user = u_part
             if ":" in spec:
                 h_part, p_part = spec.rsplit(":", 1)
                 host = h_part
@@ -94,6 +122,16 @@ class _ParamikoConnAdapter:
                     port = int(p_part)
             else:
                 host = spec
+
+        if self._jump_client is not None:
+            t_existing = self._jump_client.get_transport()
+            if t_existing is not None and t_existing.is_active():
+                target_ip = "127.0.0.1" if dest_host == host else dest_host
+                return t_existing.open_channel(
+                    "direct-tcpip", (target_ip, dest_port), ("127.0.0.1", 0)
+                )
+            self._jump_client.close()
+            self._jump_client = None
 
         jump = paramiko_mod.SSHClient()
         jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
@@ -103,6 +141,7 @@ class _ParamikoConnAdapter:
             host,
             port=port,
             username=user,
+            password=jump_pwd,
             key_filename=key_file,
             look_for_keys=True,
             allow_agent=True,
@@ -131,8 +170,15 @@ class _ParamikoConnAdapter:
             transport = self.client.get_transport()
             if transport is None or not transport.is_active():
                 if sock is not None:
-                    raise
-                transport = paramiko_mod.Transport((self.target.host, self.target.port))
+                    sock = self._open_jump_channel(
+                        paramiko_mod,
+                        self.proxy_jump or "auto",
+                        self.target.host,
+                        self.target.port,
+                    )
+                    transport = paramiko_mod.Transport(sock)
+                else:
+                    transport = paramiko_mod.Transport((self.target.host, self.target.port))
                 transport.start_client(timeout=min(self.timeout, 10))
                 self.client._transport = transport
             transport.auth_interactive(
@@ -156,7 +202,7 @@ class _ParamikoConnAdapter:
             self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         password = getattr(self.target.credentials, "password", "")
         username = self.target.credentials.username
-        clab_host = os.getenv("NETOPS_CLAB_HOST", "")
+        _, clab_host, _, _ = self._resolve_clab_jump_defaults()
 
         try:
             sock = None
