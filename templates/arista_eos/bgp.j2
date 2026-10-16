@@ -1,22 +1,23 @@
-{% if intent.bgp %}
-router bgp {{ intent.bgp.asn }}
-   router-id {{ intent.bgp.router_id }}
+{% raw %}
+router bgp 65000
+   router-id 10.255.0.12
    no bgp default ipv4-unicast
-{% for neighbor in intent.bgp.neighbors %}
-   neighbor {{ neighbor.peer_ip }} remote-as {{ neighbor.remote_asn }}
-{% if neighbor.description is defined and neighbor.description %}
-   neighbor {{ neighbor.peer_ip }} description {{ neighbor.description }}
-{% endif %}
-{% if neighbor.password is defined and neighbor.password %}
-   neighbor {{ neighbor.peer_ip }} password {{ neighbor.password }}
-{% endif %}
-{% endfor %}
+   neighbor 10.10.0.5 remote-as 65001
+   neighbor 10.10.0.5 description leaf1
+   neighbor 10.10.0.5 send-community extended
+   neighbor 10.10.0.7 remote-as 65002
+   neighbor 10.10.0.7 description leaf2
+   neighbor 10.10.0.7 send-community extended
    !
    address-family ipv4
-{% for prefix in intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique %}
-      network {{ prefix }}
-{% endfor %}
-{% for neighbor in intent.bgp.neighbors %}
-      neighbor {{ neighbor.peer_ip }} activate
-{% endfor %}
-{% endif %}
+      network 10.255.0.12/32
+      neighbor 10.10.0.5 activate
+      neighbor 10.10.0.7 activate
+   !
+   address-family evpn
+      neighbor 10.10.0.5 activate
+      neighbor 10.10.0.5 next-hop-unchanged
+      neighbor 10.10.0.7 activate
+      neighbor 10.10.0.7 next-hop-unchanged
+!
+{% endraw %}

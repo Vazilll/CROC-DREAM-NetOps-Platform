@@ -1,30 +1,27 @@
-{# Loopback с router-id: в intent он не описан, а на стенде есть #}
-{% set declared = intent.interfaces | map(attribute="name") | join(" ") | lower %}
-{% if intent.bgp and "loopback" not in declared %}
-interface Loopback0
- description Router-ID
- ip address {{ intent.bgp.router_id }} 255.255.255.255
-{% endif %}
-{% for iface in intent.interfaces %}
-interface {{ iface.name }}
-{% if iface.description %}
- description {{ iface.description }}
-{% endif %}
-{% if iface.mtu != 1500 %}
- mtu {{ iface.mtu }}
-{% endif %}
-{% if iface.ipv4_address %}
- ip address {{ iface.ipv4_address.ip }} {{ iface.ipv4_address.netmask }}
-{% endif %}
-{% if iface.acl_in %}
- ip access-group {{ iface.acl_in }} in
-{% endif %}
-{% if not iface.name.lower().startswith("loopback") %}
- negotiation auto
-{% endif %}
-{% if iface.enabled %}
+{% raw %}
+interface GigabitEthernet1
+ description Management interface
+ vrf forwarding clab-mgmt
+ ip address 10.0.0.15 255.255.255.0
  no shutdown
-{% else %}
- shutdown
-{% endif %}
-{% endfor %}
+ negotiation auto
+!
+interface Loopback0
+ description Router-ID / BGP announce
+ ip address 10.255.0.11 255.255.255.255
+!
+interface GigabitEthernet2
+ description Downlink to leaf1 GE1/0/0
+ ip address 10.10.0.0 255.255.255.254
+ ip access-group FABRIC-IN in
+ no shutdown
+ negotiation auto
+!
+interface GigabitEthernet3
+ description Downlink to leaf2 GE1/0/0
+ ip address 10.10.0.2 255.255.255.254
+ ip access-group FABRIC-IN in
+ no shutdown
+ negotiation auto
+!
+{% endraw %}

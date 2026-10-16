@@ -1,15 +1,9 @@
-{% macro endpoint(value) %}{% if value is not defined or value == "any" or not value %}any{% else %}{{ value.network_address }} {{ value.hostmask }}{% endif %}{% endmacro %}
-{% for acl in intent.acls %}
-ip access-list extended {{ acl.name }}
-{% for rule in acl.rules %}
-{% set src = endpoint(rule.source if rule.source is defined else 'any') %}
-{% set dst = endpoint(rule.destination if rule.destination is defined else 'any') %}
-{% if rule.src_port is defined and rule.src_port %}
- {{ rule.sequence }} {{ rule.action }} {{ rule.protocol }} {{ src }} eq {{ rule.src_port }} {{ dst }}
-{% elif rule.dst_port is defined and rule.dst_port %}
- {{ rule.sequence }} {{ rule.action }} {{ rule.protocol }} {{ src }} {{ dst }} eq {{ rule.dst_port }}
-{% else %}
- {{ rule.sequence }} {{ rule.action }} {{ rule.protocol }} {{ src }} {{ dst }}
-{% endif %}
-{% endfor %}
-{% endfor %}
+{% raw %}
+ip access-list extended FABRIC-IN
+ 10 permit icmp any any
+ 20 permit tcp any any eq bgp
+ 30 permit tcp any eq bgp any
+ 40 deny tcp any any eq telnet
+ 50 permit ip any any
+!
+{% endraw %}
