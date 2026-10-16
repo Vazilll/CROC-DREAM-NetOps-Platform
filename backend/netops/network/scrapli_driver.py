@@ -7,8 +7,10 @@ stages changes inside transaction sessions, and takes operational health snapsho
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import logging
 import re
+import threading
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
@@ -62,6 +64,9 @@ class _ScrapliResponse:
     def __init__(self, result: str, failed: bool = False) -> None:
         self.result = result
         self.failed = failed
+
+
+_JUMP_LOCK = threading.Lock()
 
 
 class _ParamikoConnAdapter:
@@ -123,34 +128,36 @@ class _ParamikoConnAdapter:
             else:
                 host = spec
 
+        target_ip = "127.0.0.1" if dest_host == host else dest_host
+
         if self._jump_client is not None:
             t_existing = self._jump_client.get_transport()
             if t_existing is not None and t_existing.is_active():
-                target_ip = "127.0.0.1" if dest_host == host else dest_host
                 return t_existing.open_channel(
                     "direct-tcpip", (target_ip, dest_port), ("127.0.0.1", 0)
                 )
-            self._jump_client.close()
+            with contextlib.suppress(Exception):
+                self._jump_client.close()
             self._jump_client = None
 
-        jump = paramiko_mod.SSHClient()
-        jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
-        key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
-        key_file = key_path if os.path.isfile(key_path) else None
-        jump.connect(
-            host,
-            port=port,
-            username=user,
-            password=jump_pwd,
-            key_filename=key_file,
-            look_for_keys=True,
-            allow_agent=True,
-            timeout=min(self.timeout, 10),
-        )
-        self._jump_client = jump
-        transport = jump.get_transport()
-        target_ip = "127.0.0.1" if dest_host == host else dest_host
-        return transport.open_channel("direct-tcpip", (target_ip, dest_port), ("127.0.0.1", 0))
+        with _JUMP_LOCK:
+            jump = paramiko_mod.SSHClient()
+            jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
+            key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
+            key_file = key_path if os.path.isfile(key_path) else None
+            jump.connect(
+                host,
+                port=port,
+                username=user,
+                password=jump_pwd,
+                key_filename=key_file,
+                look_for_keys=True,
+                allow_agent=True,
+                timeout=min(self.timeout, 10),
+            )
+            self._jump_client = jump
+            transport = jump.get_transport()
+            return transport.open_channel("direct-tcpip", (target_ip, dest_port), ("127.0.0.1", 0))
 
     def _connect_with_sock(self, paramiko_mod, username: str, password: str, sock=None) -> None:
         try:
@@ -224,7 +231,7 @@ class _ParamikoConnAdapter:
                     sock = None
             try:
                 self._connect_with_sock(paramiko, username, password, sock=sock)
-            except paramiko.ssh_exception.SSHException as exc:
+            except (paramiko.ssh_exception.SSHException, OSError) as exc:
                 if (
                     sock is None
                     and clab_host
