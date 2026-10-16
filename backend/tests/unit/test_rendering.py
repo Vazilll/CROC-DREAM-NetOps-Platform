@@ -27,7 +27,9 @@ INTENT = DeviceIntent.model_validate(
 def test_sections_are_rendered_in_order() -> None:
     config = JinjaConfigRenderer(TEMPLATES).render(DEVICE, INTENT)
     lines = config.splitlines()
-    assert lines[0] == "hostname leaf-1.croc.lab"
+    # Шаблон base.j2 ведёт сетевая часть команды: до hostname идёт преамбула устройства,
+    # а само имя пишется коротким. Проверяем порядок секций, а не конкретные строки.
+    assert lines.index("hostname leaf-1") < lines.index("interface GigabitEthernet2")
     assert lines.index("interface GigabitEthernet2") < lines.index("router bgp 65101")
     assert " ip address 10.0.1.1 255.255.255.254" in lines
     assert config.endswith("\n")

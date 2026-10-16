@@ -363,11 +363,15 @@ class ScrapliNetworkDriver:
         )
 
 
+# Разбор вывода display interface brief и display bgp peer на VRP.
+HUAWEI_INTERFACE_PREFIXES = ("GE", "Loop", "Eth", "Vb")
+
+
 def parse_huawei_interfaces(output: str) -> dict[str, bool]:
     res = {}
     for line in output.splitlines():
         parts = line.split()
-        if len(parts) >= 4 and (parts[0].startswith("GE") or parts[0].startswith("Loop") or parts[0].startswith("Eth") or parts[0].startswith("Vb")):
+        if len(parts) >= 4 and parts[0].startswith(HUAWEI_INTERFACE_PREFIXES):
             iface = parts[0]
             phy_up = parts[2].lower() == "up"
             proto_up = parts[3].lower() == "up"
