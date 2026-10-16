@@ -1,47 +1,47 @@
-{% if 'leaf-1' in hostname or 'leaf1' in hostname %}{% raw %}
-bgp 65001
- router-id 10.255.0.1
+{% if intent.bgp %}
+bgp {{ intent.bgp.asn }}
+ router-id {{ intent.bgp.router_id }}
  preference 20 200 200
- peer 10.10.0.0 as-number 65000
- peer 10.10.0.0 description spine1
- peer 10.10.0.4 as-number 65000
- peer 10.10.0.4 description spine2
+{% for neighbor in intent.bgp.neighbors %}
+ peer {{ neighbor.peer_ip }} as-number {{ neighbor.remote_asn }}
+{% if neighbor.description %}
+ peer {{ neighbor.peer_ip }} description {{ neighbor.description }}
+{% endif %}
+{% if neighbor.password %}
+ peer {{ neighbor.peer_ip }} password cipher {{ neighbor.password }}
+{% endif %}
+{% endfor %}
  #
  ipv4-family unicast
   undo synchronization
-  network 10.255.0.1 255.255.255.255
+{% set prefixes = intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique | list %}
+{% if prefixes %}
+{% for prefix in prefixes %}
+  network {{ prefix.network_address }} {{ prefix.netmask }}
+{% endfor %}
+{% else %}
+  network {{ intent.bgp.router_id }} 255.255.255.255
+{% endif %}
   maximum load-balancing 2
-  peer 10.10.0.0 enable
-  peer 10.10.0.4 enable
+{% for neighbor in intent.bgp.neighbors %}
+  peer {{ neighbor.peer_ip }} enable
+{% endfor %}
  #
  l2vpn-family evpn
   policy vpn-target
-  peer 10.10.0.0 enable
-  peer 10.10.0.0 advertise irb
-  peer 10.10.0.4 enable
-  peer 10.10.0.4 advertise irb
+{% for neighbor in intent.bgp.neighbors %}
+  peer {{ neighbor.peer_ip }} enable
+  peer {{ neighbor.peer_ip }} advertise irb
+{% endfor %}
 #
-{% endraw %}{% else %}{% raw %}
-bgp 65002
- router-id 10.255.0.2
- preference 20 200 200
- peer 10.10.0.2 as-number 65000
- peer 10.10.0.2 description spine1
- peer 10.10.0.6 as-number 65000
- peer 10.10.0.6 description spine2
- #
- ipv4-family unicast
-  undo synchronization
-  network 10.255.0.2 255.255.255.255
-  maximum load-balancing 2
-  peer 10.10.0.2 enable
-  peer 10.10.0.6 enable
- #
- l2vpn-family evpn
-  policy vpn-target
-  peer 10.10.0.2 enable
-  peer 10.10.0.2 advertise irb
-  peer 10.10.0.6 enable
-  peer 10.10.0.6 advertise irb
+ospf 1 router-id {{ intent.bgp.router_id }}
+ area 0.0.0.0
+  network {{ intent.bgp.router_id }} 0.0.0.0
+{% for iface in intent.interfaces %}
+{% if iface.ipv4_address and not iface.name.lower().startswith("loopback") and iface.acl_in %}
+{% set net_addr = iface.ipv4_address.network.network_address if iface.ipv4_address.network is defined else iface.ipv4_address.network_address %}
+  network {{ net_addr }} 0.0.0.1
+{% endif %}
+{% endfor %}
 #
-{% endraw %}{% endif %}
+{% endif %}

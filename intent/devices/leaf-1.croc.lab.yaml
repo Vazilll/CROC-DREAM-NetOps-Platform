@@ -3,7 +3,7 @@ hostname: "leaf-1.croc.lab"
 
 interfaces:
   - name: "LoopBack0"
-    description: "Router-ID / BGP announce"
+    description: Router-ID / BGP announce / VTEP source
     enabled: true
     mode: "l3"
     ipv4_address: "10.255.0.1/32"
@@ -26,7 +26,7 @@ interfaces:
     acl_in: "FABRIC-IN"
 
   - name: "GE1/0/9"
-    description: "Access to host-a"
+    description: Access to host-a (VLAN 10)
     enabled: true
     mode: "l3"
     ipv4_address: "10.20.1.1/24"

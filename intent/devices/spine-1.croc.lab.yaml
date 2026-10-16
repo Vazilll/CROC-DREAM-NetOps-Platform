@@ -10,7 +10,7 @@ interfaces:
     mtu: 1500
 
   - name: "GigabitEthernet2"
-    description: "Downlink to leaf1 GigabitEthernet0/0/1"
+    description: "Downlink to leaf1 GE1/0/0"
     enabled: true
     mode: "l3"
     ipv4_address: "10.10.0.0/31"
@@ -18,7 +18,7 @@ interfaces:
     acl_in: "FABRIC-IN"
 
   - name: "GigabitEthernet3"
-    description: "Downlink to leaf2 GigabitEthernet0/0/1"
+    description: "Downlink to leaf2 GE1/0/0"
     enabled: true
     mode: "l3"
     ipv4_address: "10.10.0.2/31"
@@ -31,12 +31,12 @@ bgp:
   neighbors:
     - peer_ip: "10.10.0.1"
       remote_asn: 65001
-      description: "leaf1"
+      description: leaf-1
       announced_prefixes:
         - "10.255.0.11/32"
     - peer_ip: "10.10.0.3"
       remote_asn: 65002
-      description: "leaf2"
+      description: leaf-2
       announced_prefixes:
         - "10.255.0.11/32"
 

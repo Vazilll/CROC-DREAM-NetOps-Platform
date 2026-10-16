@@ -1,0 +1,37 @@
+{# Loopback с router-id: в intent он не описан, а на стенде есть #}
+{% set declared = intent.interfaces | map(attribute="name") | join(" ") | lower %}
+{% if intent.bgp and "loopback" not in declared %}
+interface Loopback0
+ description Router-ID
+ ip address {{ intent.bgp.router_id }} 255.255.255.255
+ ip ospf 1 area 0
+{% endif %}
+{% for iface in intent.interfaces %}
+interface {{ iface.name }}
+{% if iface.description %}
+ description {{ iface.description }}
+{% endif %}
+{% if iface.mtu != 1500 %}
+ mtu {{ iface.mtu }}
+{% endif %}
+{% if iface.ipv4_address %}
+ ip address {{ iface.ipv4_address.ip }} {{ iface.ipv4_address.netmask }}
+{% endif %}
+{% if iface.acl_in %}
+ ip access-group {{ iface.acl_in }} in
+{% endif %}
+{% if iface.name.lower().startswith("loopback") %}
+ ip ospf 1 area 0
+{% elif iface.acl_in %}
+ ip ospf network point-to-point
+ ip ospf 1 area 0
+{% endif %}
+{% if not iface.name.lower().startswith("loopback") %}
+ negotiation auto
+{% endif %}
+{% if iface.enabled %}
+ no shutdown
+{% else %}
+ shutdown
+{% endif %}
+{% endfor %}

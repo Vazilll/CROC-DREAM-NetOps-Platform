@@ -1,7 +1,7 @@
-{% if 'leaf-1' in hostname or 'leaf1' in hostname %}{% raw %}
+{% set short_host = intent.hostname.split(".")[0] %}
 !Software Version V200R005C10SPC607B607
 #
-sysname leaf-1
+sysname {{ short_host }}
 #
 lldp enable
 #
@@ -9,12 +9,12 @@ telnet server disable
 telnet ipv6 server disable
 #
 ip vpn-instance __MGMT_VPN__
- route-distinguisher 65001:999
+ route-distinguisher {{ intent.bgp.asn if intent.bgp else 65001 }}:999
  ipv4-family
 #
 aaa
  undo local-user policy security-enhance
- local-user admin password irreversible-cipher $1c$jU|Y'YL<fF$$Ue%Z"3LeX)=t7TNR]%7ZUc|1,7FvWW#y(Y|+Q6=$
+ local-user admin password irreversible-cipher {% if 'leaf-2' in short_host or 'leaf2' in short_host %}$1c$yBvtPI$b;E$@jjr6#!F[M}7U|*y_d&NRgZHIFlV=SX@YzG*$..)${% else %}$1c$jU|Y'YL<fF$$Ue%Z"3LeX)=t7TNR]%7ZUc|1,7FvWW#y(Y|+Q6=${% endif %}
  local-user admin service-type ssh
  local-user admin user-group manage-ug
  authentication-scheme default
@@ -23,12 +23,33 @@ aaa
  domain default
  domain default_admin
 #
+vlan 10
+ description Tenant VLAN10 (host-a, host-b)
+#
+bridge-domain 10
+ description Tenant VLAN10 -> VNI 10010
+ vxlan vni 10010
+ evpn
+  route-distinguisher {{ intent.bgp.router_id if intent.bgp else '10.255.0.1' }}:10
+  vpn-target 65000:10 export-extcommunity
+  vpn-target 65000:10 import-extcommunity
+#
+interface MEth0/0/0
+ undo shutdown
+ ip binding vpn-instance __MGMT_VPN__
+ ip address 10.0.0.15 255.255.255.0
+#
 ip route-static vpn-instance __MGMT_VPN__ 0.0.0.0 0.0.0.0 10.0.0.2
 #
-ip route-static 10.255.0.2 255.255.255.255 10.10.0.0 preference 200
-ip route-static 10.255.0.2 255.255.255.255 10.10.0.4 preference 200
-ip route-static 10.255.0.11 255.255.255.255 10.10.0.0 preference 200
-ip route-static 10.255.0.12 255.255.255.255 10.10.0.4 preference 200
+{% if intent.bgp and intent.bgp.neighbors | length >= 2 %}
+{% set s1 = intent.bgp.neighbors[0].peer_ip %}
+{% set s2 = intent.bgp.neighbors[1].peer_ip %}
+{% set other_leaf = '10.255.0.2' if intent.bgp.router_id == '10.255.0.1' else '10.255.0.1' %}
+ip route-static {{ other_leaf }} 255.255.255.255 {{ s1 }} preference 200
+ip route-static {{ other_leaf }} 255.255.255.255 {{ s2 }} preference 200
+ip route-static 10.255.0.11 255.255.255.255 {{ s1 }} preference 200
+ip route-static 10.255.0.12 255.255.255.255 {{ s2 }} preference 200
+{% endif %}
 #
 snmp-agent
 snmp-agent community complexity-check disable
@@ -46,52 +67,3 @@ user-interface vty 0 4
  protocol inbound ssh
 #
 return
-{% endraw %}{% else %}{% raw %}
-!Software Version V200R005C10SPC607B607
-#
-sysname leaf-2
-#
-lldp enable
-#
-telnet server disable
-telnet ipv6 server disable
-#
-ip vpn-instance __MGMT_VPN__
- route-distinguisher 65002:999
- ipv4-family
-#
-aaa
- undo local-user policy security-enhance
- local-user admin password irreversible-cipher $1c$yBvtPI$b;E$@jjr6#!F[M}7U|*y_d&NRgZHIFlV=SX@YzG*$..)$
- local-user admin service-type ssh
- local-user admin user-group manage-ug
- authentication-scheme default
- authorization-scheme default
- accounting-scheme default
- domain default
- domain default_admin
-#
-ip route-static vpn-instance __MGMT_VPN__ 0.0.0.0 0.0.0.0 10.0.0.2
-#
-ip route-static 10.255.0.1 255.255.255.255 10.10.0.2 preference 200
-ip route-static 10.255.0.1 255.255.255.255 10.10.0.6 preference 200
-ip route-static 10.255.0.11 255.255.255.255 10.10.0.2 preference 200
-ip route-static 10.255.0.12 255.255.255.255 10.10.0.6 preference 200
-#
-snmp-agent
-snmp-agent community complexity-check disable
-snmp-agent sys-info version v2c
-snmp-agent community read public
-snmp-agent protocol source-status all-interface
-#
-stelnet server enable
-ssh user admin authentication-type password
-ssh user admin service-type all
-ssh authorization-type default aaa
-#
-user-interface vty 0 4
- authentication-mode aaa
- protocol inbound ssh
-#
-return
-{% endraw %}{% endif %}

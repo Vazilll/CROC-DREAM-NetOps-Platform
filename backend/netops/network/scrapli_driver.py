@@ -361,3 +361,26 @@ class ScrapliNetworkDriver:
             interfaces=interfaces,
             ping_loss_percent=ping_losses,
         )
+
+
+def parse_huawei_interfaces(output: str) -> dict[str, bool]:
+    res = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 4 and (parts[0].startswith("GE") or parts[0].startswith("Loop") or parts[0].startswith("Eth") or parts[0].startswith("Vb")):
+            iface = parts[0]
+            phy_up = parts[2].lower() == "up"
+            proto_up = parts[3].lower() == "up"
+            res[iface] = phy_up and proto_up
+    return res
+
+
+def parse_huawei_bgp(output: str) -> dict[str, bool]:
+    res = {}
+    for line in output.splitlines():
+        parts = line.split()
+        if len(parts) >= 5 and re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", parts[0]):
+            peer_ip = parts[0]
+            is_estab = any("established" in token.lower() for token in parts)
+            res[peer_ip] = is_estab
+    return res

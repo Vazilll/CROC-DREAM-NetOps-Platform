@@ -10,7 +10,7 @@ interfaces:
     mtu: 1500
 
   - name: "Ethernet1"
-    description: "Downlink to leaf1 GigabitEthernet0/0/2"
+    description: "Downlink to leaf1 GE1/0/1"
     enabled: true
     mode: "l3"
     ipv4_address: "10.10.0.4/31"
@@ -18,7 +18,7 @@ interfaces:
     acl_in: "FABRIC-IN"
 
   - name: "Ethernet2"
-    description: "Downlink to leaf2 GigabitEthernet0/0/2"
+    description: "Downlink to leaf2 GE1/0/1"
     enabled: true
     mode: "l3"
     ipv4_address: "10.10.0.6/31"

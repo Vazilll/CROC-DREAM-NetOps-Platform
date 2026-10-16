@@ -1,26 +1,42 @@
-{% raw %}
-router bgp 65000
- bgp router-id 10.255.0.11
+{% if intent.bgp %}
+router bgp {{ intent.bgp.asn }}
+ bgp router-id {{ intent.bgp.router_id }}
  bgp log-neighbor-changes
  no bgp default ipv4-unicast
- neighbor 10.10.0.1 remote-as 65001
- neighbor 10.10.0.1 description leaf-1
- neighbor 10.10.0.3 remote-as 65002
- neighbor 10.10.0.3 description leaf-2
+{% for neighbor in intent.bgp.neighbors %}
+ neighbor {{ neighbor.peer_ip }} remote-as {{ neighbor.remote_asn }}
+{% if neighbor.description %}
+ neighbor {{ neighbor.peer_ip }} description {{ neighbor.description }}
+{% endif %}
+{% if neighbor.password %}
+ neighbor {{ neighbor.peer_ip }} password {{ neighbor.password }}
+{% endif %}
+{% endfor %}
  !
  address-family ipv4
-  network 10.255.0.11 mask 255.255.255.255
-  neighbor 10.10.0.1 activate
-  neighbor 10.10.0.3 activate
+{% set prefixes = intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique | list %}
+{% if prefixes %}
+{% for prefix in prefixes %}
+  network {{ prefix.network_address }} mask {{ prefix.netmask }}
+{% endfor %}
+{% else %}
+  network {{ intent.bgp.router_id }} mask 255.255.255.255
+{% endif %}
+{% for neighbor in intent.bgp.neighbors %}
+  neighbor {{ neighbor.peer_ip }} activate
+{% endfor %}
  exit-address-family
  !
  address-family l2vpn evpn
-  neighbor 10.10.0.1 activate
-  neighbor 10.10.0.1 send-community both
-  neighbor 10.10.0.1 next-hop-unchanged
-  neighbor 10.10.0.3 activate
-  neighbor 10.10.0.3 send-community both
-  neighbor 10.10.0.3 next-hop-unchanged
+{% for neighbor in intent.bgp.neighbors %}
+  neighbor {{ neighbor.peer_ip }} activate
+  neighbor {{ neighbor.peer_ip }} send-community both
+  neighbor {{ neighbor.peer_ip }} next-hop-unchanged
+{% endfor %}
  exit-address-family
 !
-{% endraw %}
+router ospf 1
+ router-id {{ intent.bgp.router_id }}
+ log-adjacency-changes
+!
+{% endif %}
