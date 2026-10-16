@@ -14,7 +14,7 @@ Validates Acceptance Criteria 6:
 
 import os
 import sys
-import time
+
 from playwright.sync_api import sync_playwright
 
 BASE_URL = "http://localhost:5173/?token=dev-admin-token"

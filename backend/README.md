@@ -74,7 +74,6 @@ backend/
     │   ├── job.py                   # Задача (Job), цели (JobTarget) и лог шагов (JobStepLog)
     │   ├── snapshot.py              # Снимок конфигурации (ConfigSnapshot)
     │   ├── drift.py                 # Запись обнаруженного дрейфа (DriftRecord)
-    │   ├── metric.py                # Исторические метрики телеметрии (MetricSample)
     │   └── user.py                  # Пользователь, роль, скоупы и срок действия токена (User)
     ├── schemas/                     # Контракты запросов и ответов Pydantic v2
     │   ├── common.py, devices.py, drift.py, intent.py, jobs.py, users.py
@@ -286,9 +285,19 @@ python3 backend/scripts/smoke_stack.py
 
 ## Метрики и телеграм-бот
 
-Воркер раз в `NETOPS_METRICS_INTERVAL_SECONDS` (по умолчанию 60) складывает замеры в таблицу
-`metric_samples`, а `GET /metrics` отдаёт срез последнего сбора в формате Prometheus. История
-остаётся в базе и чистится по `NETOPS_METRICS_RETENTION_DAYS` (по умолчанию 7 дней).
+Воркер раз в `NETOPS_METRICS_INTERVAL_SECONDS` (по умолчанию 60) публикует последний срез замеров
+в Redis (`netops:telemetry:latest`, TTL = 3 интервала), а `GET /metrics` отдаёт его в формате
+Prometheus. В PostgreSQL метрики больше не пишутся: Prometheus скрейпит `/metrics`, держит 3 дня
+для алертов и отправляет всё через `remote_write` в VictoriaMetrics (история, `VM_RETENTION`,
+по умолчанию 12 месяцев) — она же источник по умолчанию для Grafana.
+
+Раз в `NETOPS_COLLECTOR_TARGETS_INTERVAL_SECONDS` (по умолчанию 3600) задача
+`netops.telemetry.refresh_collector_targets` проверяет каждое устройство и раскладывает его по
+внешним сборщикам: gNMI (подтверждён `gnmic capabilities`) → `gnmic_targets.yaml`, exporter
+(ответ в формате Prometheus) → `exporter_targets.json`, SNMP v2c (ответ на заданное
+`NETOPS_SNMP_COMMUNITY`) → `prometheus_targets.json`. Остальные остаются на SSH CLI-опросе.
+План виден в `GET /api/v1/telemetry/collectors`, принудительный пересчёт —
+`POST /api/v1/telemetry/collectors/refresh`.
 
 Из базы: `netops_device_status`, `netops_devices_total`, `netops_drift_devices`,
 `netops_jobs_total`, `netops_job_last_finished_timestamp_seconds`. Со стенда (через тот же

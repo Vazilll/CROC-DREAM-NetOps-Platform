@@ -141,9 +141,34 @@ class JobService:
         ]
         return self._submit(job)
 
-    def create_drift_scan(self, device_ids: Sequence[int] | None, *, requested_by: str) -> Job:
+    def create_drift_scan(
+        self,
+        device_ids: Sequence[int] | None = None,
+        *,
+        fabric_id: str | None = None,
+        site: str | None = None,
+        requested_by: str,
+    ) -> Job:
+        stand = fabric_id or site
         if device_ids:
             devices = self._devices(device_ids)
+            if stand is not None:
+                devices = [
+                    d
+                    for d in devices
+                    if (
+                        getattr(d, "fabric_id", None) == stand
+                        or getattr(d, "site", None) == stand
+                    )
+                ]
+        elif stand is not None:
+            devices = list(
+                self._session.scalars(
+                    select(Device)
+                    .where((Device.fabric_id == stand) | (Device.site == stand))
+                    .order_by(Device.hostname)
+                )
+            )
         else:
             devices = list(self._session.scalars(select(Device).order_by(Device.hostname)))
         if not devices:

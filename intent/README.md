@@ -10,7 +10,7 @@
 intent/
 ├── README.md                  # Этот документ
 ├── inventory.yaml             # Реестр устройств фабрики (по умолчанию для локального/Docker контура)
-├── inventory.live.yaml        # Реестр устройств для боевого стенда Containerlab (5.228.243.54:2211..2222)
+├── inventory.live.yaml        # Реестр устройств для боевого стенда Containerlab (198.51.100.10:2211..2222)
 ├── diff_filters.yaml          # Декларативные правила фильтрации и нормализации CLI по платформам
 └── devices/                   # Целевые декларативные профили каждого узла (YAML)
     ├── spine-1.croc.lab.yaml  # Cisco IOS-XE (BGP ASN 65000, Router ID 10.255.0.1)
@@ -26,7 +26,7 @@ intent/
 | Файл | Назначение и правила валидации |
 |------|--------------------------------|
 | [`inventory.yaml`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/inventory.yaml) | Список управляемых устройств (`hostname`, `management_ip`, `management_port`, `platform`, `role`, `auth_profile`). **Важно:** пароли здесь хранить запрещено — `auth_profile` ссылается на ключ в переменной окружения `NETOPS_AUTH_PROFILES`. |
-| [`inventory.live.yaml`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/inventory.live.yaml) | Профиль инвентаря с проброшенными SSH-портами (`2211`, `2212`, `2221`, `2222`) удалённого сервера Containerlab (`5.228.243.54`). |
+| [`inventory.live.yaml`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/inventory.live.yaml) | Профиль инвентаря с проброшенными SSH-портами (`2211`, `2212`, `2221`, `2222`) удалённого сервера Containerlab (`198.51.100.10`). |
 | `devices/<hostname>.yaml` | Декларативное описание L3-интерфейсов (`interfaces`), процесса BGP (`bgp`: `asn`, `router_id`, `neighbors`, `networks`) и списков контроля доступа (`acls`). Имя файла обязано строго совпадать с `hostname` из `inventory.yaml`. |
 | [`diff_filters.yaml`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/diff_filters.yaml) | Правила очистки `running-config` перед сравнением: `mask_secrets` (скрытие хэшей паролей), `drop_line_patterns` (удаление меток времени и баннеров), `drop_blocks` (служебные сертификаты и OAM VPN) и `managed_sections` (сравниваются только управляемые секции, чтобы не затереть management-интерфейс и SSH/VTY). |
 

@@ -10,22 +10,69 @@ ssh_banners:
   - ubuntu
   - debian
   - alpine
+  - linux
+  - centos
+  - redhat
+  - rhel
 version_signatures:
   - Linux
+  - Ubuntu
+  - Debian
+  - Alpine
+  - CentOS
+  - Red Hat
 interface_prefixes:
   - eth
   - ens
+  - enp
   - lo
 lldp_port_prefixes:
   - eth
   - ens
+  - enp
 commands:
   version: uname -a
   memory: top -bn1 | head -n 5
+  cpu: top -bn1 | head -n 5
   running_config: ip addr show
   hostname_filter: hostname
   interfaces_brief: ip -br addr show
   lldp_neighbors: lldpctl
+telemetry:
+  cpu_pct:
+    command: top -bn1 | head -n 5
+    parser: parse_linux_cpu
+  memory_pct:
+    command: top -bn1 | head -n 5
+    parser: parse_linux_memory
+  uplink_util_pct:
+    command: cat /proc/net/dev
+    parser: parse_linux_net_util
+  disk_util_pct:
+    command: df -h /
+    parser: parse_linux_disk
+  network_rate_mbps:
+    command: cat /proc/net/dev
+    parser: parse_linux_network_rate
+  load_1m:
+    command: cat /proc/loadavg
+    parser: parse_linux_load
+gnmi:
+  default_port: 6030
+  check_command: systemctl status gnmi
+  match_tokens:
+    - active
+    - running
+snmp:
+  base_port: 161
+  clab_offset: 0
+exporter:
+  port: 9100
+  path: /metrics
+protocol_priority:
+  - node_exporter
+  - snmp
+  - ssh_cli
 emergency_commands:
   reset_bgp_sessions: ip route flush cache
   rollback_last_commit: etckeeper vcs checkout || true

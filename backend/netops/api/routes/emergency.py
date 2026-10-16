@@ -6,7 +6,7 @@ Provides:
 2. Emergency direct patching without pre-flight gating.
 3. Two-tier recovery:
    - Soft Reset: re-applies golden baseline intent via NetOps pipeline.
-   - Hard Reset: redeploys Containerlab topology on server 5.228.243.54.
+   - Hard Reset: redeploys Containerlab topology on server 198.51.100.10.
 """
 
 from __future__ import annotations
@@ -289,7 +289,8 @@ def apply_emergency_patch(
     with container.session_factory() as session:
         from sqlalchemy import select  # noqa: PLC0415
         from netops.enums import JobStatus, JobType  # noqa: PLC0415
-        from netops.models import Job, JobTarget  # noqa: PLC0415
+        from netops.models import Device, Job, JobTarget  # noqa: PLC0415
+        from netops.services.state import get_state_manager  # noqa: PLC0415
 
         active_job = session.scalar(
             select(Job.id)
@@ -306,6 +307,13 @@ def apply_emergency_patch(
                 detail=f"Device '{device_obj.hostname}' is locked by active pipeline job {active_job}",
             )
 
+        state_mgr = get_state_manager()
+        lock_holder = f"emergency_patch:{_.username}"
+        state_mgr.acquire_sync_lock(f"device:{device_obj.hostname}", holder=lock_holder, ttl=600, reason=req.reason)
+        db_device = session.scalar(select(Device).where(Device.hostname == device_obj.hostname))
+        if db_device is not None:
+            state_mgr.acquire_sync_lock(f"device:{db_device.id}", holder=lock_holder, ttl=600, reason=req.reason)
+
     target = toolchain.target_for(device_obj)
     lines = [line.strip() for line in req.patch.splitlines() if line.strip() and not line.strip().startswith("!")]
 
@@ -314,6 +322,7 @@ def apply_emergency_patch(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Patch does not contain any valid configuration statements",
         )
+
 
     # Offline simulation fallback
     if container.settings.network_driver == "offline":

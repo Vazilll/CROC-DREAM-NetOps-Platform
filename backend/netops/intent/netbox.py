@@ -35,6 +35,11 @@ def load_netbox_inventory(
             ip = (raw.get("primary_ip4") or {}).get("address", "").split("/")[0]
             platform = (raw.get("platform") or {}).get("slug")
             role = (raw.get("role") or raw.get("device_role") or {}).get("slug")
+            site_slug = (raw.get("site") or {}).get("slug")
+            kwargs: dict[str, Any] = {}
+            if site_slug:
+                kwargs["fabric_id"] = site_slug
+                kwargs["site"] = site_slug
             try:
                 devices.append(
                     InventoryDevice(
@@ -43,6 +48,7 @@ def load_netbox_inventory(
                         platform=Platform(platform),
                         role=DeviceRole(role),
                         auth_profile=(raw.get("custom_fields") or {}).get("auth_profile") or default_auth_profile,
+                        **kwargs,
                     )
                 )
             except ValueError as exc:

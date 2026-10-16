@@ -238,3 +238,36 @@ def test_offline_and_online_mode_separation() -> None:
     assert verdict.expected_range == (0.0, 0.0)
     assert "Нет данных телеметрии" in verdict.message
 
+
+def test_six_vendor_cli_metrics_and_single_point_forecast() -> None:
+    from netops.services.forecast import clear_forecast_cache
+    from netops.services.telemetry import collect_metrics_from_cli
+
+    class FakeSession:
+        def send_command(self, cmd: str) -> str:
+            if "cpu" in cmd or "processes" in cmd:
+                return "CPU utilization for five seconds: 11%/2%; one minute: 14%; five minutes: 9%"
+            if "routing-engine" in cmd:
+                return "    Idle                      82 percent"
+            if "top -bn1" in cmd:
+                return "%Cpu(s): 12.0 us,  3.0 sy,  0.0 ni, 85.0 id"
+            if "counters rates" in cmd:  # YADRO KornfeOS: таблица утилизации в процентах
+                return "Ethernet1/1  up  up  3.0%  2.0%"
+            return "30 seconds input rate 0 bits/sec"
+
+    s_online = Settings(_env_file=None, network_driver="scrapli", forecast_url="")  # type: ignore[call-arg]
+    for vendor, host in (
+        ("eltex_mes", "eltex-leaf.lab"),
+        ("yadro_kornfe", "yadro-leaf.lab"),
+        ("juniper_junos", "juniper-spine.lab"),
+    ):
+        clear_live_metrics(host)
+        clear_forecast_cache()
+        res = collect_metrics_from_cli(host, vendor, FakeSession().send_command)
+        assert "cpu_pct" in res and res["cpu_pct"] > 0
+        assert "uplink_util_pct" in res and res["uplink_util_pct"] >= 0.0
+        fc = build_forecast(s_online, 1, host, "leaf", "cpu_pct", 12)
+        assert len(fc.history) == 1
+        assert len(fc.median) == 12
+        clear_live_metrics(host)
+

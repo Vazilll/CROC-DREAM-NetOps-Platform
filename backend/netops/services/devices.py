@@ -15,7 +15,15 @@ from netops.models.drift import DriftRecord
 from netops.schemas.devices import DeviceCreate, DeviceUpdate, InventorySyncResult
 from netops.services.telemetry import metric_series
 
-_INVENTORY_FIELDS = ("management_ip", "management_port", "platform", "role", "auth_profile")
+_INVENTORY_FIELDS = (
+    "management_ip",
+    "management_port",
+    "platform",
+    "role",
+    "auth_profile",
+    "fabric_id",
+    "site",
+)
 
 
 class DeviceService:
@@ -28,6 +36,8 @@ class DeviceService:
         status: DeviceStatus | None = None,
         role: DeviceRole | None = None,
         platform: Platform | None = None,
+        fabric_id: str | None = None,
+        site: str | None = None,
         limit: int = 100,
         offset: int = 0,
     ) -> Sequence[Device]:
@@ -38,6 +48,10 @@ class DeviceService:
             query = query.where(Device.role == role)
         if platform is not None:
             query = query.where(Device.platform == platform)
+        if fabric_id is not None:
+            query = query.where((Device.fabric_id == fabric_id) | (Device.site == fabric_id))
+        if site is not None:
+            query = query.where((Device.site == site) | (Device.fabric_id == site))
         devices = self._session.scalars(query).all()
 
         device_ids = [d.id for d in devices]
@@ -117,9 +131,7 @@ class DeviceService:
             val = sparkline[i] if i < len(sparkline) else None
             if oper_status == "DOWN":
                 timeline.append("DOWN")
-            elif oper_status == "DEGRADED":
-                timeline.append("DEGRADED")
-            elif val is not None and val >= 85.0:
+            elif oper_status == "DEGRADED" or (val is not None and val >= 85.0):
                 timeline.append("DEGRADED")
             elif val is not None:
                 timeline.append("UP")
@@ -144,6 +156,7 @@ class DeviceService:
 
     def delete(self, device_id: int) -> None:
         from sqlalchemy import delete  # noqa: PLC0415
+
         from netops.models import Job, JobTarget  # noqa: PLC0415
 
         device = self.get(device_id)

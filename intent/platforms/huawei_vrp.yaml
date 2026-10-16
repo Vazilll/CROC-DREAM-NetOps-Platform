@@ -27,10 +27,41 @@ lldp_port_prefixes:
 commands:
   version: display version
   memory: display memory
+  cpu: display cpu
   running_config: display current-configuration
   hostname_filter: display current-configuration | include sysname
   interfaces_brief: display ip interface brief
   lldp_neighbors: display lldp neighbor brief
+telemetry:
+  cpu_pct:
+    command: display cpu
+    parser: parse_huawei_cpu
+  memory_pct:
+    command: display memory
+    parser: parse_huawei_memory
+  uplink_util_pct:
+    command: display interface brief
+    parser: max_huawei_link_utilization
+gnmi:
+  default_port: 57400
+  check_command: display grpc
+  match_tokens:
+    - enabled
+    - active
+    - running
+    - "57400"
+    - grpc
+snmp:
+  base_port: 161
+  clab_offset: -600
+  hardware_module: huawei_cpu
+exporter:
+  port: 9100
+  path: /metrics
+protocol_priority:
+  - gnmi
+  - snmp
+  - ssh_cli
 emergency_commands:
   reset_bgp_sessions: reset bgp all
   rollback_last_commit: rollback configuration last 1

@@ -373,11 +373,18 @@ def _remote_forecast(
 def _statistical_forecast(series: list[float], horizon: int) -> dict[str, Any]:
     # Linear trend over the last 8h + residual quantile band (Q10-Q90)
     tail = series[-96:]
+    if len(tail) == 1:
+        tail = [tail[0], tail[0], tail[0]]
+    elif len(tail) == 2:
+        tail = [tail[0], (tail[0] + tail[1]) / 2.0, tail[1]]
     xs = list(range(len(tail)))
     fit = statistics.linear_regression(xs, tail)
-    resid = statistics.pstdev([
-        y - (fit.intercept + fit.slope * x) for x, y in zip(xs, tail, strict=True)
-    ])
+    resid = max(
+        0.5,
+        statistics.pstdev([
+            y - (fit.intercept + fit.slope * x) for x, y in zip(xs, tail, strict=True)
+        ]),
+    )
     median = [fit.intercept + fit.slope * (len(tail) + i) for i in range(horizon)]
     spread = [resid * (1 + i / horizon) * 1.28 for i in range(horizon)]
     return {
@@ -435,7 +442,7 @@ def build_forecast(
                         exc,
                         _SERVICE_FAILURE_COOLDOWN,
                     )
-        if result is None and len(series) < 3:
+        if result is None and not series:
             result = {"median": [], "lower": [], "upper": [], "provider": "Нет данных телеметрии"}
         elif result is None:
             result = _statistical_forecast(series, horizon)

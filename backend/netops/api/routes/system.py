@@ -3,9 +3,9 @@ from __future__ import annotations
 import asyncio
 import secrets
 import time
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, inspect, select
@@ -15,7 +15,7 @@ from netops.api.deps import ContainerDep, Operator, SessionDep, Viewer
 from netops.db import Base
 from netops.enums import DeviceStatus, IntentSource, UserRole
 from netops.intent.netbox import load_netbox_inventory
-from netops.models import ConfigSnapshot, Device, DriftRecord, Job, MetricSample, User
+from netops.models import ConfigSnapshot, Device, DriftRecord, Job, User
 from netops.schemas.intent import IntentIssueRead, IntentLintReport
 from netops.schemas.users import UserRead
 from netops.services import DeviceService, JobService
@@ -123,7 +123,7 @@ def _render_prometheus_metrics(session: SessionDep) -> PlainTextResponse:
         drift_count = session.scalar(select(func.count(DriftRecord.id))) or 0
         lines.append(f"netops_drift_records_total {drift_count}")
 
-        samples, collected_at = collector.latest(session)
+        samples, collected_at = collector.latest()
         hw_samples = [
             s
             for s in samples
@@ -158,7 +158,7 @@ def _render_prometheus_metrics(session: SessionDep) -> PlainTextResponse:
     response_class=PlainTextResponse,
 )
 def prometheus_metrics(session: SessionDep) -> PlainTextResponse:
-    samples, collected_at = collector.latest(session)
+    samples, collected_at = collector.latest()
     return PlainTextResponse(
         content=metrics.render(samples, collected_at),
         media_type="text/plain; version=0.0.4; charset=utf-8",
@@ -182,6 +182,8 @@ class ChaosRequest(BaseModel):
 class FreezeRequest(BaseModel):
     frozen: bool
     reason: str | None = None
+    fabric_id: str | None = None
+    site: str | None = None
 
 
 class GitSyncRequest(BaseModel):
@@ -256,8 +258,14 @@ def current_user(user: Viewer) -> ApiPrincipal:
     tags=["intent"],
     summary="Проверка репозитория intent (pre-flight lint)",
 )
-def lint_intent(container: ContainerDep, _: Viewer) -> IntentLintReport:
-    issues = container.intents.lint()
+def lint_intent(
+    container: ContainerDep,
+    _: Viewer,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+    site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
+) -> IntentLintReport:
+    stand = fabric_id or site
+    issues = container.intents.lint(fabric_id=stand)
     return IntentLintReport(
         valid=not issues, issues=[IntentIssueRead.model_validate(issue) for issue in issues]
     )
@@ -273,8 +281,13 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dic
     tags=["system"],
     summary="Статус экстренной заморозки фабрики (Kill Switch)",
 )
-def get_freeze_status(_: Viewer) -> dict[str, Any]:
-    return get_freeze_state()
+def get_freeze_status(
+    _: Viewer,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+    site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
+) -> dict[str, Any]:
+    stand = fabric_id or site
+    return get_freeze_state(fabric_id=stand)
 
 
 @api_router.post(
@@ -283,7 +296,22 @@ def get_freeze_status(_: Viewer) -> dict[str, Any]:
     summary="Включение / отключение экстренной заморозки фабрики",
 )
 def toggle_freeze(req: FreezeRequest, user: Operator) -> dict[str, Any]:
-    return set_factory_freeze(req.frozen, req.reason, user.username)
+    stand = req.fabric_id or req.site
+    return set_factory_freeze(req.frozen, req.reason, user.username, fabric_id=stand)
+
+
+@api_router.delete(
+    "/system/freeze",
+    tags=["system"],
+    summary="Снятие экстренной заморозки фабрики",
+)
+def unfreeze(
+    user: Operator,
+    fabric_id: Annotated[str | None, Query(description="Идентификатор стенда/фабрики")] = None,
+    site: Annotated[str | None, Query(description="Идентификатор площадки/стенда")] = None,
+) -> dict[str, Any]:
+    stand = fabric_id or site
+    return set_factory_freeze(False, "Заморозка снята оператором", user.username, fabric_id=stand)
 
 
 @api_router.get(
@@ -479,7 +507,6 @@ def get_integrations_status(
     jobs_count = session.scalar(select(func.count(Job.id))) or 0
     drift_count = session.scalar(select(func.count(DriftRecord.id))) or 0
     snapshots_count = session.scalar(select(func.count(ConfigSnapshot.id))) or 0
-    metrics_count = session.scalar(select(func.count(MetricSample.id))) or 0
 
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     issues = container.intents.lint()
@@ -507,7 +534,6 @@ def get_integrations_status(
         "jobs": jobs_count,
         "drift_records": drift_count,
         "config_snapshots": snapshots_count,
-        "metric_samples": metrics_count,
         "users": len(db_users),
         "bound_sessions": bound_count,
         "bound_device_sessions": bound_count,
@@ -554,7 +580,7 @@ def get_integrations_status(
             "url": settings.prometheus_url or None,
             "scrape_endpoint": "/metrics",
             "collector_interval_sec": settings.metrics_interval_seconds,
-            "stored_samples": metrics_count,
+            "stored_samples": len(collector.latest()[0]),
         },
         "telegram": {
             "configured": tg_configured,

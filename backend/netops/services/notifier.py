@@ -35,6 +35,20 @@ KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {
 }
 
 
+def load_telegram_profiles(settings: Settings | None = None) -> dict[int, dict[str, str]]:
+    """Dynamically load telegram notification recipient profiles from runtime storage or fallback."""
+    rt_file = _runtime_dir(settings) / "telegram_profiles.json"
+    if rt_file.is_file():
+        try:
+            raw = json.loads(rt_file.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                return {int(k): v for k, v in raw.items() if isinstance(v, dict)}
+        except Exception:
+            pass
+    return dict(KNOWN_TELEGRAM_PROFILES)
+
+
+
 def _runtime_dir(settings: Settings | None = None) -> Path:
     import os  # noqa: PLC0415
     import tempfile  # noqa: PLC0415

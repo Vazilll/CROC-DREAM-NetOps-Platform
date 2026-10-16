@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from types import MappingProxyType
+from typing import Any
 
 # Каталог метрик: имена и описания попадают в вывод /metrics (строки HELP и TYPE).
 DEVICE_STATUS = "netops_device_status"
@@ -21,6 +22,19 @@ MEMORY_USAGE = "netops_memory_usage_percent"
 UPLINK_UTIL = "netops_uplink_util_percent"
 COLLECTED_AT = "netops_metrics_collected_timestamp_seconds"
 
+# Метрики серверов и приложений стендов (R4)
+SERVER_CPU_UTIL = "netops_server_cpu_utilization_percent"
+SERVER_MEMORY_UTIL = "netops_server_memory_utilization_percent"
+SERVER_DISK_UTIL = "netops_server_disk_utilization_percent"
+SERVER_NETWORK_RATE = "netops_server_network_rate_mbps"
+SERVER_LOAD_1M = "netops_server_load_1m"
+
+# Алиасы и именованные метрики сетевых коммутаторов для Grafana NOC (R4)
+DEVICE_CPU_UTIL = "netops_device_cpu_utilization_percent"
+DEVICE_MEMORY_UTIL = "netops_device_memory_utilization_percent"
+DEVICE_UPLINK_UTIL = "netops_device_uplink_utilization_percent"
+DRIFT_DEVICES_TOTAL = "netops_drift_devices_total"
+
 HELP: Mapping[str, str] = MappingProxyType(
     {
         DEVICE_STATUS: "Текущий статус устройства: 1 у текущего статуса, 0 у остальных",
@@ -29,6 +43,7 @@ HELP: Mapping[str, str] = MappingProxyType(
         JOBS_TOTAL: "Количество задач по типу и статусу",
         JOB_LAST_FINISHED: "Время завершения последней задачи этого типа",
         DRIFT_DEVICES: "Количество устройств с обнаруженным дрейфом",
+        DRIFT_DEVICES_TOTAL: "Количество устройств с обнаруженным дрейфом конфигурации",
         BGP_SESSION_UP: "BGP-сессия в состоянии Established",
         BGP_PREFIXES_ACCEPTED: "Принятых префиксов от соседа",
         INTERFACE_UP: "Интерфейс в состоянии up/up",
@@ -36,6 +51,14 @@ HELP: Mapping[str, str] = MappingProxyType(
         CPU_USAGE: "Загрузка CPU устройства, проценты",
         MEMORY_USAGE: "Загрузка RAM устройства, проценты",
         UPLINK_UTIL: "Загрузка аплинка устройства, проценты",
+        DEVICE_CPU_UTIL: "Загрузка CPU сетевого коммутатора, проценты",
+        DEVICE_MEMORY_UTIL: "Загрузка RAM сетевого коммутатора, проценты",
+        DEVICE_UPLINK_UTIL: "Загрузка аплинка сетевого коммутатора, проценты",
+        SERVER_CPU_UTIL: "Загрузка CPU серверов и стендовых приложений, проценты",
+        SERVER_MEMORY_UTIL: "Загрузка RAM серверов и стендовых приложений, проценты",
+        SERVER_DISK_UTIL: "Загрузка дискового пространства серверов, проценты",
+        SERVER_NETWORK_RATE: "Сетевой трафик серверов, Мбит/с",
+        SERVER_LOAD_1M: "Средняя загрузка сервера за 1 минуту (Load Average 1m)",
         COLLECTED_AT: "Время последнего сбора метрик",
     }
 )
@@ -70,5 +93,7 @@ def _number(value: float) -> str:
     return str(int(number)) if number.is_integer() else repr(number)
 
 
-def _escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+def _escape(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")

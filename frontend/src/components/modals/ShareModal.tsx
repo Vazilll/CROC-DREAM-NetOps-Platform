@@ -997,9 +997,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                   </div>
                   <div className="p-2 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)]">
                     <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {integrations?.database?.counts?.metric_samples ?? '—'}
+                      {integrations?.database?.counts?.jobs ?? '—'}
                     </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Метрик</div>
+                    <div className="text-[10px] text-[var(--text-muted)]">Задач</div>
                   </div>
                 </div>
 

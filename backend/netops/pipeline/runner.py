@@ -60,10 +60,33 @@ class JobRunner:
 
             from netops.services.freeze import get_freeze_state, is_factory_frozen  # noqa: PLC0415
 
-            if is_factory_frozen() and job.type in (JobType.DEPLOY, JobType.DRIFT_REMEDIATE):
-                reason = get_freeze_state().get("reason") or "Экстренная блокировка"
-                recorder.fail(f"Отклонено: Фабрика заморожена оператором (Kill Switch: {reason})")
-                return job.status
+            if job.type in (JobType.DEPLOY, JobType.DRIFT_REMEDIATE):
+                if is_factory_frozen():
+                    reason = get_freeze_state().get("reason") or "Экстренная блокировка"
+                    recorder.fail(
+                        f"Отклонено: Фабрика заморожена оператором (Kill Switch: {reason})"
+                    )
+                    return job.status
+
+                target_fabrics: set[str] = set()
+                for target in job.targets:
+                    if target.device:
+                        dev = target.device
+                        fab = getattr(dev, "fabric_id", None) or getattr(dev, "site", None)
+                        if fab:
+                            target_fabrics.add(fab)
+                frozen_stands = [
+                    fab for fab in sorted(target_fabrics) if is_factory_frozen(fabric_id=fab)
+                ]
+                if frozen_stands:
+                    stand_names = ", ".join(frozen_stands)
+                    first_state = get_freeze_state(fabric_id=frozen_stands[0])
+                    reason = first_state.get("reason") or "Экстренная блокировка"
+                    recorder.fail(
+                        f"Отклонено: Стенд {stand_names} заморожен оператором "
+                        f"(Kill Switch: {reason})"
+                    )
+                    return job.status
 
             try:
                 pipeline = PIPELINES[job.type](session, self._toolchain_factory(), recorder)

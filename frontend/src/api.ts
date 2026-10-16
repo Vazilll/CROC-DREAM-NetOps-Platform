@@ -701,7 +701,6 @@ export interface IntegrationsStatus {
       jobs: number;
       users: number;
       bound_sessions: number;
-      metric_samples: number;
     };
   };
   github_sot: GitStatusInfo;
@@ -1121,7 +1120,7 @@ export class NetOpsApiClient {
    *
    * @example
    * ```ts
-   * const probe = await api.probeDevice({ management_ip: '5.228.243.54', management_port: 2201 });
+   * const probe = await api.probeDevice({ management_ip: '198.51.100.10', management_port: 2201 });
    * if (probe.reachable) console.log(probe.detected_platform);
    * ```
    */

@@ -53,7 +53,8 @@ class Settings(BaseSettings):
 
     drift_scan_interval_seconds: int = Field(default=900, ge=60)
     metrics_interval_seconds: int = Field(default=60, ge=10)
-    metrics_retention_days: int = Field(default=7, ge=1)
+    # Как часто заново проверять протоколы устройств и переписывать цели сборщиков.
+    collector_targets_interval_seconds: int = Field(default=3600, ge=300)
     job_timeout_seconds: int = Field(default=3600, ge=60)
 
     # {"<токен>": {"username": "alice", "role": "admin"}}
@@ -112,8 +113,12 @@ class Settings(BaseSettings):
     clab_key_path: str | None = None
     clab_topology_path: str = "/home/crocdream/clab-quickstart/fabric.clab.yaml"
 
-    # Prometheus telemetry ingestion (empty URL = falls back to the SSH CLI cache; no data is invented)
+    # Prometheus-compatible query API (Prometheus или VictoriaMetrics; empty URL = falls back to
+    # the SSH CLI cache; no data is invented)
     prometheus_url: str = ""
+    # SNMP v2c community для проверки агента и snmp-exporter. Пусто — v2c не проверяется
+    # (значения «public» по умолчанию в коде нет).
+    snmp_community: SecretStr | None = None
 
     # Telegram Incident Alerting & Broadcast
     telegram_bot_token: SecretStr | None = None
@@ -166,8 +171,10 @@ class Settings(BaseSettings):
         ):
             self.inventory_file = "inventory.live.yaml"
         import os  # noqa: PLC0415
+        import sys  # noqa: PLC0415
 
-        if "PYTEST_CURRENT_TEST" not in os.environ or "offline_lab_path" in self.model_fields_set:
+        in_pytest = "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
+        if not in_pytest or "offline_lab_path" in self.model_fields_set:
             self.apply_runtime_overlay(respect_explicit=True)
         return self
 

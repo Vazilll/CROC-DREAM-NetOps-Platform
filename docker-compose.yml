@@ -5,6 +5,7 @@
 # Веб-консоль (React + Nginx): http://localhost:5173
 # API и Swagger:               http://localhost:8000/docs
 # Prometheus UI:               http://localhost:9090/targets
+# VictoriaMetrics (история):   http://localhost:8428/vmui
 name: netops
 
 x-backend: &backend
@@ -93,13 +94,39 @@ services:
   snmp-exporter:
     image: prom/snmp-exporter:v0.26.0
     ports: ["${SNMP_EXPORTER_PORT:-9116}:9116"]
+    volumes:
+      - ./monitoring/snmp.yml:/etc/snmp_exporter/snmp.yml:ro
+    restart: unless-stopped
+
+  # gNMI-поток с устройств, которые платформа проверила через gRPC Capabilities.
+  gnmic:
+    image: ghcr.io/openconfig/gnmic:0.49.0
+    command: ["--config", "/etc/gnmic/gnmic.yaml", "subscribe"]
+    environment:
+      GNMIC_USERNAME: ${GNMIC_USERNAME:-admin}
+      GNMIC_PASSWORD: ${GNMIC_PASSWORD:-admin}
+    ports: ["${GNMIC_PORT:-9804}:9804"]
+    volumes:
+      - ./monitoring/gnmic/gnmic.yaml:/etc/gnmic/gnmic.yaml:ro
+      - ${OFFLINE_LAB:-./lab/running}:/data/lab:ro
+    restart: unless-stopped
+
+  # Долговременное хранилище рядов (Prometheus пишет сюда через remote_write).
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.154.0
+    command:
+      - -storageDataPath=/storage
+      - -retentionPeriod=${VM_RETENTION:-12}
+      - -httpListenAddr=:8428
+    ports: ["${VM_PORT:-8428}:8428"]
+    volumes: [vm-data:/storage]
     restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.54.1
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.time=3d
     ports: ["${PROMETHEUS_PORT:-9090}:9090"]
     volumes:
       - ./monitoring:/etc/prometheus:ro
@@ -109,6 +136,26 @@ services:
     depends_on:
       - snmp-exporter
       - node-exporter
+      - gnmic
+      - victoriametrics
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports: ["${GRAFANA_PORT:-3000}:3000"]
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/provisioning/dashboards/json/croc-dream-1000-stand-noc.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+      - victoriametrics
+      - postgres
 
   frontend:
     build: ./frontend
@@ -122,3 +169,5 @@ services:
 volumes:
   postgres-data:
   prometheus-data:
+  vm-data:
+  grafana-data:

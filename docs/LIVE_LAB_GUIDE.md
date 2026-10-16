@@ -1,7 +1,7 @@
 # 🌐 CROC DREAM NetOps Platform — Live 6-Node Bare Metal Lab Guide
 
 > **Руководство по эксплуатации и подключению живого стенда Containerlab (6 узлов, 3 вендора)**  
-> **Server Endpoint**: `5.228.243.54:221` (SSH: `crocdream`)  
+> **Server Endpoint**: `198.51.100.10:221` (SSH: `crocdream`)  
 > **Branch**: `feature/live-lab-integration`  
 > **SSOT Inventory**: `intent/inventory.live.yaml`
 
@@ -59,19 +59,19 @@ flowchart TD
 
 ## 2. Карта портов и сетевые доступы
 
-Все 6 узлов проброшены через Docker port mapping на внешний IP-адрес сервера `5.228.243.54`:
+Все 6 узлов проброшены через Docker port mapping на внешний IP-адрес сервера `198.51.100.10`:
 
 | Нода Containerlab | Роль | Вендор & ОС | Внутренний IP (OOB) | Внешний SSH Порт | Учетные данные |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`spine-1-a`** | Spine 1 | Arista cEOS 4.32.0F | `172.20.20.11` | `5.228.243.54:2211` | `admin` / `admin` |
-| **`spine-2-a`** | Spine 2 | Arista cEOS 4.32.0F | `172.20.20.12` | `5.228.243.54:2212` | `admin` / `admin` |
-| **`leaf-1-c`** | Leaf 1 | Cisco C8000V 17.03.08a | `172.20.20.21` | `5.228.243.54:2221` | `admin` / `admin` |
-| **`leaf-2-c`** | Leaf 2 | Cisco C8000V 17.03.08a | `172.20.20.22` | `5.228.243.54:2222` | `admin` / `admin` |
-| **`leaf-3-h`** | Leaf 3 | Huawei CE12800 8.180 | `172.20.20.31` | `5.228.243.54:2231` | `admin` / `admin` |
-| **`leaf-4-h`** | Leaf 4 | Huawei CE12800 8.180 | `172.20.20.32` | `5.228.243.54:2232` | `admin` / `admin` |
+| **`spine-1-a`** | Spine 1 | Arista cEOS 4.32.0F | `172.20.20.11` | `198.51.100.10:2211` | `admin` / `admin` |
+| **`spine-2-a`** | Spine 2 | Arista cEOS 4.32.0F | `172.20.20.12` | `198.51.100.10:2212` | `admin` / `admin` |
+| **`leaf-1-c`** | Leaf 1 | Cisco C8000V 17.03.08a | `172.20.20.21` | `198.51.100.10:2221` | `admin` / `admin` |
+| **`leaf-2-c`** | Leaf 2 | Cisco C8000V 17.03.08a | `172.20.20.22` | `198.51.100.10:2222` | `admin` / `admin` |
+| **`leaf-3-h`** | Leaf 3 | Huawei CE12800 8.180 | `172.20.20.31` | `198.51.100.10:2231` | `admin` / `admin` |
+| **`leaf-4-h`** | Leaf 4 | Huawei CE12800 8.180 | `172.20.20.32` | `198.51.100.10:2232` | `admin` / `admin` |
 
 > **Параметры подключения к серверу управления**:  
-> `ssh -p 221 crocdream@5.228.243.54`  
+> `ssh -p 221 crocdream@198.51.100.10`  
 > Каталог лаборатории: `/home/crocdream/clab-quickstart/`
 
 ---
@@ -148,37 +148,37 @@ flowchart TD
 ```yaml
 devices:
   - hostname: spine-1.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2211
     platform: arista_eos
     role: spine
     auth_profile: lab
   - hostname: spine-2.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2212
     platform: arista_eos
     role: spine
     auth_profile: lab
   - hostname: leaf-1.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2221
     platform: cisco_iosxe
     role: leaf
     auth_profile: lab
   - hostname: leaf-2.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2222
     platform: cisco_iosxe
     role: leaf
     auth_profile: lab
   - hostname: leaf-3.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2231
     platform: huawei_vrp
     role: leaf
     auth_profile: lab
   - hostname: leaf-4.croc.lab
-    management_ip: 5.228.243.54
+    management_ip: 198.51.100.10
     management_port: 2232
     platform: huawei_vrp
     role: leaf
@@ -265,7 +265,7 @@ Summary: 6/6 nodes accessible in 2.81s.
 
 ### Быстрый перезапуск через SSH:
 ```bash
-ssh -p 221 crocdream@5.228.243.54
+ssh -p 221 crocdream@198.51.100.10
 cd /home/crocdream/clab-quickstart/
 
 # Переразвертывание всех 6 нод (с сохранением ветки windddkz)

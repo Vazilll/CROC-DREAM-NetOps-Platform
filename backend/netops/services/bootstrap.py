@@ -6,15 +6,16 @@ parallel TCP port probing across fabric nodes.
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
 import json
+import logging
 import os
 import re
 import secrets
 import socket
 import subprocess
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
+from datetime import timedelta
 from typing import Any
 
 from fastapi import HTTPException, Request, status
@@ -37,6 +38,8 @@ from netops.services.notifier import (
 from netops.services.telemetry import check_prometheus_status
 from netops.services.users import _is_expired
 from netops.settings import ApiPrincipal
+
+logger = logging.getLogger(__name__)
 
 _tunnel_proc: Any = None
 
@@ -860,21 +863,32 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
     live_switches: list[dict[str, Any]] = []
     if candidate_ports and not os.environ.get("PYTEST_CURRENT_TEST"):
         import yaml  # noqa: PLC0415
+
         from netops.enums import SnapshotKind  # noqa: PLC0415
         from netops.models import ConfigSnapshot  # noqa: PLC0415
-        from netops.services.discovery import discover_live_switch_via_ssh  # noqa: PLC0415
+        from netops.services.discovery import (  # noqa: PLC0415
+            discover_live_switch_via_ssh,
+            load_platform_profiles,
+        )
 
-        pw_by_plat = {
+        profiles = load_platform_profiles(settings.intent_repo_path)
+        pw_by_plat: dict[str, str] = {
             "cisco_iosxe": req.switch_password_cisco,
             "arista_eos": req.switch_password_arista,
             "huawei_vrp": req.switch_password_huawei,
         }
+        for plat_name, prof in profiles.items():
+            if plat_name not in pw_by_plat:
+                pw_by_plat[plat_name] = str(prof.get("default_password", "admin"))
+
         cand_pws = [
             req.switch_password_cisco,
             req.switch_password_arista,
             req.switch_password_huawei,
+            *(str(p.get("default_password", "admin")) for p in profiles.values()),
             "admin",
         ]
+        cand_pws = list(dict.fromkeys(p for p in cand_pws if p))
 
         def _probe_live_port(p: int) -> dict[str, Any] | None:
             return discover_live_switch_via_ssh(
@@ -915,22 +929,6 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             except Exception:
                 pass
 
-            try:
-                prom_targets = [
-                    {
-                        "targets": [f"{clean_host}:{sw['management_port']}"],
-                        "labels": {"hostname": sw["hostname"], "platform": sw["platform"]},
-                    }
-                    for sw in live_switches
-                ]
-                prom_file = settings.offline_lab_path / "prometheus_targets.json"
-                prom_file.parent.mkdir(parents=True, exist_ok=True)
-                prom_file.write_text(
-                    json.dumps(prom_targets, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            except Exception:
-                pass
-
             if hasattr(container.intents, "_inventory_file"):
                 container.intents._inventory_file = settings.inventory_file
             inventory = container.intents.load_inventory()
@@ -951,6 +949,15 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                             )
                         )
             session.commit()
+            # Цели сборщиков (gnmic / snmp-exporter / node_exporter) — только для доказанных
+            # протоколов; остальные устройства остаются на SSH-опросе.
+            try:
+                from netops.telemetry.targets import refresh_collector_targets  # noqa: PLC0415
+                from netops.toolchain import build_toolchain  # noqa: PLC0415
+
+                refresh_collector_targets(session, build_toolchain(settings), settings)
+            except Exception as exc:
+                logger.warning("Не удалось обновить цели сборщиков телеметрии: %s", exc)
             discovered_switches = [
                 {
                     "hostname": sw["hostname"],

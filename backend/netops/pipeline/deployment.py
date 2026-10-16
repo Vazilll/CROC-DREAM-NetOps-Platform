@@ -193,8 +193,31 @@ class DeploymentExecutor:
             logger.warning("Rollback failed on %s", device.hostname, exc_info=True)
             self._recorder.error("rollback", f"Rollback failed: {exc}", hostname=device.hostname)
             return False
+
+        # Two-Phase Rollback Protection: engage sync_lock on rolled-back device & fabric
+        try:
+            from netops.services.state import get_state_manager  # noqa: PLC0415
+
+            state_mgr = get_state_manager()
+            job_id_str = getattr(plan, "job_id", None) or "rollback"
+            holder_id = f"rollback:{job_id_str}"
+            reason = "Two-Phase Rollback: target rolled back; locked pending SoT reconciliation"
+            if device.id is not None:
+                state_mgr.acquire_sync_lock(f"device:{device.id}", holder=holder_id, ttl=600, reason=reason)
+            state_mgr.acquire_sync_lock(f"device:{device.hostname}", holder=holder_id, ttl=600, reason=reason)
+            if getattr(device, "fabric_id", None):
+                state_mgr.acquire_sync_lock(f"fabric:{device.fabric_id}", holder=holder_id, ttl=600, reason=reason)
+            self._recorder.warning(
+                "rollback",
+                f"Sync lock engaged on device:{device.id} and fabric:{getattr(device, 'fabric_id', None)} (TTL 600s)",
+                hostname=device.hostname,
+            )
+        except Exception as lock_exc:
+            logger.warning("Failed to engage sync_lock on %s: %s", device.hostname, lock_exc)
+
         self._recorder.info("rollback", "Change rolled back", hostname=device.hostname)
         return True
+
 
     def _fail(self, row: JobTarget, device: Device, status: DeviceStatus, reason: str) -> bool:
         row.mark(TargetStatus.FAILED, reason)

@@ -9,6 +9,7 @@ import {
   Share2,
   HelpCircle,
   SlidersHorizontal,
+  BarChart3,
 } from 'lucide-react';
 import type { UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
@@ -47,6 +48,11 @@ export const Header: React.FC<HeaderProps> = ({
   const ghostBtn =
     'h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)]/50 hover:bg-[var(--bg-elevated)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
 
+  const grafanaUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:3000/d/croc-dream-noc`
+      : 'http://localhost:3000/d/croc-dream-noc';
+
   return (
     <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/90 backdrop-blur-md sticky top-0 z-50 px-3 sm:px-5 h-13 flex items-center justify-between gap-2 transition-colors">
       {/* Brand & Connection Status (Geist / Linear Monochrome) */}
@@ -81,6 +87,22 @@ export const Header: React.FC<HeaderProps> = ({
 
       {/* Right Controls: Unified Monochrome Action Strip */}
       <div className="flex items-center gap-1.5 shrink-0">
+        {/* Grafana Enterprise NOC Wallboard Link */}
+        <a
+          href={grafanaUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={ghostBtn}
+          title={
+            locale === 'en'
+              ? 'Open Grafana Enterprise NOC Dashboard (1000 Stands)'
+              : 'Открыть дашборд Grafana Enterprise NOC (1000 стендов)'
+          }
+        >
+          <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
+          <span className="hidden md:inline text-[11px] font-medium">Grafana</span>
+        </a>
+
         {/* AI Copilot Button */}
         <button
           onClick={onToggleCopilot}

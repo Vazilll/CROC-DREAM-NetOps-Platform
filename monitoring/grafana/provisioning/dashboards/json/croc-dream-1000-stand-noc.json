@@ -1,0 +1,195 @@
+{
+  "uid": "croc-dream-noc",
+  "title": "CROC DREAM — Enterprise 1000-Stand NOC",
+  "tags": ["netops", "croc-dream", "multi-fabric", "1000-stands"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 2,
+  "refresh": "15s",
+  "templating": {
+    "list": [
+      {
+        "name": "fabric_id",
+        "label": "Fabric / Stand",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "query": "label_values(netops_device_reachable, fabric_id)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      },
+      {
+        "name": "hostname",
+        "label": "Switch / Node",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "query": "label_values(netops_device_reachable{fabric_id=~\"$fabric_id\"}, hostname)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Fleet Devices by Status (1000-Stand Summary)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_devices_total",
+          "legendFormat": "{{status}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Active Configuration Drift Count",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_drift_devices_total or netops_drift_devices",
+          "legendFormat": "Drifted Devices",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Reachable Nodes Across Stands",
+      "type": "gauge",
+      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "sum(netops_device_reachable{fabric_id=~\"$fabric_id\"})",
+          "legendFormat": "Online Nodes",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Switch CPU Utilization (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_device_cpu_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"} or netops_cpu_usage_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Switch Memory & Uplink Utilization (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_device_memory_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"} or netops_memory_usage_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Memory %",
+          "refId": "A"
+        },
+        {
+          "expr": "netops_device_uplink_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"} or netops_uplink_util_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Uplink %",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "BGP Session Health & Accepted Prefixes",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_bgp_session_up{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} <-> {{peer}} ({{state}})",
+          "refId": "A"
+        },
+        {
+          "expr": "netops_bgp_prefixes_accepted{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Prefixes ({{peer}})",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Multi-Stand Inventory & Sync Status (PostgreSQL SoT)",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "datasource": { "type": "postgres", "uid": "postgres-netops" },
+      "targets": [
+        {
+          "rawSql": "SELECT hostname, fabric_id, site, platform, role, status, management_ip, last_checked_at FROM devices WHERE ('$__all' IN (${fabric_id:singlequote}) OR fabric_id IN (${fabric_id:singlequote})) ORDER BY fabric_id, hostname;",
+          "format": "table",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Stand & Application Server CPU Utilization (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_server_cpu_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Server CPU %",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Stand Server Memory & Disk Utilization (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_server_memory_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Server RAM %",
+          "refId": "A"
+        },
+        {
+          "expr": "netops_server_disk_utilization_percent{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Server Disk %",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Stand Server Network Rate & Load Average",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        {
+          "expr": "netops_server_network_rate_mbps{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Net Rate (Mbps)",
+          "refId": "A"
+        },
+        {
+          "expr": "netops_server_load_1m{fabric_id=~\"$fabric_id\", hostname=~\"$hostname\"}",
+          "legendFormat": "{{hostname}} Load 1m",
+          "refId": "B"
+        }
+      ]
+    }
+  ]
+}

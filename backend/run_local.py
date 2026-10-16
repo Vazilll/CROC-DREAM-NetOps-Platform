@@ -67,6 +67,7 @@ if is_live:
 
 
 import uvicorn
+
 from netops.api.app import create_app
 from netops.db import Base, build_engine, build_session_factory
 from netops.intent.repository import IntentRepository
@@ -108,7 +109,8 @@ def init_local_environment() -> None:
     logger.info("Initializing database schema at %s...", settings.database_url)
     Base.metadata.create_all(engine)
     with engine.begin() as conn:
-        from sqlalchemy import inspect as sa_inspect, text as sa_text  # noqa: PLC0415
+        from sqlalchemy import inspect as sa_inspect  # noqa: PLC0415
+        from sqlalchemy import text as sa_text
 
         user_cols = {c["name"] for c in sa_inspect(conn).get_columns("users")}
         if "allowed_system" not in user_cols:
@@ -135,6 +137,17 @@ def init_local_environment() -> None:
             conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_code VARCHAR(32)"))
         if "verification_expires_at" not in user_cols:
             conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_expires_at TIMESTAMP"))
+
+        device_cols = {c["name"] for c in sa_inspect(conn).get_columns("devices")}
+        if "fabric_id" not in device_cols:
+            conn.execute(
+                sa_text("ALTER TABLE devices ADD COLUMN fabric_id VARCHAR(64) DEFAULT 'croc-dc1-pod1'")
+            )
+            conn.execute(
+                sa_text("CREATE INDEX IF NOT EXISTS ix_devices_fabric_id ON devices (fabric_id)")
+            )
+        if "site" not in device_cols:
+            conn.execute(sa_text("ALTER TABLE devices ADD COLUMN site VARCHAR(64)"))
 
     # Make sure lab running configs exist
     lab_dir = Path(settings.offline_lab_path)
@@ -212,11 +225,11 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
                     from netops.telemetry import collector  # noqa: PLC0415
 
                     toolchain = build_toolchain(settings)
-                    samples = collector.collect(session, toolchain)
-                    collector.store(
-                        session,
-                        samples,
-                        retention=timedelta(days=settings.metrics_retention_days),
+                    samples = collector.collect(
+                        session, toolchain, include_fabric_label=True
+                    )
+                    collector.publish(
+                        samples, ttl_seconds=settings.metrics_interval_seconds * 3
                     )
         except Exception:
             logger.exception("Beat: startup cleanup/metrics failed")
@@ -232,11 +245,11 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
                         from netops.telemetry import collector  # noqa: PLC0415
 
                         toolchain = build_toolchain(settings)
-                        samples = collector.collect(session, toolchain)
-                        collector.store(
-                            session,
-                            samples,
-                            retention=timedelta(days=settings.metrics_retention_days),
+                        samples = collector.collect(
+                            session, toolchain, include_fabric_label=True
+                        )
+                        collector.publish(
+                            samples, ttl_seconds=settings.metrics_interval_seconds * 3
                         )
                     except Exception:
                         logger.warning("Beat: metrics collection skipped due to error")

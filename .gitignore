@@ -54,3 +54,11 @@ intent/inventory.live.yaml
 intent/diffs/*.cfg
 backend/.env*
 !backend/.env.example
+
+# Containerlab runtime artifacts and binary dumps
+lab/clab-*/
+lab/clab-croc-hybrid-fabric/
+lab/clab-dc-clos-cisco-arista-huawei/
+*.log.gz
+.checkpoints/
+persist/

@@ -14,6 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
+# gnmic нужен платформе для проверки gNMI (gRPC Capabilities) перед переводом устройства на поток.
+COPY --from=ghcr.io/openconfig/gnmic:0.49.0 /app/gnmic /usr/local/bin/gnmic
 
 WORKDIR /app
 

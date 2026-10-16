@@ -1,0 +1,63 @@
+platform: eltex_mes
+vendor: Eltex
+default_password: admin
+default_interface: gigabitethernet 1/0/1
+offline_ports: [2241, 2242]
+offline_interfaces:
+  - gigabitethernet 1/0/1
+  - gigabitethernet 1/0/2
+ssh_banners:
+  - eltex
+  - mes
+version_signatures:
+  - MES
+  - Eltex
+interface_prefixes:
+  - gigabitethernet
+  - tengigabitethernet
+  - Loopback
+  - oob
+lldp_port_prefixes:
+  - gi
+  - te
+commands:
+  version: show version
+  memory: show memory
+  cpu: show cpu utilization
+  running_config: show running-config
+  hostname_filter: show running-config | include hostname
+  interfaces_brief: show ip interface brief
+  lldp_neighbors: show lldp neighbors
+telemetry:
+  cpu_pct:
+    command: show cpu utilization
+    parser: parse_eltex_cpu
+  memory_pct:
+    command: show memory
+    parser: parse_eltex_memory
+  uplink_util_pct:
+    command: show interfaces | include rate
+    parser: max_cisco_link_utilization
+gnmi:
+  default_port: 6030
+  check_command: show gnmi
+  match_tokens:
+    - enabled
+    - active
+    - running
+snmp:
+  base_port: 161
+  clab_offset: -600
+  hardware_module: cisco_cpu
+exporter:
+  port: 9100
+  path: /metrics
+protocol_priority:
+  - snmp
+  - ssh_cli
+emergency_commands:
+  reset_bgp_sessions: clear ip bgp *
+  rollback_last_commit: reload
+  restart_services: clear arp-cache
+  reboot: reload
+  default: show version

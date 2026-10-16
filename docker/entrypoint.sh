@@ -6,9 +6,10 @@ echo "  CROC DREAM NetOps Platform — All-in-One Container Boot"
 echo "============================================================"
 
 mkdir -p /app/lab/running
-if [ ! -f /app/lab/running/prometheus_targets.json ]; then
-    echo "[]" > /app/lab/running/prometheus_targets.json
-fi
+for f in prometheus_targets.json exporter_targets.json; do
+    [ -f "/app/lab/running/$f" ] || echo "[]" > "/app/lab/running/$f"
+done
+[ -f /app/lab/running/gnmic_targets.yaml ] || echo "{}" > /app/lab/running/gnmic_targets.yaml
 if [ ! -d /app/.git ]; then
     git init -b main /app && git config --global --add safe.directory /app
 fi

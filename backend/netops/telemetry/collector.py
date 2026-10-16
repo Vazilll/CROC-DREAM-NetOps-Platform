@@ -2,60 +2,77 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from datetime import datetime, timedelta
+from datetime import datetime
+from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from netops.db import utcnow
-from netops.enums import DeviceStatus, JobStatus, JobType
+from netops.enums import DeviceRole, DeviceStatus, JobStatus, JobType, Platform
 from netops.intent import IntentValidationError, InventoryDevice
-from netops.models import Device, Job, MetricSample
+from netops.models import Device, Job
 from netops.network.base import HealthExpectations
+from netops.services.state import get_state_manager
+from netops.services.telemetry import (
+    record_live_metric,
+    resolve_device_ports,
+)
 from netops.telemetry import metrics
 from netops.telemetry.metrics import Sample
 from netops.toolchain import Toolchain
 
 logger = logging.getLogger(__name__)
 
+LATEST_SNAPSHOT_KEY = "netops:telemetry:latest"
+
 
 # Один проход сбора: счётчики из базы и опрос стенда. Все замеры пишутся с одним
 # collected_at, поэтому /metrics отдаёт срез последнего сбора.
-def collect(session: Session, toolchain: Toolchain | None = None) -> list[Sample]:
-    dev_samples = device_samples(session, toolchain) if toolchain is not None else []
+def collect(
+    session: Session,
+    toolchain: Toolchain | None = None,
+    *,
+    include_fabric_label: bool = False,
+    max_workers: int = 16,
+) -> list[Sample]:
+    dev_samples = (
+        device_samples(
+            session,
+            toolchain,
+            max_workers=max_workers,
+            include_fabric_label=include_fabric_label,
+        )
+        if toolchain is not None
+        else []
+    )
     samples = platform_samples(session)
     samples.extend(dev_samples)
     return samples
 
 
-def store(session: Session, samples: Sequence[Sample], *, retention: timedelta) -> datetime:
+# Публикует срез последнего сбора в Redis (StateManager). Историю здесь не храним:
+# Prometheus скрейпит /metrics и пишет ряды в VictoriaMetrics. TTL нужен, чтобы
+# /metrics не отдавал «вечно живые» значения, если сборщик остановился.
+def publish(samples: Sequence[Sample], *, ttl_seconds: int | None = None) -> datetime:
     collected_at = utcnow()
-    session.add_all(
-        MetricSample(
-            name=sample.name,
-            labels=dict(sample.labels),
-            value=sample.value,
-            collected_at=collected_at,
-        )
-        for sample in samples
+    get_state_manager().set_json(
+        LATEST_SNAPSHOT_KEY,
+        {
+            "collected_at": collected_at.isoformat(),
+            "samples": [[s.name, s.value, dict(s.labels)] for s in samples],
+        },
+        ex=ttl_seconds,
     )
-    session.execute(
-        delete(MetricSample).where(MetricSample.collected_at < collected_at - retention)
-    )
-    session.commit()
     return collected_at
 
 
-def latest(session: Session) -> tuple[list[Sample], datetime | None]:
-    collected_at = session.scalar(select(func.max(MetricSample.collected_at)))
-    if collected_at is None:
+def latest() -> tuple[list[Sample], datetime | None]:
+    data = get_state_manager().get_json(LATEST_SNAPSHOT_KEY)
+    if not data:
         return [], None
-    rows = session.scalars(
-        select(MetricSample)
-        .where(MetricSample.collected_at == collected_at)
-        .order_by(MetricSample.id)
-    ).all()
-    return [Sample(row.name, row.value, dict(row.labels)) for row in rows], collected_at
+    samples = [Sample(name, float(value), dict(labels)) for name, value, labels in data["samples"]]
+    return samples, datetime.fromisoformat(data["collected_at"])
 
 
 def platform_samples(session: Session) -> list[Sample]:
@@ -82,6 +99,7 @@ def platform_samples(session: Session) -> list[Sample]:
         for status, count in counts.items()
     )
     samples.append(Sample(metrics.DRIFT_DEVICES, float(counts[DeviceStatus.DRIFT_DETECTED])))
+    samples.append(Sample(metrics.DRIFT_DEVICES_TOTAL, float(counts[DeviceStatus.DRIFT_DETECTED])))
 
     job_counts = session.execute(
         select(Job.type, Job.status, func.count()).group_by(Job.type, Job.status)
@@ -111,27 +129,171 @@ def platform_samples(session: Session) -> list[Sample]:
     return samples
 
 
+_SERVER_METRICS: tuple[tuple[str, str], ...] = (
+    ("cpu_pct", metrics.SERVER_CPU_UTIL),
+    ("memory_pct", metrics.SERVER_MEMORY_UTIL),
+    ("disk_util_pct", metrics.SERVER_DISK_UTIL),
+    ("network_rate_mbps", metrics.SERVER_NETWORK_RATE),
+    ("load_1m", metrics.SERVER_LOAD_1M),
+)
+
+
+# Отдаём только то, что сервер реально вернул: пропуск лучше выдуманного значения.
+def _emit_server_samples(
+    health: Any,
+    labels: dict[str, str],
+    hostname: str,
+) -> list[Sample]:
+    res: list[Sample] = []
+    for attr, metric_name in _SERVER_METRICS:
+        raw = getattr(health, attr, None)
+        if raw is None:
+            continue
+        val = float(raw)
+        record_live_metric(hostname, attr, val)
+        res.append(Sample(metric_name, val, labels))
+    return res
+
+
+def _emit_switch_samples(
+    health: Any,
+    labels: dict[str, str],
+    hostname: str,
+) -> list[Sample]:
+    res: list[Sample] = []
+    if health.cpu_pct is not None:
+        val = float(health.cpu_pct)
+        res.append(Sample(metrics.CPU_USAGE, val, labels))
+        res.append(Sample(metrics.DEVICE_CPU_UTIL, val, labels))
+        record_live_metric(hostname, "cpu_pct", val)
+    if health.memory_pct is not None:
+        val = float(health.memory_pct)
+        res.append(Sample(metrics.MEMORY_USAGE, val, labels))
+        res.append(Sample(metrics.DEVICE_MEMORY_UTIL, val, labels))
+        record_live_metric(hostname, "memory_pct", val)
+    if health.uplink_util_pct is not None:
+        val = float(health.uplink_util_pct)
+        res.append(Sample(metrics.UPLINK_UTIL, val, labels))
+        res.append(Sample(metrics.DEVICE_UPLINK_UTIL, val, labels))
+        record_live_metric(hostname, "uplink_util_pct", val)
+
+    for peer, session_state in health.bgp_sessions.items():
+        peer_labels = labels | {"peer": peer, "state": session_state.state}
+        res.append(Sample(metrics.BGP_SESSION_UP, float(session_state.established), peer_labels))
+        if session_state.prefixes_accepted is not None:
+            res.append(
+                Sample(
+                    metrics.BGP_PREFIXES_ACCEPTED,
+                    float(session_state.prefixes_accepted),
+                    labels | {"peer": peer},
+                )
+            )
+    res.extend(
+        Sample(
+            metrics.INTERFACE_UP,
+            float(state.is_up),
+            labels | {"interface": name, "state": str(state)},
+        )
+        for name, state in health.interfaces.items()
+    )
+    res.extend(
+        Sample(metrics.PING_LOSS, loss, labels | {"peer": peer})
+        for peer, loss in health.ping_loss_percent.items()
+    )
+    return res
+
+
+def _is_server_device(device: Device) -> bool:
+    return (
+        device.platform == Platform.LINUX_SERVER
+        or getattr(device, "role", None) == DeviceRole.SERVER
+        or "server" in str(device.platform).lower()
+        or "server" in str(device.role).lower()
+    )
+
+
+def _build_probe_tasks(
+    devices: list[Device],
+    snapshot: Any,
+    toolchain: Toolchain,
+    include_fabric_label: bool,
+) -> list[
+    tuple[Device, dict[str, str], HealthExpectations, Any, Exception | None, dict[str, int]]
+]:
+    probe_tasks = []
+    for device in devices:
+        intent = snapshot.intent_for(device.hostname) if snapshot is not None else None
+        expectations = (
+            HealthExpectations.from_intent(intent)
+            if intent is not None
+            else HealthExpectations(interfaces={}, bgp_peers=frozenset())
+        )
+        labels = {"hostname": device.hostname}
+        if include_fabric_label:
+            labels["fabric_id"] = getattr(device, "fabric_id", "default") or "default"
+        resolved_ports = resolve_device_ports(
+            str(device.management_ip),
+            management_port=device.management_port,
+            platform=device.platform,
+        )
+        try:
+            target = toolchain.target_for(InventoryDevice.model_validate(device))
+            probe_tasks.append((device, labels, expectations, target, None, resolved_ports))
+        except Exception as exc:
+            probe_tasks.append((device, labels, expectations, None, exc, resolved_ports))
+    return probe_tasks
+
+
 # Опрос стенда: что заявлено в intent, то и проверяем. Устройство, которое не ответило,
 # отмечаем недоступным и идём дальше — сбор метрик не должен падать из-за одной ноды.
-def device_samples(session: Session, toolchain: Toolchain) -> list[Sample]:
+def device_samples(
+    session: Session,
+    toolchain: Toolchain,
+    *,
+    max_workers: int = 16,
+    include_fabric_label: bool = False,
+) -> list[Sample]:
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    snapshot = None
     try:
         snapshot = toolchain.intents.load()
     except IntentValidationError as exc:
-        logger.warning("Телеметрия пропущена: intent не проходит проверку (%s)", exc)
+        logger.warning(
+            "Intent содержит предупреждения (%s) — продолжаем сбор базовой телеметрии", exc
+        )
+
+    devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
+    if not devices:
         return []
+
+    probe_tasks = _build_probe_tasks(devices, snapshot, toolchain, include_fabric_label)
+
+    def _run_probe(
+        item: tuple[
+            Device, dict[str, str], HealthExpectations, Any, Exception | None, dict[str, int]
+        ],
+    ):
+        dev, lbls, exp, tgt, prep_err, ports = item
+        if prep_err is not None or tgt is None:
+            return dev, lbls, None, prep_err, ports
+        try:
+            return dev, lbls, toolchain.health_probe.snapshot(tgt, exp), None, ports
+        except Exception as exc:
+            return dev, lbls, None, exc, ports
+
+    workers = max(1, min(max_workers, len(probe_tasks)))
+    if workers == 1:
+        results = [_run_probe(item) for item in probe_tasks]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            results = list(pool.map(_run_probe, probe_tasks))
 
     samples: list[Sample] = []
     status_changed = False
-    for device in session.scalars(select(Device).order_by(Device.hostname)).all():
-        intent = snapshot.intent_for(device.hostname)
-        if intent is None:
-            continue
-        labels = {"hostname": device.hostname}
-        try:
-            target = toolchain.target_for(InventoryDevice.model_validate(device))
-            health = toolchain.health_probe.snapshot(target, HealthExpectations.from_intent(intent))
-        except Exception as exc:
-            logger.info("Телеметрия с %s не снята: %s", device.hostname, exc)
+    for device, labels, health, err, _ports in results:
+        if err is not None or health is None:
+            logger.info("Телеметрия с %s не снята: %s", device.hostname, err)
             if device.status not in (DeviceStatus.UNREACHABLE, DeviceStatus.UNKNOWN):
                 device.status = DeviceStatus.UNREACHABLE
                 status_changed = True
@@ -139,37 +301,11 @@ def device_samples(session: Session, toolchain: Toolchain) -> list[Sample]:
             continue
 
         samples.append(Sample(metrics.DEVICE_REACHABLE, 1.0, labels))
-        if health.cpu_pct is not None:
-            samples.append(Sample(metrics.CPU_USAGE, float(health.cpu_pct), labels))
-        if health.memory_pct is not None:
-            samples.append(Sample(metrics.MEMORY_USAGE, float(health.memory_pct), labels))
-        if health.uplink_util_pct is not None:
-            samples.append(Sample(metrics.UPLINK_UTIL, float(health.uplink_util_pct), labels))
-        for peer, session_state in health.bgp_sessions.items():
-            peer_labels = labels | {"peer": peer, "state": session_state.state}
-            samples.append(
-                Sample(metrics.BGP_SESSION_UP, float(session_state.established), peer_labels)
-            )
-            if session_state.prefixes_accepted is not None:
-                samples.append(
-                    Sample(
-                        metrics.BGP_PREFIXES_ACCEPTED,
-                        float(session_state.prefixes_accepted),
-                        labels | {"peer": peer},
-                    )
-                )
-        samples.extend(
-            Sample(
-                metrics.INTERFACE_UP,
-                float(state.is_up),
-                labels | {"interface": name, "state": str(state)},
-            )
-            for name, state in health.interfaces.items()
-        )
-        samples.extend(
-            Sample(metrics.PING_LOSS, loss, labels | {"peer": peer})
-            for peer, loss in health.ping_loss_percent.items()
-        )
+        if _is_server_device(device):
+            samples.extend(_emit_server_samples(health, labels, device.hostname))
+        else:
+            samples.extend(_emit_switch_samples(health, labels, device.hostname))
+
     if status_changed:
         session.commit()
     return samples

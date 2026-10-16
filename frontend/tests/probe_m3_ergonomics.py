@@ -11,9 +11,9 @@ Validates:
 5. 0 console errors and 0 page exceptions
 """
 
-import sys
 import json
-import time
+import sys
+
 from playwright.sync_api import sync_playwright
 
 if hasattr(sys.stdout, "reconfigure"):

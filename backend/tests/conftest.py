@@ -66,6 +66,21 @@ class RecordingDispatcher:
         self.job_ids.append(job_id)
 
 
+@pytest.fixture(autouse=True)
+def _reset_shared_state() -> Iterator[None]:
+    from netops.services.ai_guard import _active_injections  # noqa: PLC0415
+    from netops.services.state import reset_state_manager  # noqa: PLC0415
+    from netops.settings import get_settings  # noqa: PLC0415
+
+    get_settings.cache_clear()
+    _active_injections.clear()
+    reset_state_manager()
+    yield
+    get_settings.cache_clear()
+    _active_injections.clear()
+    reset_state_manager()
+
+
 def auth(role: UserRole) -> dict[str, str]:
     return {"Authorization": f"Bearer {TOKENS[role]}"}
 

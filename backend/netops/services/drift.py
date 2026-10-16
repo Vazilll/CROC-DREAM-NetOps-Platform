@@ -16,6 +16,8 @@ def latest_drift_records(
     since: datetime | None = None,
     until: datetime | None = None,
     status: DriftStatus | None = None,
+    fabric_id: str | None = None,
+    site: str | None = None,
 ) -> Sequence[DriftRecord]:
     ranked = select(
         DriftRecord.id,
@@ -41,6 +43,10 @@ def latest_drift_records(
     )
     if status is not None:
         query = query.where(DriftRecord.status == status)
+    if fabric_id is not None:
+        query = query.where((Device.fabric_id == fabric_id) | (Device.site == fabric_id))
+    if site is not None:
+        query = query.where((Device.site == site) | (Device.fabric_id == site))
     return session.scalars(query).all()
 
 

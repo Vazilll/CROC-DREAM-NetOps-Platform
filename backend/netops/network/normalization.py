@@ -10,6 +10,7 @@ from typing import Any
 import yaml
 
 from netops.enums import Platform
+from netops.intent.models import DiffFilters
 
 # Правила Ани: что выбрасывать из конфигов перед сравнением и какие секции сравнивать.
 DIFF_FILTERS_PATH = Path(__file__).with_name("diff_filters.yaml")
@@ -30,50 +31,69 @@ class NormalizationRules:
 
 
 class ConfigNormalizer:
-    def __init__(self, rules: Mapping[Platform, NormalizationRules] | None = None) -> None:
+    def __init__(self, rules: Mapping[Platform | str, NormalizationRules] | None = None) -> None:
         self._rules = dict(rules) if rules is not None else dict(_default_rules())
 
     @classmethod
     def from_file(cls, path: Path | None) -> ConfigNormalizer:
         return cls(load_diff_filters(path) if path is not None else None)
 
-    def rules_for(self, platform: Platform) -> NormalizationRules:
+    def rules_for(self, platform: Platform | str) -> NormalizationRules:
+        if platform in self._rules:
+            return self._rules[platform]
+        if isinstance(platform, str):
+            try:
+                enum_plat = Platform(platform)
+                if enum_plat in self._rules:
+                    return self._rules[enum_plat]
+            except ValueError:
+                pass
         return self._rules[platform]
 
     def normalize(
         self,
-        platform: Platform,
+        platform: Platform | str,
         text: str,
         *,
         is_intended: bool = False,
         managed_only: bool = True,
     ) -> str:
-        rules = self._rules[platform]
-        entries = list(_filter_lines(text, rules, is_intended=is_intended, managed_only=managed_only))
+        rules = self.rules_for(platform)
+        entries = list(
+            _filter_lines(text, rules, is_intended=is_intended, managed_only=managed_only)
+        )
         if not entries:
             return ""
         return "\n".join(_reindent(entries, rules.indent_unit)) + "\n"
 
 
 @lru_cache(maxsize=1)
-def _default_rules() -> Mapping[Platform, NormalizationRules]:
+def _default_rules() -> Mapping[Platform | str, NormalizationRules]:
     return load_diff_filters(DIFF_FILTERS_PATH)
 
 
-def load_diff_filters(path: Path) -> dict[Platform, NormalizationRules]:
+def load_diff_filters(path: Path) -> dict[Platform | str, NormalizationRules]:
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     platforms = raw.get("platforms") if isinstance(raw, dict) else None
     if not isinstance(platforms, dict):
         raise ValueError(f"{path}: expected a 'platforms' mapping")
-    implicit = (raw.get("common") or {}).get("implicit_lines_to_drop_from_intended") or {}
-    rules = {
-        Platform(name): _platform_rules(spec or {}, implicit.get(name) or ())
-        for name, spec in platforms.items()
-    }
-    missing = sorted(set(Platform) - rules.keys())
+    parsed = DiffFilters.model_validate(raw)
+    platforms = parsed.platforms
+    implicit = parsed.common.implicit_lines_to_drop_from_intended
+
+    rules: dict[Platform | str, NormalizationRules] = {}
+    for name, spec in platforms.items():
+        try:
+            plat_key: Platform | str = Platform(name)
+        except ValueError:
+            plat_key = str(name)
+        rules[plat_key] = _platform_rules(spec.model_dump(), implicit.get(str(name)) or ())
+
+    missing = sorted(set(Platform) - set(rules.keys()))
     if missing:
         raise ValueError(f"{path}: no rules for platform(s) {', '.join(missing)}")
     return rules
+
 
 
 def _platform_rules(spec: Mapping[str, Any], implicit: Iterable[str]) -> NormalizationRules:
@@ -103,7 +123,7 @@ def _filter_lines(
     text: str,
     rules: NormalizationRules,
     *,
-    is_intended: bool = False,  # noqa: ARG001
+    is_intended: bool = False,
     managed_only: bool = True,
 ) -> Iterator[tuple[int, str]]:
     skip_deeper_than: int | None = None

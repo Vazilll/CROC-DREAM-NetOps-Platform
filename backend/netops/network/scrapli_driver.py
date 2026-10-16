@@ -10,6 +10,7 @@ import concurrent.futures
 import logging
 import re
 from collections.abc import Mapping, Sequence
+from types import MappingProxyType
 
 from netops.enums import Platform
 from netops.network.base import (
@@ -24,6 +25,35 @@ from netops.network.base import (
 from netops.services.telemetry import collect_metrics_from_cli
 
 logger = logging.getLogger(__name__)
+
+ARISTA_SESSION = "NETOPS_DEPLOY"
+HUAWEI_COMMIT_LIST = "display configuration commit list"
+_COMMIT_ID = re.compile(r"\b(\d{6,})\b")
+
+SCRAPLI_PLATFORMS: Mapping[Platform, str] = MappingProxyType(
+    {
+        Platform.CISCO_IOSXE: "cisco_iosxe",
+        Platform.ARISTA_EOS: "arista_eos",
+        Platform.HUAWEI_VRP: "huawei_vrp",
+        Platform.JUNIPER_JUNOS: "juniper_junos",
+        Platform.ELTEX_ESR: "eltex_esr",
+        Platform.ELTEX_MES: "eltex_mes",
+        Platform.YADRO_KORNFE: "yadro_kornfe",
+        Platform.LINUX_SERVER: "linux_server",
+    }
+)
+
+TRANSACTIONAL_PLATFORMS = frozenset(
+    {Platform.CISCO_IOSXE, Platform.ARISTA_EOS, Platform.HUAWEI_VRP}
+)
+
+
+def _latest_commit_id(output: str) -> str | None:
+    for line in output.splitlines():
+        match = _COMMIT_ID.search(line)
+        if match:
+            return match.group(1)
+    return None
 
 
 class _ScrapliResponse:
@@ -110,7 +140,7 @@ class _ParamikoConnAdapter:
                 lambda title, instructions, prompt_list: [password for _ in prompt_list],
             )
 
-    def __enter__(self):
+    def __enter__(self):  # noqa: PLR0912, PLR0915
         import os  # noqa: PLC0415
         import time  # noqa: PLC0415
 
@@ -153,7 +183,10 @@ class _ParamikoConnAdapter:
                     sock is None
                     and clab_host
                     and self.target.host == clab_host
-                    and ("protocol banner" in str(exc).lower() or "no existing session" in str(exc).lower())
+                    and (
+                        "protocol banner" in str(exc).lower()
+                        or "no existing session" in str(exc).lower()
+                    )
                 ):
                     sock = self._open_jump_channel(
                         paramiko, "auto", self.target.host, self.target.port
@@ -256,11 +289,12 @@ class _ParamikoConnAdapter:
 
 
 class ScrapliNetworkDriver:
-    """Implements ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
+    """ConfigCollector, ConfigDeployer, and HealthProbe via Scrapli with Paramiko fallback."""
 
     def __init__(self, max_workers: int = 6, timeout_socket: int = 15) -> None:
         self.max_workers = max_workers
         self.timeout_socket = timeout_socket
+        self._commit_ids: dict[str, str | None] = {}
 
     def _get_connection(self, target: DeviceTarget):
         return _ParamikoConnAdapter(
@@ -302,17 +336,28 @@ class ScrapliNetworkDriver:
                         raise RuntimeError(f"Command '{cmd}' failed: {response.result}")
                     if not response.result.strip():
                         raise RuntimeError("Empty response from device")
-                    collect_metrics_from_cli(
-                        target.hostname,
-                        target.platform.value,
-                        lambda c: conn.send_command(c).result,
-                    )
+                    from netops.telemetry.targets import is_externally_collected  # noqa: PLC0415
+
+                    if not is_externally_collected(target.hostname):
+                        collect_metrics_from_cli(
+                            target.hostname,
+                            target.platform.value,
+                            lambda c: conn.send_command(c).result,
+                        )
                     return response.result
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 last_exc = exc
-                logger.warning("Fetch attempt %d/2 failed for %s: %s", attempt + 1, target.hostname, exc)
+                logger.warning(
+                    "Fetch attempt %d/2 failed for %s: %s", attempt + 1, target.hostname, exc
+                )
                 err_str = str(exc).lower()
-                if any(x in err_str for x in ("no existing session", "protocol banner", "connection refused", "timed out")):
+                fast_fail = (
+                    "no existing session",
+                    "protocol banner",
+                    "connection refused",
+                    "timed out",
+                )
+                if any(x in err_str for x in fast_fail):
                     break
                 time.sleep(1.0)
         raise RuntimeError(str(last_exc))
@@ -325,45 +370,54 @@ class ScrapliNetworkDriver:
         ]
         if not lines:
             return
+        if target.platform not in TRANSACTIONAL_PLATFORMS:
+            raise RuntimeError(
+                f"Транзакционное применение для {target.platform.value} не реализовано: "
+                "нужны commit/rollback этой платформы, иначе откат не гарантирован"
+            )
 
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_configs(lines)
                 conn.send_command(f"commit confirmed {confirm_timeout}")
             elif target.platform == Platform.ARISTA_EOS:
-                session_name = "NETOPS_DEPLOY"
-                conn.send_command(f"configure session {session_name}")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_configs(lines)
                 conn.send_command(f"commit timer {confirm_timeout}")
             elif target.platform == Platform.HUAWEI_VRP:
+                self._commit_ids[target.hostname] = _latest_commit_id(
+                    conn.send_command(HUAWEI_COMMIT_LIST).result
+                )
                 conn.send_configs(lines)
                 conn.send_command("commit")
             else:
                 conn.send_configs(lines)
 
     def confirm(self, target: DeviceTarget) -> None:
+        if target.platform is Platform.HUAWEI_VRP:
+            self._commit_ids.pop(target.hostname, None)
+            return
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_command("commit")
                 conn.send_command("write memory")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_command("commit")
                 conn.send_command("write memory")
-            elif target.platform == Platform.HUAWEI_VRP:
-                conn.send_command("save\ny")
             else:
                 conn.send_command("write memory")
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
+        if target.platform is Platform.HUAWEI_VRP:
+            self._rollback_huawei(target)
+            return
         with self._get_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
                 conn.send_command("abort")
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command("configure session NETOPS_DEPLOY")
+                conn.send_command(f"configure session {ARISTA_SESSION}")
                 conn.send_command("abort")
-            elif target.platform == Platform.HUAWEI_VRP:
-                conn.send_command("quit")
 
             rollback_lines = [
                 line.strip()
@@ -373,7 +427,24 @@ class ScrapliNetworkDriver:
             if rollback_lines:
                 conn.send_configs(rollback_lines)
 
-    def snapshot(
+    def _rollback_huawei(self, target: DeviceTarget) -> None:
+        commit_id = self._commit_ids.pop(target.hostname, None)
+        command = (
+            f"rollback configuration to commit-id {commit_id}"
+            if commit_id
+            else "rollback configuration last 1"
+        )
+        with self._get_connection(target) as conn:
+            conn.send_command("system-view")
+            conn.send_command(command)
+            conn.send_command("commit")
+
+    def run_read_only(self, target: DeviceTarget, command: str) -> str:
+        with self._get_connection(target) as conn:
+            response = conn.send_command(command)
+        return str(response.result)
+
+    def snapshot(  # noqa: PLR0912, PLR0915
         self, target: DeviceTarget, expected: HealthExpectations | None
     ) -> HealthSnapshot:
         bgp_sessions: dict[str, BgpSessionState] = {}
@@ -419,9 +490,13 @@ class ScrapliNetworkDriver:
                         continue
                     last = parts[-1]
                     if last.isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(last))
+                        bgp_sessions[peer_ip] = BgpSessionState(
+                            "Established", prefixes_accepted=int(last)
+                        )
                     elif len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState("Established", prefixes_accepted=int(parts[-2]))
+                        bgp_sessions[peer_ip] = BgpSessionState(
+                            "Established", prefixes_accepted=int(parts[-2])
+                        )
                     else:
                         bgp_sessions[peer_ip] = BgpSessionState(last, prefixes_accepted=0)
 
@@ -430,7 +505,9 @@ class ScrapliNetworkDriver:
                     parts = line.split()
                     if target.platform == Platform.CISCO_IOSXE and len(parts) >= 6:
                         if parts[0].startswith(("Gigabit", "Loop")):
-                            interfaces[parts[0]] = InterfaceState(status=parts[4], protocol=parts[5])
+                            interfaces[parts[0]] = InterfaceState(
+                                status=parts[4], protocol=parts[5]
+                            )
                     elif (
                         len(parts) >= 4
                         and parts[0].startswith(("Ethernet", "Loop", "Management"))
@@ -439,10 +516,16 @@ class ScrapliNetworkDriver:
                         proto = "up" if "up" in parts[3].lower() else "down"
                         interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
 
-            cli_metrics = collect_metrics_from_cli(
-                target.hostname,
-                target.platform.value,
-                lambda c: conn.send_command(c).result,
+            from netops.telemetry.targets import is_externally_collected  # noqa: PLC0415
+
+            cli_metrics = (
+                {}
+                if is_externally_collected(target.hostname)
+                else collect_metrics_from_cli(
+                    target.hostname,
+                    target.platform.value,
+                    lambda c: conn.send_command(c).result,
+                )
             )
 
             if expected:
@@ -454,8 +537,13 @@ class ScrapliNetworkDriver:
                     else:
                         ping_cmd = f"ping {peer} count 5"
                     ping_out = conn.send_command(ping_cmd).result
-                    rate_match = re.search(r"(?:Success rate is |packet loss, |transmitted, \d+ received, )(\d+)%", ping_out)
-                    ping_losses[peer] = (100.0 - float(rate_match.group(1))) if rate_match else 0.0
+                    rate_match = re.search(
+                        r"(?:Success rate is |packet loss, |transmitted, \d+ received, )(\d+)%",
+                        ping_out,
+                    )
+                    ping_losses[peer] = (
+                        (100.0 - float(rate_match.group(1))) if rate_match else 0.0
+                    )
 
         return HealthSnapshot(
             bgp_sessions=bgp_sessions,
@@ -464,4 +552,7 @@ class ScrapliNetworkDriver:
             cpu_pct=cli_metrics.get("cpu_pct"),
             memory_pct=cli_metrics.get("memory_pct"),
             uplink_util_pct=cli_metrics.get("uplink_util_pct"),
+            disk_util_pct=cli_metrics.get("disk_util_pct"),
+            network_rate_mbps=cli_metrics.get("network_rate_mbps"),
+            load_1m=cli_metrics.get("load_1m"),
         )

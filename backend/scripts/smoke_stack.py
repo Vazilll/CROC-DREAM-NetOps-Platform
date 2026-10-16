@@ -202,10 +202,15 @@ class StackSmoke:
                 error: object = exc
             else:
                 error = None
-                if states.get("netops-api") == "up":
+                ours = {
+                    job: health
+                    for job, health in states.items()
+                    if "netops" in job or "backend" in job
+                }
+                if ours and all(health == "up" for health in ours.values()):
                     return ", ".join(f"{job}: {health}" for job, health in sorted(states.items()))
             if time.monotonic() > deadline:
-                raise SmokeError(f"цель netops-api не поднялась: {states or error}")
+                raise SmokeError(f"цели netops не поднялись: {states or error}")
             time.sleep(5)
 
     def _wait_success(self, job_id: str) -> dict[str, Any]:

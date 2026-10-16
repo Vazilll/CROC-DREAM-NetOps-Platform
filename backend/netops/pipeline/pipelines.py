@@ -108,19 +108,50 @@ class DryRunPipeline(_BasePipeline):
         self._auto_commit_diff_to_git(job)
 
 
-# Устройства обновляем по одному; после первой ошибки раскатку останавливаем.
+def order_targets_into_waves(targets: list[JobTarget]) -> list[tuple[str, list[JobTarget]]]:
+    """Order deployment targets into topological waves: Canary Leaf -> Leaf Batch -> Spine Core."""
+    leaves: list[JobTarget] = []
+    spines: list[JobTarget] = []
+    for row in targets:
+        role_val = str(getattr(getattr(row.device, "role", None), "value", getattr(row.device, "role", ""))).lower()
+        if role_val == "spine" or ("spine" in (row.hostname or "").lower() and role_val != "leaf"):
+            spines.append(row)
+        else:
+            leaves.append(row)
+
+    waves: list[tuple[str, list[JobTarget]]] = []
+    if leaves:
+        waves.append(("wave-1-canary-leaf", [leaves[0]]))
+        if len(leaves) > 1:
+            waves.append(("wave-2-leaf-batch", leaves[1:]))
+    if spines:
+        waves.append(("wave-3-spine-core", spines))
+    return waves
+
+
+# Устройства обновляем волнами (Canary Leaf -> Leaf Batch -> Spine); после первой ошибки раскатку останавливаем.
 class DeployPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
         executor = DeploymentExecutor(self._session, self._toolchain, self._recorder)
         failed_on: str | None = None
-        total = len(job.targets)
-        for index, row in enumerate(job.targets, start=1):
-            if failed_on is not None:
-                row.mark(TargetStatus.SKIPPED, f"Rollout stopped after the failure on {failed_on}")
-                continue
-            if not self._deploy_row(executor, row):
-                failed_on = row.hostname
-            self._recorder.progress(index, total)
+        waves = order_targets_into_waves(list(job.targets))
+        ordered_rows = [row for _, wave_rows in waves for row in wave_rows]
+        total = len(ordered_rows)
+        index = 0
+        for wave_name, wave_rows in waves:
+            if failed_on is None and wave_rows:
+                self._recorder.info(
+                    "wave",
+                    f"Starting {wave_name} ({len(wave_rows)} target(s): {', '.join(r.hostname for r in wave_rows)})",
+                )
+            for row in wave_rows:
+                index += 1
+                if failed_on is not None:
+                    row.mark(TargetStatus.SKIPPED, f"Rollout stopped after the failure on {failed_on}")
+                    continue
+                if not self._deploy_row(executor, row):
+                    failed_on = row.hostname
+                self._recorder.progress(index, total)
         if failed_on is None:
             self._auto_commit_diff_to_git(job)
 
@@ -159,14 +190,30 @@ class DeployPipeline(_BasePipeline):
 
 class DriftScanPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
+        from netops.services.state import get_state_manager  # noqa: PLC0415
+
+        state_mgr = get_state_manager()
         pairs = []
         for row, device in self._live_targets(job):
+            locked = False
+            if device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"):
+                locked = True
+            elif state_mgr.is_sync_locked(f"device:{device.hostname}"):
+                locked = True
+            elif getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"):
+                locked = True
+
+            if locked:
+                row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+                continue
+
             if device.status is DeviceStatus.IN_PROGRESS:
                 row.mark(TargetStatus.SKIPPED, "A deployment is in progress")
             else:
                 pairs.append((row, device))
 
         checked_at = utcnow()
+
         for row, plan in self._plan(job, pairs):
             device = plan.device
             if plan.error is not None and not plan.unreachable:
@@ -216,7 +263,24 @@ class DriftRemediationPipeline(_BasePipeline):
         pairs = self._live_targets(job)
         if not pairs:
             raise PipelineError("The device to remediate no longer exists")
+
+        from netops.services.state import get_state_manager  # noqa: PLC0415
+
+        state_mgr = get_state_manager()
+        for row, device in pairs:
+            locked = False
+            if device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"):
+                locked = True
+            elif state_mgr.is_sync_locked(f"device:{device.hostname}"):
+                locked = True
+            elif getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"):
+                locked = True
+            if locked:
+                row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+                return
+
         [(row, plan)] = self._plan(job, pairs)
+
 
         device = plan.device
         if plan.error is not None:

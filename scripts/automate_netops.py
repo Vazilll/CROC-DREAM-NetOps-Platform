@@ -15,12 +15,11 @@ and RFC 7938 / 7432 / 8365 data center fabric best practices:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 BACKEND_DIR = PROJECT_ROOT / "backend"
@@ -58,7 +57,7 @@ def action_validate() -> bool:
         return False
 
 
-def action_render() -> Dict[str, str]:
+def action_render() -> dict[str, str]:
     """Render candidate configuration for all devices using Jinja2 templates."""
     from netops.intent.repository import IntentRepository
     from netops.network.rendering import JinjaConfigRenderer
@@ -70,7 +69,7 @@ def action_render() -> Dict[str, str]:
     snapshot = repo.load()
     renderer = JinjaConfigRenderer(templates_dir)
 
-    rendered_configs: Dict[str, str] = {}
+    rendered_configs: dict[str, str] = {}
     for d in snapshot.inventory.devices:
         dev_intent = snapshot.intents.get(d.hostname)
         if not dev_intent:
@@ -84,25 +83,23 @@ def action_render() -> Dict[str, str]:
     return rendered_configs
 
 
-def action_diff() -> Dict[str, Any]:
+def action_diff() -> dict[str, Any]:
     """Compute semantic hierarchical diffs between current running config and Intent."""
-    from netops.intent.repository import IntentRepository
-    from netops.network.rendering import JinjaConfigRenderer
 
     rendered = action_render()
     lab_running = PROJECT_ROOT / "lab" / "running"
     logger.info("--> [3/7] Вычисление семантического диффа (Hierarchical AST Diff) против %s...", lab_running)
 
-    diff_report: Dict[str, Any] = {}
+    diff_report: dict[str, Any] = {}
     for hostname, target_cfg in rendered.items():
         running_path = lab_running / f"{hostname}.cfg"
         running_cfg = running_path.read_text(encoding="utf-8") if running_path.exists() else ""
         
-        target_lines = set(line.strip() for line in target_cfg.splitlines() if line.strip() and not line.strip().startswith(('!', '#')))
-        running_lines = set(line.strip() for line in running_cfg.splitlines() if line.strip() and not line.strip().startswith(('!', '#')))
+        target_lines = {line.strip() for line in target_cfg.splitlines() if line.strip() and not line.strip().startswith(('!', '#'))}
+        running_lines = {line.strip() for line in running_cfg.splitlines() if line.strip() and not line.strip().startswith(('!', '#'))}
 
-        added = sorted(list(target_lines - running_lines))
-        removed = sorted(list(running_lines - target_lines))
+        added = sorted(target_lines - running_lines)
+        removed = sorted(running_lines - target_lines)
         diff_report[hostname] = {
             "has_diff": len(added) > 0 or len(removed) > 0,
             "added_count": len(added),
@@ -116,7 +113,7 @@ def action_diff() -> Dict[str, Any]:
     return diff_report
 
 
-def action_ai_guard(diff_report: Dict[str, Any] | None = None) -> bool:
+def action_ai_guard(diff_report: dict[str, Any] | None = None) -> bool:
     """Analyze changes with AI Guard safety rules (preventing management lockouts and routing wipe)."""
     if diff_report is None:
         diff_report = action_diff()
@@ -138,7 +135,7 @@ def action_ai_guard(diff_report: Dict[str, Any] | None = None) -> bool:
     return safe
 
 
-def action_telemetry_and_health() -> Dict[str, Any]:
+def action_telemetry_and_health() -> dict[str, Any]:
     """Verify infrastructure health and telephony VoIP/SIP metrics."""
     logger.info("--> [5/7] Сбор телеметрии здоровья оборудования и сервисов телефонии...")
     

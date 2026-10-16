@@ -66,7 +66,7 @@ backend/netops/
 │   ├── repository.py чтение и запись файлов в intent/
 │   ├── lint.py       проверки по фабрике: дубли router-id и адресов
 │   └── netbox.py     синхронизация топологии с форматом NetBox
-├── models/           Таблицы SQLAlchemy (Device, Job, ConfigSnapshot, DriftRecord, MetricSample, User)
+├── models/           Таблицы SQLAlchemy (Device, Job, ConfigSnapshot, DriftRecord, User)
 ├── telemetry/        Метрики и телеграм-бот
 │   ├── metrics.py    каталог метрик и вывод в формате Prometheus
 │   ├── collector.py  сбор из базы и со стенда, запись замеров
@@ -239,7 +239,6 @@ PENDING ──> RUNNING ──> SUCCESS
 | `job_logs` | Журнал по шагам: уровень, шаг, устройство, сообщение |
 | `config_snapshots` | Снимки конфигов (running и intended) с хешем SHA-256 |
 | `drift_records` | История проверок: статус, лишние и недостающие строки, патчи |
-| `metric_samples` | Замеры метрик: имя, метки, значение, время сбора |
 | `users` | Пользователи и хеши токенов |
 
 Миграции в `backend/migrations/versions/`. Тест `test_migrations.py` сверяет результат миграций с
@@ -266,11 +265,12 @@ API — токен показывается один раз, в базе леж�
 
 ## Метрики и бот
 
-Воркер раз в `NETOPS_METRICS_INTERVAL_SECONDS` собирает замеры и пишет их в `metric_samples`:
-статусы устройств, задачи по типам и статусам, дрейф — из базы; состояние BGP-сессий, портов и
-потери ping — со стенда через тот же `HealthProbe`, что и post-check. `GET /metrics` отдаёт срез
-последнего сбора в формате Prometheus. Старые замеры удаляются по
-`NETOPS_METRICS_RETENTION_DAYS`.
+Воркер раз в `NETOPS_METRICS_INTERVAL_SECONDS` собирает замеры и публикует последний срез в Redis
+(`netops:telemetry:latest`): статусы устройств, задачи по типам и статусам, дрейф — из базы;
+состояние BGP-сессий, портов и потери ping — со стенда через тот же `HealthProbe`, что и
+post-check. `GET /metrics` отдаёт этот срез в формате Prometheus. Историю хранит не PostgreSQL, а
+VictoriaMetrics (Prometheus → `remote_write`). Устройства с подтверждённым gNMI / exporter / SNMP
+раз в час раскладываются по целям gnmic и Prometheus file_sd (`netops/telemetry/targets.py`).
 
 Бот читает ту же базу: оповещает при смене состояния устройства (появился дрейф, стало
 недоступно, снова совпало с эталоном) и об упавших задачах, а также отвечает на команды. Одно и то

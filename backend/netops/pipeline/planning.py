@@ -178,11 +178,9 @@ def persist_plan(session: Session, job: Job, row: JobTarget, plan: DevicePlan) -
 def _snapshot(
     session: Session, job: Job, device: Device, kind: SnapshotKind, content: str
 ) -> ConfigSnapshot:
-    snapshot = ConfigSnapshot.capture(
-        device_id=device.id, kind=kind, content=content, job_id=job.id
+    return ConfigSnapshot.capture_or_reuse(
+        session, device_id=device.id, kind=kind, content=content, job_id=job.id
     )
-    session.add(snapshot)
-    return snapshot
 
 
 def _count_lines(text: str) -> int:

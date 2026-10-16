@@ -423,7 +423,10 @@ class MetricsBot:
 
     def send_startup_audit(self) -> str:
         from netops.models import User  # noqa: PLC0415
-        from netops.services.notifier import record_security_event, sync_access_registry  # noqa: PLC0415
+        from netops.services.notifier import (  # noqa: PLC0415
+            record_security_event,
+            sync_access_registry,
+        )
 
         with self._session_factory() as session:
             sync_access_registry(session, self._settings)
@@ -979,7 +982,7 @@ def _overview_text(session: Session, settings: Settings | None = None) -> str:
     driver = settings.network_driver if settings is not None else "scrapli"
     mode_str = "ONLINE SSH (Scrapli)" if driver == "scrapli" else "OFFLINE (эмуляция)"
     devices = session.scalars(select(Device).order_by(Device.hostname)).all()
-    samples, collected_at = collector.latest(session)
+    samples, collected_at = collector.latest()
 
     cpu_by_host: dict[str, float] = {}
     mem_by_host: dict[str, float] = {}
@@ -1101,7 +1104,7 @@ def _jobs_text(session: Session) -> str:
 
 
 def _metrics_text(session: Session) -> str:
-    samples, collected_at = collector.latest(session)
+    samples, collected_at = collector.latest()
     if collected_at is None:
         return "Метрики ещё не собирались"
     lines = [f"Сбор: {collected_at:%d.%m %H:%M:%S} UTC"]
@@ -1290,8 +1293,12 @@ def _set_user_ttl_text(
     session: Session, args: Sequence[str], *, settings: Settings | None = None
 ) -> str:
     from datetime import timedelta  # noqa: PLC0415
+
     from netops.models import User  # noqa: PLC0415
-    from netops.services.notifier import record_security_event, sync_access_registry  # noqa: PLC0415
+    from netops.services.notifier import (  # noqa: PLC0415
+        record_security_event,
+        sync_access_registry,
+    )
 
     if len(args) < 2:
         return "Укажите участника и время: /ttl <username> <минуты|forever>"
@@ -1391,16 +1398,13 @@ def _set_user_role_text(session: Session, args: Sequence[str]) -> str:
 
 
 def _collect_now_text(session: Session, settings: Settings | None = None) -> str:
-    from datetime import timedelta  # noqa: PLC0415
     from netops.toolchain import build_toolchain  # noqa: PLC0415
 
     eff = settings or get_settings()
     try:
         toolchain = build_toolchain(eff)
         samples = collector.collect(session, toolchain)
-        ts = collector.store(
-            session, samples, retention=timedelta(days=eff.metrics_retention_days)
-        )
+        ts = collector.publish(samples, ttl_seconds=eff.metrics_interval_seconds * 3)
         lines = [f"✅ Сбор живой телеметрии завершён ({ts:%H:%M:%S} UTC):"]
         lines.extend(_summary(samples))
         return "\n".join(lines)
@@ -1414,6 +1418,7 @@ def _scan_now_text(
     settings: Settings | None = None,
 ) -> str:
     import threading  # noqa: PLC0415
+
     from netops.enums import IntentSource, JobType  # noqa: PLC0415
     from netops.models import JobTarget  # noqa: PLC0415
     from netops.pipeline.runner import JobRunner  # noqa: PLC0415
@@ -1487,6 +1492,7 @@ def _ai_copilot_text(
     session: Session, args: Sequence[str], *, settings: Settings | None = None
 ) -> str:
     import asyncio  # noqa: PLC0415
+
     from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
     from netops.services.freeze import is_factory_frozen  # noqa: PLC0415
     from netops.services.llm import chat_with_llm  # noqa: PLC0415
@@ -1494,7 +1500,7 @@ def _ai_copilot_text(
     eff = settings or get_settings()
     question = " ".join(args).strip()[:500]
     devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
-    samples, collected_at = collector.latest(session)
+    samples, collected_at = collector.latest()
     guard = AiTelemetryGuard(eff)
 
     verdicts: list[str] = []
@@ -1519,7 +1525,7 @@ def _ai_copilot_text(
     context_block = (
         f"Режим фабрики: {freeze_note}\n"
         f"Сводка метрик:\n" + "\n".join(summary_lines) + "\n\n"
-        f"Вердикты мониторинга телеметрии:\n" + "\n".join(verdicts)
+        "Вердикты мониторинга телеметрии:\n" + "\n".join(verdicts)
     )
 
     sys_prompt = (

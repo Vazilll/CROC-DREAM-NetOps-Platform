@@ -21,7 +21,11 @@ _CACHE_TTL_SEC = 10.0
 
 
 def invalidate_git_cache() -> None:
+    from netops.services.state import get_state_manager  # noqa: PLC0415
+
+    get_state_manager().clear_git_sot_meta()
     _GIT_META_CACHE.clear()
+
 
 
 def _sanitize_git_url(url: str) -> str:
@@ -85,7 +89,14 @@ def _scrub_secret(text: str, secret: str | None) -> str:
 
 
 def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
+    from netops.services.state import get_state_manager  # noqa: PLC0415
+
     cache_key = f"{repo_path}:{fallback_url}"
+    state_mgr = get_state_manager()
+    cached_meta = state_mgr.get_git_sot_meta(cache_key)
+    if cached_meta is not None:
+        return dict(cached_meta)
+
     now = time.monotonic()
     cached = _GIT_META_CACHE.get(cache_key)
     if cached and (now - cached[0]) < _CACHE_TTL_SEC:
@@ -146,8 +157,10 @@ def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
         "webhook_configured": True,
         "auto_sync_on_push": True,
     }
+    state_mgr.set_git_sot_meta(cache_key, result, ttl=int(_CACHE_TTL_SEC))
     _GIT_META_CACHE[cache_key] = (now, result)
     return dict(result)
+
 
 
 def git_pull_repo(repo_path: Path, branch: str = "main", github_pat: str | None = None) -> str:

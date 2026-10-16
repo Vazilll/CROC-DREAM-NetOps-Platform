@@ -5,17 +5,19 @@ Extracted from `api/routes/devices.py` so the HTTP controller stays thin and dec
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import contextlib
+import fcntl
 import ipaddress
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import socket
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
-import yaml
 
+import yaml
 from fastapi import HTTPException, status
 from pydantic import SecretStr
 
@@ -24,7 +26,12 @@ from netops.intent.models import DeviceIntent, InventoryDevice
 from netops.models import Device
 from netops.network.base import Credentials, DeviceTarget
 from netops.network.scrapli_driver import _ParamikoConnAdapter
-from netops.schemas.devices import DeviceCreate, DeviceEmergencyAction, DeviceProbeRequest, DeviceProbeResult
+from netops.schemas.devices import (
+    DeviceCreate,
+    DeviceEmergencyAction,
+    DeviceProbeRequest,
+    DeviceProbeResult,
+)
 from netops.settings import AuthProfile
 from netops.toolchain import build_toolchain
 
@@ -48,31 +55,35 @@ def _normalize_probe_endpoint(raw_ip: str, default_port: int) -> tuple[str, int]
     if ":" in clean_ip:
         parts = clean_ip.split(":", 1)
         clean_ip = parts[0]
-        try:
+        with contextlib.suppress(ValueError):
             clean_port = int(parts[1])
-        except ValueError:
-            pass
     return clean_ip, clean_port
 
 
 _PLATFORMS_DIR = _REPO_ROOT / "intent" / "platforms"
 
 
-def load_platform_profiles(intent_repo_path: Path | None = None) -> dict[str, dict[str, Any]]:
-    """Load declarative platform rules (SSH banners, version signatures, CLI commands) from intent/platforms/*.yaml."""
+def load_platform_profiles(intent_repo_path: Path | None = None) -> dict[str, Any]:
+    """Load declarative platform rules (SSH banners, version signatures, CLI commands).
+
+    Read from intent/platforms/*.yaml.
+    """
+    from netops.intent.models import PlatformProfile  # noqa: PLC0415
+
     profiles_dir = (
         intent_repo_path / "platforms"
         if intent_repo_path is not None and (intent_repo_path / "platforms").is_dir()
         else _PLATFORMS_DIR
     )
-    profiles: dict[str, dict[str, Any]] = {}
+    profiles: dict[str, Any] = {}
     if profiles_dir.is_dir():
         for yml_file in sorted(profiles_dir.glob("*.yaml")):
             try:
                 raw = yaml.safe_load(yml_file.read_text(encoding="utf-8")) or {}
                 if isinstance(raw, dict):
-                    plat_key = str(raw.get("platform") or yml_file.stem)
-                    profiles[plat_key] = raw
+                    profile = PlatformProfile.model_validate(raw)
+                    plat_key = str(getattr(profile.platform, "value", profile.platform)).lower()
+                    profiles[plat_key] = profile
             except Exception:
                 continue
     return profiles
@@ -81,7 +92,7 @@ def load_platform_profiles(intent_repo_path: Path | None = None) -> dict[str, di
 def detect_platform_from_banner(
     banner: str, profiles: dict[str, dict[str, Any]] | None = None
 ) -> Platform:
-    """Resolve Platform enum from TCP SSH banner using declarative ssh_banners in intent/platforms/*.yaml."""
+    """Resolve Platform enum from TCP SSH banner using declarative ssh_banners."""
     low = (banner or "").lower()
     if not low:
         return Platform.CISCO_IOSXE
@@ -101,11 +112,11 @@ def detect_platform_from_version(
     initial_platform: Platform,
     profiles: dict[str, dict[str, Any]] | None = None,
 ) -> Platform:
-    """Resolve Platform enum from version command output using version_signatures in intent/platforms/*.yaml."""
+    """Resolve Platform enum from version command output using version_signatures."""
     active_profiles = profiles if profiles is not None else load_platform_profiles()
     for plat_name, cfg in active_profiles.items():
         for sig in cfg.get("version_signatures") or []:
-            if str(sig) in ver_out:
+            if str(sig).lower() in ver_out.lower():
                 try:
                     return Platform(plat_name)
                 except ValueError:
@@ -125,18 +136,31 @@ def _simulate_offline_probe(clean_ip: str, clean_port: int) -> DeviceProbeResult
                 continue
     plat_cfg = profiles.get(platform.value) or {}
     is_spine = clean_port in (2211, 2212, 2001, 2002)
+    if platform == Platform.LINUX_SERVER:
+        role = DeviceRole.SERVER
+        hname = f"server-{max(1, clean_port % 10)}.croc.lab"
+    elif is_spine:
+        role = DeviceRole.SPINE
+        hname = f"spine-{clean_port % 10}.croc.lab"
+    else:
+        role = DeviceRole.LEAF
+        hname = f"leaf-{max(1, clean_port % 10)}.croc.lab"
+
+    default_ifaces = (
+        ["eth0", "eth1"]
+        if platform == Platform.LINUX_SERVER
+        else ["GigabitEthernet1", "GigabitEthernet2"]
+    )
     return DeviceProbeResult(
         reachable=True,
         detected_platform=platform,
-        detected_role=DeviceRole.SPINE if is_spine else DeviceRole.LEAF,
-        hostname=f"spine-{clean_port % 10}.croc.lab"
-        if is_spine
-        else f"leaf-{max(1, clean_port % 10)}.croc.lab",
+        detected_role=role,
+        hostname=hname,
         os_version=f"Offline Emulation ({platform.value})",
         cpu_cores=2,
         ram_gb=4.0,
         disk_gb=8.0,
-        interfaces=list(plat_cfg.get("offline_interfaces") or ["GigabitEthernet1", "GigabitEthernet2"]),
+        interfaces=list(plat_cfg.get("offline_interfaces") or default_ifaces),
         lldp_neighbors=[
             {"local_port": "eth1", "neighbor": "spine-1.croc.lab", "remote_port": "eth1"}
         ],
@@ -151,10 +175,8 @@ def _probe_tcp_banner(clean_ip: str, clean_port: int) -> tuple[bool, str]:
     try:
         sock.connect((clean_ip, clean_port))
         sock.settimeout(2.0)
-        try:
+        with contextlib.suppress(Exception):
             banner = sock.recv(1024).decode("utf-8", errors="ignore").strip()
-        except Exception:
-            pass
         sock.close()
         return True, banner
     except Exception as exc:
@@ -163,17 +185,86 @@ def _probe_tcp_banner(clean_ip: str, clean_port: int) -> tuple[bool, str]:
         return False, ""
 
 
-def _parse_ssh_hardware_specs(
+def _parse_ssh_hardware_specs(  # noqa: PLR0912, PLR0915
     conn: _ParamikoConnAdapter, initial_platform: Platform, fallback_ver: str
 ) -> tuple[Platform, str, int, float | None, float | None]:
     profiles = load_platform_profiles()
     plat_cfg = profiles.get(initial_platform.value) or {}
     cmds = plat_cfg.get("commands") or {}
-    ver_cmd = str(cmds.get("version") or "show version")
+    ver_cmd = str(
+        cmds.get("version")
+        or ("uname -a" if initial_platform == Platform.LINUX_SERVER else "show version")
+    )
     ver_out = conn.send_command(ver_cmd).result
     detected_platform = detect_platform_from_version(ver_out, initial_platform, profiles)
     plat_cfg = profiles.get(detected_platform.value) or plat_cfg
     cmds = plat_cfg.get("commands") or cmds
+
+    if detected_platform == Platform.LINUX_SERVER:
+        cpu_cores = 1
+        try:
+            nproc_out = conn.send_command("nproc").result.strip()
+            if nproc_out.isdigit():
+                cpu_cores = int(nproc_out)
+            else:
+                cpuinfo_out = conn.send_command("grep -c ^processor /proc/cpuinfo").result.strip()
+                if cpuinfo_out.isdigit():
+                    cpu_cores = int(cpuinfo_out)
+        except Exception:
+            pass
+
+        ram_gb = None
+        try:
+            mem_out = conn.send_command("grep MemTotal /proc/meminfo").result
+            m_mem = re.search(r"MemTotal:\s*(\d+)\s*kB", mem_out, re.IGNORECASE)
+            if m_mem:
+                ram_gb = round(int(m_mem.group(1)) / (1024 * 1024), 2)
+            else:
+                top_mem = conn.send_command(
+                    str(cmds.get("memory") or "top -bn1 | head -n 5")
+                ).result
+                m_top = re.search(r"MiB Mem\s*:\s*([\d.]+)\s*total", top_mem, re.IGNORECASE)
+                if m_top:
+                    ram_gb = round(float(m_top.group(1)) / 1024, 2)
+        except Exception:
+            pass
+
+        disk_gb = None
+        try:
+            df_out = conn.send_command("df -m /").result
+            for line in df_out.splitlines():
+                parts = line.split()
+                if parts and (line.strip().endswith(" /") or parts[-1] == "/"):
+                    if parts[0].isdigit():
+                        disk_gb = round(int(parts[0]) / 1024, 2)
+                        break
+                    if len(parts) >= 2 and parts[1].isdigit():
+                        disk_gb = round(int(parts[1]) / 1024, 2)
+                        break
+            if disk_gb is None:
+                df_h_out = conn.send_command("df -h /").result
+                m_h = re.search(
+                    r"\s+(\d+(?:\.\d+)?)\s*([GMKT])i?B?\s+.*(?:\s|/)$", df_h_out, re.MULTILINE
+                )
+                if m_h:
+                    val = float(m_h.group(1))
+                    unit = m_h.group(2).upper()
+                    if unit == "G":
+                        disk_gb = round(val, 2)
+                    elif unit == "T":
+                        disk_gb = round(val * 1024, 2)
+                    elif unit == "M":
+                        disk_gb = round(val / 1024, 2)
+        except Exception:
+            pass
+
+        lines_clean = [
+            ln.strip()
+            for ln in ver_out.splitlines()
+            if ln.strip() and not ln.strip().endswith(("#", ">", "]", "$"))
+        ]
+        os_ver = lines_clean[0][:100] if lines_clean else fallback_ver
+        return detected_platform, os_ver, cpu_cores, ram_gb, disk_gb
 
     ram_gb: float | None = None
     m_kb = (
@@ -225,6 +316,88 @@ def _parse_ssh_hardware_specs(
     return detected_platform, os_ver, cpu_cores, ram_gb, disk_gb
 
 
+def _parse_linux_interfaces(output: str) -> list[dict[str, Any]]:  # noqa: PLR0912
+    """Parse 'ip addr show' or 'ip -o addr show' into standard L3 interface intent dicts."""
+    interfaces: list[dict[str, Any]] = []
+    if re.search(r"^\d+:\s+\S+\s+inet\s+", output, re.MULTILINE):
+        seen_names: dict[str, dict[str, Any]] = {}
+        for line in output.splitlines():
+            m = re.match(
+                r"^\d+:\s+([A-Za-z0-9._-]+)\s+inet\s+(\d+\.\d+\.\d+\.\d+/\d+)",
+                line.strip(),
+            )
+            if m:
+                if_name, ip = m.group(1), m.group(2)
+                if if_name not in seen_names:
+                    seen_names[if_name] = {
+                        "name": if_name,
+                        "description": f"Linux network interface {if_name}",
+                        "enabled": True,
+                        "mode": "l3",
+                        "ipv4_address": ip,
+                        "mtu": 1500,
+                    }
+        interfaces = list(seen_names.values())
+    else:
+        cur_if: dict[str, Any] | None = None
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            m_head = re.match(
+                r"^\d+:\s+([A-Za-z0-9._-]+)(?:@\S+)?:.*?<([^>]*)>(?:\s+mtu\s+(\d+))?",
+                line,
+            )
+            if m_head:
+                if cur_if is not None:
+                    interfaces.append(cur_if)
+                if_name = m_head.group(1)
+                flags = m_head.group(2)
+                mtu_val = int(m_head.group(3)) if m_head.group(3) else 1500
+                valid_mtu = max(68, min(9216, mtu_val))
+                is_up = "UP" in flags.split(",")
+                cur_if = {
+                    "name": if_name,
+                    "description": f"Linux network interface {if_name}",
+                    "enabled": is_up,
+                    "mode": "l3",
+                    "ipv4_address": None,
+                    "mtu": valid_mtu,
+                }
+                continue
+
+            if cur_if is not None:
+                m_inet = re.search(r"\binet\s+(\d+\.\d+\.\d+\.\d+/\d+)", line)
+                if m_inet and not cur_if.get("ipv4_address"):
+                    cur_if["ipv4_address"] = m_inet.group(1)
+
+        if cur_if is not None:
+            interfaces.append(cur_if)
+
+    # Prevent overlapping subnets between distinct interfaces and clamp MTU
+    filtered: list[dict[str, Any]] = []
+    used_nets = []
+    for iface in interfaces:
+        entry = dict(iface)
+        raw_mtu = entry.get("mtu")
+        if isinstance(raw_mtu, (int, float, str)) and str(raw_mtu).isdigit():
+            entry["mtu"] = max(68, min(9216, int(raw_mtu)))
+        else:
+            entry["mtu"] = 1500
+
+        ip_str = entry.get("ipv4_address")
+        if ip_str:
+            try:
+                net = ipaddress.IPv4Interface(ip_str).network
+                if any(net.overlaps(un) for un in used_nets):
+                    entry["ipv4_address"] = None
+                else:
+                    used_nets.append(net)
+            except Exception:
+                pass
+        filtered.append(entry)
+
+    return filtered
+
+
 def _parse_ssh_topology(
     conn: _ParamikoConnAdapter, platform: Platform, default_hostname: str
 ) -> tuple[str, list[str], list[dict[str, Any]]]:
@@ -232,26 +405,59 @@ def _parse_ssh_topology(
     plat_cfg = profiles.get(platform.value) or {}
     cmds = plat_cfg.get("commands") or {}
     if_prefixes = tuple(
-        str(p) for p in (plat_cfg.get("interface_prefixes") or ("Gigabit", "Ethernet", "Loop", "Management", "GE", "MEth"))
+        str(p)
+        for p in (
+            plat_cfg.get("interface_prefixes")
+            or (
+                "Gigabit",
+                "Ethernet",
+                "Loop",
+                "Management",
+                "GE",
+                "MEth",
+                "eth",
+                "lo",
+                "ens",
+                "enp",
+            )
+        )
     )
     lldp_prefixes = tuple(
-        str(p) for p in (plat_cfg.get("lldp_port_prefixes") or ("Gi", "Et", "GE", "eth"))
+        str(p)
+        for p in (plat_cfg.get("lldp_port_prefixes") or ("Gi", "Et", "GE", "eth", "ens", "enp"))
     )
 
     hostname = default_hostname
     run_out = conn.send_command(
         str(cmds.get("hostname_filter") or "show running-config | include hostname")
     ).result
-    for hm in re.finditer(r"^\s*(?:hostname|sysname)\s+([A-Za-z0-9._-]+)", run_out, re.MULTILINE):
-        raw_h = hm.group(1).strip()
-        if raw_h.lower() not in ("hostname", "sysname", "include"):
-            hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
-            break
+    if platform == Platform.LINUX_SERVER and run_out.strip():
+        first_line = run_out.strip().splitlines()[0].strip()
+        if re.match(r"^[A-Za-z0-9._-]+$", first_line) and first_line.lower() not in (
+            "hostname",
+            "sysname",
+            "include",
+        ):
+            hostname = first_line if "." in first_line else f"{first_line}.croc.lab"
     else:
-        pm = re.search(r"(?:^|\n)<?([A-Za-z0-9._-]+?)(?:\([^)]*\))?[>#\]]\s*$", run_out.strip())
-        if pm and pm.group(1).lower() not in ("hostname", "sysname", "switch", "router", "huawei"):
-            raw_h = pm.group(1).strip()
-            hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
+        for hm in re.finditer(
+            r"^\s*(?:hostname|sysname)\s+([A-Za-z0-9._-]+)", run_out, re.MULTILINE
+        ):
+            raw_h = hm.group(1).strip()
+            if raw_h.lower() not in ("hostname", "sysname", "include"):
+                hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
+                break
+        else:
+            pm = re.search(r"(?:^|\n)<?([A-Za-z0-9._-]+?)(?:\([^)]*\))?[>#\]]\s*$", run_out.strip())
+            if pm and pm.group(1).lower() not in (
+                "hostname",
+                "sysname",
+                "switch",
+                "router",
+                "huawei",
+            ):
+                raw_h = pm.group(1).strip()
+                hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
 
     int_cmd = str(cmds.get("interfaces_brief") or "show ip interface brief")
     interfaces = [
@@ -259,6 +465,12 @@ def _parse_ssh_topology(
         for line in conn.send_command(int_cmd).result.splitlines()
         if line.split() and line.split()[0].startswith(if_prefixes)
     ]
+    if not interfaces and platform == Platform.LINUX_SERVER:
+        try:
+            ip_out = conn.send_command("ip addr show").result
+            interfaces = [it["name"] for it in _parse_linux_interfaces(ip_out)]
+        except Exception:
+            pass
 
     lldp_cmd = str(cmds.get("lldp_neighbors") or "show lldp neighbors")
     lldp_neighbors: list[dict[str, Any]] = []
@@ -307,6 +519,8 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
     hostname = f"node-{clean_port}"
     os_ver = banner or detected_platform.value
     try:
+        from netops.services.telemetry import collect_metrics_from_cli  # noqa: PLC0415
+
         with _ParamikoConnAdapter(target, timeout=12, proxy_jump=req.proxy_jump) as conn:
             detected_platform, os_ver, cpu_cores, ram_gb, disk_gb = _parse_ssh_hardware_specs(
                 conn, detected_platform, os_ver
@@ -314,19 +528,32 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
             hostname, interfaces, lldp_neighbors = _parse_ssh_topology(
                 conn, detected_platform, hostname
             )
+            collect_metrics_from_cli(
+                hostname, detected_platform.value, lambda c: conn.send_command(c).result
+            )
     except Exception as exc:
         return DeviceProbeResult(
             reachable=False,
             detected_platform=detected_platform,
-            detected_role=DeviceRole.SPINE if "spine" in hostname else DeviceRole.LEAF,
+            detected_role=(
+                DeviceRole.SERVER
+                if detected_platform == Platform.LINUX_SERVER
+                else (DeviceRole.SPINE if "spine" in hostname else DeviceRole.LEAF)
+            ),
             hostname=hostname,
             os_version=os_ver,
             interfaces=[],
             lldp_neighbors=[],
-            message=f"TCP-порт открыт ({banner or 'passthrough'}), но SSH-сессия не установлена: {exc}",
+            message=(
+                f"TCP-порт открыт ({banner or 'passthrough'}), но SSH-сессия не установлена: {exc}"
+            ),
         )
 
-    role = DeviceRole.SPINE if "spine" in hostname.lower() else DeviceRole.LEAF
+    role = (
+        DeviceRole.SERVER
+        if detected_platform == Platform.LINUX_SERVER
+        else (DeviceRole.SPINE if "spine" in hostname.lower() else DeviceRole.LEAF)
+    )
     return DeviceProbeResult(
         reachable=True,
         detected_platform=detected_platform,
@@ -342,7 +569,7 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
     )
 
 
-def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
+def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:  # noqa: PLR0912
     parsed_ifaces: list[dict[str, Any]] = []
     cur_if: dict[str, Any] | None = None
     for raw_line in cfg.splitlines():
@@ -388,16 +615,32 @@ def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
     return parsed_ifaces
 
 
-def _parse_brownfield_intent_from_config(hostname: str, cfg: str) -> dict[str, Any] | None:
+def _parse_brownfield_intent_from_config(
+    hostname: str, cfg: str, platform: Platform | str | None = None
+) -> dict[str, Any] | None:
+    plat_str = str(getattr(platform, "value", platform or "")).lower()
+    if (
+        plat_str == "linux_server"
+        or "link/ether" in cfg
+        or "link/loopback" in cfg
+        or re.search(r"^\d+:\s+\S+:\s+<", cfg, re.MULTILINE)
+    ):
+        linux_ifaces = _parse_linux_interfaces(cfg)
+        if linux_ifaces:
+            return {
+                "hostname": hostname,
+                "interfaces": linux_ifaces,
+                "bgp": None,
+                "acls": [],
+            }
+
     parsed_ifaces = _parse_running_interfaces(cfg)
     m_asn = re.search(r"^(?:router\s+bgp|bgp)\s+(\d+)", cfg, re.IGNORECASE | re.MULTILINE)
     if not parsed_ifaces or not m_asn:
         return None
 
     asn = int(m_asn.group(1))
-    m_rid = re.search(
-        r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE
-    )
+    m_rid = re.search(r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE)
     router_id = m_rid.group(1) if m_rid else parsed_ifaces[0]["ipv4_address"].split("/")[0]
 
     neighbors: list[dict[str, Any]] = []
@@ -429,7 +672,7 @@ def _parse_brownfield_intent_from_config(hostname: str, cfg: str) -> dict[str, A
     }
 
 
-def discover_live_switch_via_ssh(
+def discover_live_switch_via_ssh(  # noqa: PLR0915
     host: str,
     port: int,
     username: str,
@@ -440,17 +683,19 @@ def discover_live_switch_via_ssh(
     candidate_passwords: list[str] | None = None,
     passwords_by_platform: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
-    """Probe TCP banner, connect via SSH, extract live identity, running-config, and brownfield intent."""
+    """Probe TCP banner, connect via SSH, extract live identity.
+
+    Extracts running-config and brownfield intent.
+    """
     reachable, banner = _probe_tcp_banner(host, port)
     if not reachable or not banner:
         return None
 
     profiles = load_platform_profiles(getattr(settings, "intent_repo_path", None))
     detected_platform = detect_platform_from_banner(banner, profiles)
-    if detected_platform == Platform.LINUX_SERVER:
-        return None
 
     plat_cfg = profiles.get(detected_platform.value) or {}
+
     default_pw = str(plat_cfg.get("default_password") or "admin")
     plat_pw = (passwords_by_platform or {}).get(detected_platform.value, "")
     pw_candidates: list[str] = []
@@ -469,6 +714,8 @@ def discover_live_switch_via_ssh(
     interfaces: list[str] = []
     lldp_neighbors: list[dict[str, Any]] = []
     hostname = fallback_host
+
+    from netops.services.telemetry import collect_metrics_from_cli  # noqa: PLC0415
 
     for pw in pw_candidates:
         target = DeviceTarget(
@@ -491,6 +738,9 @@ def discover_live_switch_via_ssh(
                     (plat_cfg.get("commands") or {}).get("running_config") or "show running-config"
                 )
                 running_config = conn.send_command(run_cmd).result
+                collect_metrics_from_cli(
+                    hostname, detected_platform.value, lambda c: conn.send_command(c).result
+                )
                 used_pw = pw
                 connected = True
                 break
@@ -500,8 +750,13 @@ def discover_live_switch_via_ssh(
     if not connected:
         return None
 
-    role = "spine" if ("spine" in hostname.lower() or default_role == "spine") else "leaf"
+    role = (
+        "server"
+        if detected_platform == Platform.LINUX_SERVER
+        else ("spine" if ("spine" in hostname.lower() or default_role == "spine") else "leaf")
+    )
     short_stem = hostname.split(".")[0].replace("-", "")
+
     auth_profile = f"{short_stem}_auth"
     _persist_custom_auth(settings, auth_profile, username or "admin", used_pw)
 
@@ -514,7 +769,9 @@ def discover_live_switch_via_ssh(
         devices_dir = settings.intent_repo_path / "devices"
         devices_dir.mkdir(parents=True, exist_ok=True)
         intent_file = devices_dir / f"{hostname}.yaml"
-        intent_data = _parse_brownfield_intent_from_config(hostname, running_config)
+        intent_data = _parse_brownfield_intent_from_config(
+            hostname, running_config, detected_platform
+        )
         if intent_data is not None:
             try:
                 DeviceIntent.model_validate(intent_data)
@@ -527,7 +784,11 @@ def discover_live_switch_via_ssh(
                 management_ip=host,
                 management_port=port,
                 platform=detected_platform,
-                role=DeviceRole.SPINE if role == "spine" else DeviceRole.LEAF,
+                role=(
+                    DeviceRole.SERVER
+                    if role == "server"
+                    else (DeviceRole.SPINE if role == "spine" else DeviceRole.LEAF)
+                ),
                 auth_profile=auth_profile,
             )
             intent_data = _build_default_device_intent(dummy_dev)
@@ -584,20 +845,52 @@ def extract_brownfield_intent(
     )
     try:
         with _ParamikoConnAdapter(target, timeout=10, proxy_jump=data.proxy_jump) as conn:
-            cmd = str(cmds.get("running_config") or "show running-config")
+            default_cmd = (
+                "ip addr show"
+                if device.platform == Platform.LINUX_SERVER
+                else "show running-config"
+            )
+            cmd = str(cmds.get("running_config") or default_cmd)
             cfg = conn.send_command(cmd).result
     except Exception:
         return None
 
-    return _parse_brownfield_intent_from_config(device.hostname, cfg)
+    return _parse_brownfield_intent_from_config(device.hostname, cfg, device.platform)
 
 
 def _build_default_device_intent(device: Device) -> dict[str, Any]:
     idx = (device.id or 5) + 10
+    plat_cfg = load_platform_profiles().get(device.platform.value) or {}
+    default_if = "eth0" if device.platform == Platform.LINUX_SERVER else "GigabitEthernet2"
+    if_name = str(plat_cfg.get("default_interface") or default_if)
+
+    if device.role == DeviceRole.SERVER or device.platform == Platform.LINUX_SERVER:
+        return {
+            "hostname": device.hostname,
+            "interfaces": [
+                {
+                    "name": "lo",
+                    "description": "Loopback interface",
+                    "enabled": True,
+                    "mode": "l3",
+                    "ipv4_address": f"10.255.0.{idx}/32",
+                    "mtu": 1500,
+                },
+                {
+                    "name": if_name or "eth0",
+                    "description": "Primary server network interface",
+                    "enabled": True,
+                    "mode": "l3",
+                    "ipv4_address": f"10.0.{idx}.10/24",
+                    "mtu": 1500,
+                },
+            ],
+            "bgp": None,
+            "acls": [],
+        }
+
     asn = 65000 if device.role == DeviceRole.SPINE else 65100 + idx
     lo_ip = f"10.255.0.{idx}"
-    plat_cfg = load_platform_profiles().get(device.platform.value) or {}
-    if_name = str(plat_cfg.get("default_interface") or "GigabitEthernet2")
     return {
         "hostname": device.hostname,
         "interfaces": [
@@ -643,18 +936,26 @@ def _persist_custom_auth(settings: Any, profile_name: str, username: str, passwo
     try:
         custom_auth_file = settings.offline_lab_path / "custom_auth_profiles.json"
         custom_auth_file.parent.mkdir(parents=True, exist_ok=True)
-        existing_profiles = {}
-        if custom_auth_file.is_file():
-            existing_profiles = json.loads(custom_auth_file.read_text(encoding="utf-8"))
-        existing_profiles[profile_name] = {"username": username, "password": password}
-        custom_auth_file.write_text(
-            json.dumps(existing_profiles, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        lock_file = custom_auth_file.with_suffix(".lock")
+        with open(lock_file, "w", encoding="utf-8") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                existing_profiles = {}
+                if custom_auth_file.is_file():
+                    existing_profiles = json.loads(custom_auth_file.read_text(encoding="utf-8"))
+                existing_profiles[profile_name] = {"username": username, "password": password}
+                custom_auth_file.write_text(
+                    json.dumps(existing_profiles, ensure_ascii=False, indent=2), encoding="utf-8"
+                )
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
     except Exception:
         pass
 
 
-def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> None:
+def bind_device_to_sot(  # noqa: PLR0912, PLR0915
+    data: DeviceCreate, device: Device, container: Any
+) -> None:
     """Persist custom SSH credentials and generate baseline Git SoT intent if missing."""
     settings = container.settings
     plat_cfg = load_platform_profiles(settings.intent_repo_path).get(data.platform.value) or {}
@@ -663,8 +964,6 @@ def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> No
     if data.username or default_pw != "admin":
         _persist_custom_auth(settings, data.auth_profile, data.username or "admin", eff_pw)
 
-    if data.role == DeviceRole.SERVER or data.platform == Platform.LINUX_SERVER:
-        return
     if _is_protected_repo_path(settings.intent_repo_path):
         return
 
@@ -683,7 +982,9 @@ def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> No
                         rid = (raw.get("bgp") or {}).get("router_id")
                         if rid:
                             existing_rids.add(str(rid))
-                if str((baseline_intent.get("bgp") or {}).get("router_id")) in existing_rids:
+                bgp_data = baseline_intent.get("bgp") or {} if baseline_intent else {}
+                rid_val = bgp_data.get("router_id")
+                if rid_val and str(rid_val) in existing_rids:
                     baseline_intent = None
             except Exception:
                 baseline_intent = None
@@ -699,25 +1000,37 @@ def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> No
         inv_path = settings.intent_repo_path / inv_name
         if not inv_path.is_file():
             continue
+        lock_path = inv_path.with_suffix(".lock")
         try:
-            raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-            dev_list = raw_inv.get("devices") or []
-            if not any(d.get("hostname") == device.hostname for d in dev_list):
-                dev_list.append(
-                    {
-                        "hostname": device.hostname,
-                        "management_ip": str(device.management_ip),
-                        "management_port": int(device.management_port),
-                        "platform": device.platform.value,
-                        "role": device.role.value,
-                        "auth_profile": device.auth_profile,
-                    }
-                )
-                raw_inv["devices"] = dev_list
-                inv_path.write_text(
-                    yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
-                    encoding="utf-8",
-                )
+            with open(lock_path, "w", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                    dev_list = raw_inv.get("devices") or []
+                    if not any(d.get("hostname") == device.hostname for d in dev_list):
+                        dev_fabric = (
+                            getattr(device, "fabric_id", "croc-dc1-pod1") or "croc-dc1-pod1"
+                        )
+                        dev_site = getattr(device, "site", None) or dev_fabric
+                        dev_list.append(
+                            {
+                                "hostname": device.hostname,
+                                "management_ip": str(device.management_ip),
+                                "management_port": int(device.management_port),
+                                "platform": device.platform.value,
+                                "role": device.role.value,
+                                "auth_profile": device.auth_profile,
+                                "fabric_id": dev_fabric,
+                                "site": dev_site,
+                            }
+                        )
+                        raw_inv["devices"] = dev_list
+                        inv_path.write_text(
+                            yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
+                            encoding="utf-8",
+                        )
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
 
@@ -749,16 +1062,22 @@ def remove_device_from_sot(
         inv_path = intent_repo_path / inv_name
         if not inv_path.is_file():
             continue
+        lock_path = inv_path.with_suffix(".lock")
         try:
-            raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-            dev_list = raw_inv.get("devices") or []
-            filtered = [d for d in dev_list if d.get("hostname") != hostname]
-            if len(filtered) != len(dev_list):
-                raw_inv["devices"] = filtered
-                inv_path.write_text(
-                    yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
-                    encoding="utf-8",
-                )
+            with open(lock_path, "w", encoding="utf-8") as lf:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                try:
+                    raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                    dev_list = raw_inv.get("devices") or []
+                    filtered = [d for d in dev_list if d.get("hostname") != hostname]
+                    if len(filtered) != len(dev_list):
+                        raw_inv["devices"] = filtered
+                        inv_path.write_text(
+                            yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
+                            encoding="utf-8",
+                        )
+                finally:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
         except Exception:
             pass
 
@@ -791,7 +1110,10 @@ def execute_device_emergency_action(
                 cfg_file = container.settings.offline_lab_path / f"{device.hostname}.cfg"
                 cfg_file.parent.mkdir(parents=True, exist_ok=True)
                 cfg_file.write_text(rendered, encoding="utf-8")
-                output = f"Restored {device.hostname}.cfg to Git SoT baseline ({len(rendered.splitlines())} lines)"
+                output = (
+                    f"Restored {device.hostname}.cfg to Git SoT baseline "
+                    f"({len(rendered.splitlines())} lines)"
+                )
             except Exception as exc:
                 output = f"Offline rollback completed ({exc})"
         else:
@@ -810,7 +1132,7 @@ def execute_device_emergency_action(
 
     audit_path = container.settings.offline_lab_path / "emergency_audit.jsonl"
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "actor": actor_username,
         "user": actor_username,
         "device": device.hostname,

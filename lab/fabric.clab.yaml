@@ -17,6 +17,7 @@ topology:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:
         - "2211:22"
+        - "1611:161/udp"
       exec:
         - sh -c "iptables -t nat -C PREROUTING -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161 2>/dev/null || iptables -t nat -I PREROUTING 1 -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161"
 
@@ -29,6 +30,8 @@ topology:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:
         - "2212:22"
+        - "1612:161/udp"
+        - "6032:6030/tcp"
 
     # ─── LEAF LAYER ────────────────────────────────────────────────
     leaf1:
@@ -40,6 +43,7 @@ topology:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:
         - "2221:22"
+        - "1621:161/udp"
       exec:
         - sh -c "iptables -t nat -C PREROUTING -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161 2>/dev/null || iptables -t nat -I PREROUTING 1 -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161"
 
@@ -52,6 +56,7 @@ topology:
         CLAB_MGMT_PASSTHROUGH: "true"
       ports:
         - "2222:22"
+        - "1622:161/udp"
       exec:
         - sh -c "iptables -t nat -C PREROUTING -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161 2>/dev/null || iptables -t nat -I PREROUTING 1 -i eth0 -p udp --dport 161 -j DNAT --to-destination 10.0.0.15:161"
 

@@ -82,7 +82,6 @@ def main() -> int:
     # 2. Database Connectivity
     print(f"\n{BOLD}2. Database Health & Storage:{RESET}")
     try:
-        from netops.settings import get_settings
         from netops.db import build_engine, build_session_factory
         from sqlalchemy import text
 
@@ -117,8 +116,8 @@ def main() -> int:
         print(f"   • Repository:     {RED}✖ Failed to load intent: {exc}{RESET}")
         overall_healthy = False
 
-    # 4. Live Lab Connectivity Probe (5.228.243.54)
-    print(f"\n{BOLD}4. Multi-Vendor Lab Network Probe (5.228.243.54):{RESET}")
+    # 4. Live Lab Connectivity Probe (198.51.100.10)
+    print(f"\n{BOLD}4. Multi-Vendor Lab Network Probe (198.51.100.10):{RESET}")
     nodes = [
         ("spine-1.croc.lab", 2211, "Cisco C8000v"),
         ("spine-2.croc.lab", 2212, "Arista cEOS"),
@@ -133,7 +132,7 @@ def main() -> int:
 
     lab_reachable_count = 0
     for hostname, port, vendor in nodes:
-        ok, latency, banner = check_tcp_port("5.228.243.54", port, timeout=2.5)
+        ok, latency, banner = check_tcp_port("198.51.100.10", port, timeout=2.5)
         if ok:
             lab_reachable_count += 1
             status_str = f"{GREEN}OPEN{RESET}"
@@ -157,7 +156,7 @@ def main() -> int:
         print(f"   {GREEN}✔ Unmodeled server nodes (srv-*) safely skipped during drift scans{RESET}")
         print(f"   {GREEN}✔ Dual-theme (Obsidian Dark / Crisp Light) & RU/EN i18n fully validated{RESET}")
     else:
-        print(f"   {YELLOW}⚠ Notice: External lab host 5.228.243.54 has limited connectivity ({lab_reachable_count}/{len(nodes)}). Check VPN or firewall.{RESET}")
+        print(f"   {YELLOW}⚠ Notice: External lab host 198.51.100.10 has limited connectivity ({lab_reachable_count}/{len(nodes)}). Check VPN or firewall.{RESET}")
 
     print(f"\n{BOLD}Doctor Verdict:{RESET} {'[SYSTEM READY FOR PRODUCTION / DEMO]' if overall_healthy else '[ATTENTION REQUIRED]'}\n")
     return 0 if overall_healthy else 1

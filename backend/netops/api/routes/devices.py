@@ -44,12 +44,20 @@ def list_devices(
     status_filter: Annotated[DeviceStatus | None, Query(alias="status")] = None,
     role: DeviceRole | None = None,
     platform: Platform | None = None,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+    site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[Device]:
     devices = list(
         service.list_devices(
-            status=status_filter, role=role, platform=platform, limit=limit, offset=offset
+            status=status_filter,
+            role=role,
+            platform=platform,
+            fabric_id=fabric_id,
+            site=site,
+            limit=limit,
+            offset=offset,
         )
     )
     if principal.allowed_system:

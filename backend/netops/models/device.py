@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
@@ -27,11 +28,23 @@ class Device(Base):
         index=True,
     )
     management_mode: Mapped[str] = mapped_column(String(32), default="MONITORING_ONLY", server_default="MONITORING_ONLY")
+    fabric_id: Mapped[str] = mapped_column(
+        String(64),
+        default="croc-dc1-pod1",
+        server_default="croc-dc1-pod1",
+        nullable=False,
+        index=True,
+    )
+    site: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
     proxy_jump: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hardware_specs: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     last_checked_at: Mapped[datetime | None]
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+    def __init__(self, **kwargs: Any) -> None:
+        kwargs.setdefault("fabric_id", "croc-dc1-pod1")
+        super().__init__(**kwargs)
 
     def __repr__(self) -> str:
         return f"<Device id={self.id} hostname={self.hostname!r} status={self.status}>"

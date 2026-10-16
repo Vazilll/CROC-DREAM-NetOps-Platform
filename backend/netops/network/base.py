@@ -92,6 +92,9 @@ class HealthSnapshot:
     cpu_pct: float | None = None
     memory_pct: float | None = None
     uplink_util_pct: float | None = None
+    disk_util_pct: float | None = None
+    network_rate_mbps: float | None = None
+    load_1m: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

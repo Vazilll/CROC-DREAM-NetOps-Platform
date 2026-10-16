@@ -10,12 +10,15 @@ from sqlalchemy.orm import Session, sessionmaker
 from netops.db import build_engine, build_session_factory
 from netops.pipeline import JobRunner, fail_stale_jobs
 from netops.services import JobDispatcher, JobService
+from netops.services.retention import purge_expired_records
 from netops.settings import Settings, get_settings
-from netops.telemetry import collector
+from netops.telemetry import collector, targets
 from netops.toolchain import build_toolchain
 from netops.worker.celery_app import (
     COLLECT_METRICS_TASK,
     FAIL_STALE_JOBS_TASK,
+    PURGE_EXPIRED_RECORDS_TASK,
+    REFRESH_COLLECTOR_TARGETS_TASK,
     RUN_JOB_TASK,
     SCHEDULED_DRIFT_SCAN_TASK,
     CeleryJobDispatcher,
@@ -64,11 +67,21 @@ def scheduled_drift_scan() -> str | None:
 def collect_metrics() -> int:
     runtime = get_runtime()
     with runtime.session_factory() as session:
-        samples = collector.collect(session, build_toolchain(runtime.settings))
-        collector.store(
-            session, samples, retention=timedelta(days=runtime.settings.metrics_retention_days)
+        samples = collector.collect(
+            session, build_toolchain(runtime.settings), include_fabric_label=True
         )
+        collector.publish(samples, ttl_seconds=runtime.settings.metrics_interval_seconds * 3)
         return len(samples)
+
+
+@celery_app.task(name=REFRESH_COLLECTOR_TARGETS_TASK)  # type: ignore[untyped-decorator]
+def refresh_collector_targets() -> dict[str, int]:
+    runtime = get_runtime()
+    with runtime.session_factory() as session:
+        plan = targets.refresh_collector_targets(
+            session, build_toolchain(runtime.settings), runtime.settings
+        )
+        return plan["protocols"]
 
 
 @celery_app.task(name=FAIL_STALE_JOBS_TASK)  # type: ignore[untyped-decorator]
@@ -79,3 +92,10 @@ def fail_stale() -> list[str]:
             session, timeout=timedelta(seconds=runtime.settings.job_timeout_seconds)
         )
         return [str(job_id) for job_id in failed]
+
+
+@celery_app.task(name=PURGE_EXPIRED_RECORDS_TASK)  # type: ignore[untyped-decorator]
+def purge_expired() -> dict[str, int]:
+    runtime = get_runtime()
+    with runtime.session_factory() as session:
+        return purge_expired_records(session)

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import timedelta
 from typing import Any
 
 import pytest
@@ -109,8 +108,7 @@ def test_status_and_drift_show_the_current_state(
 def test_metrics_command_reports_problems(
     session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
 ) -> None:
-    collector.store(
-        session,
+    collector.publish(
         [
             metrics.Sample(metrics.DRIFT_DEVICES, 1),
             metrics.Sample(metrics.DEVICE_REACHABLE, 0, {"hostname": "leaf-1.croc.lab"}),
@@ -120,7 +118,6 @@ def test_metrics_command_reports_problems(
                 {"hostname": "leaf-1.croc.lab", "peer": "10.0.1.0", "state": "Active"},
             ),
         ],
-        retention=timedelta(days=1),
     )
     api = FakeTelegram([_command("/metrics")])
     _bot(session_factory, api).poll_once()
@@ -178,8 +175,7 @@ def test_catch_up_skips_what_happened_before_the_start(
 def test_metrics_command_shows_numbers_when_everything_is_fine(
     session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
 ) -> None:
-    collector.store(
-        session,
+    collector.publish(
         [
             metrics.Sample(metrics.DEVICES_TOTAL, 4, {"status": "IN_SYNC"}),
             metrics.Sample(metrics.DEVICE_REACHABLE, 1, {"hostname": "leaf-1.croc.lab"}),
@@ -197,7 +193,6 @@ def test_metrics_command_shows_numbers_when_everything_is_fine(
                 metrics.PING_LOSS, 0, {"hostname": "leaf-1.croc.lab", "peer": "10.0.1.0"}
             ),
         ],
-        retention=timedelta(days=1),
     )
     api = FakeTelegram([_command("/metrics")])
     _bot(session_factory, api).poll_once()

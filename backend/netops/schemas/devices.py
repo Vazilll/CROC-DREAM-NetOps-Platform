@@ -2,18 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from ipaddress import IPv4Address
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from netops.enums import DeviceRole, DeviceStatus, Platform
 from netops.intent.models import DeviceIntent, Hostname, Identifier
 from netops.schemas.common import PartialUpdate
 from netops.schemas.intent import IntentIssueRead
 
-
-from typing import Any
-from pydantic import field_validator
 
 class DeviceCreate(BaseModel):
     model_config = ConfigDict(extra="ignore")
@@ -27,8 +24,20 @@ class DeviceCreate(BaseModel):
     username: str | None = Field(default=None, exclude=True)
     password: str | None = Field(default=None, exclude=True)
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] = "MONITORING_ONLY"
+    fabric_id: str = "croc-dc1-pod1"
+    site: str | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_stand(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("site") and not data.get("fabric_id"):
+                data["fabric_id"] = data["site"]
+            elif data.get("fabric_id") and not data.get("site"):
+                data["site"] = data["fabric_id"]
+        return data
 
     @field_validator("hostname", mode="before")
     @classmethod
@@ -55,8 +64,20 @@ class DeviceUpdate(PartialUpdate):
     role: DeviceRole | None = None
     auth_profile: Identifier | None = None
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] | None = None
+    fabric_id: str | None = None
+    site: str | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_stand(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            if data.get("site") and not data.get("fabric_id"):
+                data["fabric_id"] = data["site"]
+            elif data.get("fabric_id") and not data.get("site"):
+                data["site"] = data["fabric_id"]
+        return data
 
 
 class DeviceRead(BaseModel):
@@ -71,6 +92,8 @@ class DeviceRead(BaseModel):
     auth_profile: str
     status: DeviceStatus
     management_mode: str = "MONITORING_ONLY"
+    fabric_id: str = "croc-dc1-pod1"
+    site: str | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
     oper_status: Literal["UP", "DOWN", "DEGRADED"] = "UP"
@@ -91,7 +114,7 @@ class DeviceProbeRequest(BaseModel):
     management_port: int = 22
     username: str = "root"
     password: str | None = None
-    proxy_jump: str | None = None  # e.g. "crocdream@5.228.243.54:221"
+    proxy_jump: str | None = None  # e.g. "crocdream@198.51.100.10:221"
 
 
 class DeviceProbeResult(BaseModel):

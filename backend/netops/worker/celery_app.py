@@ -10,8 +10,11 @@ RUN_JOB_TASK = "netops.jobs.run"
 SCHEDULED_DRIFT_SCAN_TASK = "netops.drift.scheduled_scan"
 FAIL_STALE_JOBS_TASK = "netops.jobs.fail_stale"
 COLLECT_METRICS_TASK = "netops.metrics.collect"
+REFRESH_COLLECTOR_TARGETS_TASK = "netops.telemetry.refresh_collector_targets"
+PURGE_EXPIRED_RECORDS_TASK = "netops.retention.purge"
 
 STALE_JOBS_CHECK_INTERVAL_SECONDS = 300
+RETENTION_PURGE_INTERVAL_SECONDS = 86400
 
 
 def create_celery_app(settings: Settings) -> Celery:
@@ -39,6 +42,14 @@ def create_celery_app(settings: Settings) -> Celery:
             "collect-metrics": {
                 "task": COLLECT_METRICS_TASK,
                 "schedule": float(settings.metrics_interval_seconds),
+            },
+            "refresh-collector-targets": {
+                "task": REFRESH_COLLECTOR_TARGETS_TASK,
+                "schedule": float(settings.collector_targets_interval_seconds),
+            },
+            "purge-expired-records": {
+                "task": PURGE_EXPIRED_RECORDS_TASK,
+                "schedule": float(RETENTION_PURGE_INTERVAL_SECONDS),
             },
         },
     )

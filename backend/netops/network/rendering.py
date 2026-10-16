@@ -28,6 +28,16 @@ class JinjaConfigRenderer:
         )
 
     def render(self, device: InventoryDevice, intent: DeviceIntent) -> str:
+        import hashlib  # noqa: PLC0415
+        from netops.services.state import get_state_manager  # noqa: PLC0415
+
+        state_mgr = get_state_manager()
+        cache_seed = f"{self._root.resolve()}:{device.platform.value}:{device.model_dump_json()}:{intent.model_dump_json()}"
+        cache_key = hashlib.sha256(cache_seed.encode("utf-8")).hexdigest()
+        cached = state_mgr.get_rendered_template(cache_key)
+        if cached is not None:
+            return cached
+
         platform_dir = self._root / device.platform.value
         templates = [
             f"{device.platform.value}/{section}.j2"
@@ -46,4 +56,7 @@ class JinjaConfigRenderer:
             except jinja2.TemplateError as exc:
                 raise RenderError(f"{name}: {exc}") from exc
             parts.append(rendered.rstrip("\n"))
-        return "\n".join(part for part in parts if part) + "\n"
+        result = "\n".join(part for part in parts if part) + "\n"
+        state_mgr.set_rendered_template(cache_key, result, ttl=300)
+        return result
+

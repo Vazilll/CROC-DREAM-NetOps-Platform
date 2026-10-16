@@ -13,9 +13,9 @@ intercepts the backend API for device forecast endpoints, and rigorously validat
 9. Adversarial Case: Clamping with out-of-bounds metrics (>100%, <0%), unknown event types, and tooltip edge clamp.
 """
 
-import sys
 import json
-import time
+import sys
+
 from playwright.sync_api import sync_playwright
 
 if hasattr(sys.stdout, "reconfigure"):

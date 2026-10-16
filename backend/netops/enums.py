@@ -107,3 +107,12 @@ class UserRole(StrEnum):
 
 
 _ROLE_RANK = {UserRole.VIEWER: 0, UserRole.OPERATOR: 1, UserRole.ADMIN: 2, UserRole.OWNER: 3}
+
+
+class TelemetryProtocol(StrEnum):
+    GNMI = "gnmi"
+    PROMETHEUS_EXPORTER = "node_exporter"
+    NODE_EXPORTER = "node_exporter"
+    SNMP = "snmp"
+    SSH_CLI = "ssh_cli"
+
