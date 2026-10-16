@@ -1,12 +1,12 @@
-{% raw %}! Command: show running-config
-! device: spine-2 (cEOSLab, EOS-4.32.0F)
+! Command: show running-config
+! device: {{ intent.hostname.split('.')[0] }} (cEOSLab, EOS-4.32.0F)
 !
 no aaa root
 username admin privilege 15 role network-admin secret sha512 $6$8el7Sqjp8re5MhG3$Z00NJOkXHHld1v7okq4AEnc7DXkZBNrLhKjI9bxRc90bhR/Zx4SjzeWQ.UrDkSn57aQXTScokN9kblwcNOnTG/
 service routing protocols model multi-agent
-{% endraw %}
+
 hostname {{ intent.hostname.split(".")[0] }}
-{% raw %}snmp-server community public ro
+snmp-server community public ro
 lldp run
 spanning-tree mode mstp
 !
@@ -22,4 +22,4 @@ ip route 10.255.0.11/32 10.10.0.7 200
 management api http-commands
    no shutdown
 !
-end{% endraw %}
+end

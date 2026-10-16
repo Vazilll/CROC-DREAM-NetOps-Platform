@@ -1,11 +1,11 @@
-{% raw %}version 17.3
+version 17.3
 service timestamps debug datetime msec
 service timestamps log datetime msec
 platform qfp utilization monitor load 80
 platform console serial
-{% endraw %}
+
 hostname {{ intent.hostname.split(".")[0] }}
-{% raw %}!
+!
 vrf definition clab-mgmt
  description Containerlab management VRF (DO NOT DELETE)
  address-family ipv4
@@ -37,4 +37,4 @@ line vty 0 4
  login local
  transport input ssh
 !
-end{% endraw %}
+end
