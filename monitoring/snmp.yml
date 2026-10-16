@@ -1,0 +1,151 @@
+auths:
+  public_v2:
+    version: 2
+    community: public
+
+modules:
+  # ─── 1. Стандартный IF-MIB (трафик, ошибки, дропы портов) ─────────────────
+  if_mib:
+    walk:
+      - 1.3.6.1.2.1.1.3         # sysUpTime
+      - 1.3.6.1.2.1.1.5         # sysName
+      - 1.3.6.1.2.1.2.2.1.2     # ifDescr
+      - 1.3.6.1.2.1.2.2.1.7     # ifAdminStatus
+      - 1.3.6.1.2.1.2.2.1.8     # ifOperStatus
+      - 1.3.6.1.2.1.31.1.1.1.1  # ifName
+      - 1.3.6.1.2.1.31.1.1.1.6  # ifHCInOctets (64-bit RX)
+      - 1.3.6.1.2.1.31.1.1.1.10 # ifHCOutOctets (64-bit TX)
+      - 1.3.6.1.2.1.31.1.1.1.15 # ifHighSpeed
+      - 1.3.6.1.2.1.31.1.1.1.18 # ifAlias
+      - 1.3.6.1.2.1.2.2.1.13    # ifInDiscards
+      - 1.3.6.1.2.1.2.2.1.14    # ifInErrors
+      - 1.3.6.1.2.1.2.2.1.19    # ifOutDiscards
+      - 1.3.6.1.2.1.2.2.1.20    # ifOutErrors
+    metrics:
+      - name: sysUpTime
+        oid: 1.3.6.1.2.1.1.3
+        type: gauge
+      - name: ifOperStatus
+        oid: 1.3.6.1.2.1.2.2.1.8
+        type: gauge
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+        lookups:
+          - labels: [ifIndex]
+            labelname: ifDescr
+            oid: 1.3.6.1.2.1.2.2.1.2
+            type: DisplayString
+      - name: ifHCInOctets
+        oid: 1.3.6.1.2.1.31.1.1.1.6
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifHCOutOctets
+        oid: 1.3.6.1.2.1.31.1.1.1.10
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifInDiscards
+        oid: 1.3.6.1.2.1.2.2.1.13
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifInErrors
+        oid: 1.3.6.1.2.1.2.2.1.14
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifOutDiscards
+        oid: 1.3.6.1.2.1.2.2.1.19
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifOutErrors
+        oid: 1.3.6.1.2.1.2.2.1.20
+        type: counter
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+      - name: ifHighSpeed
+        oid: 1.3.6.1.2.1.31.1.1.1.15
+        type: gauge
+        indexes:
+          - labelname: ifIndex
+            type: Integer
+
+  # ─── 2. CPU и память для Arista / Linux (HOST-RESOURCES-MIB) ───────────────
+  host_resources:
+    walk:
+      - 1.3.6.1.2.1.25.3.3.1.2  # hrProcessorLoad
+      - 1.3.6.1.2.1.25.2.3.1.5  # hrStorageSize
+      - 1.3.6.1.2.1.25.2.3.1.6  # hrStorageUsed
+    metrics:
+      - name: hrProcessorLoad
+        oid: 1.3.6.1.2.1.25.3.3.1.2
+        type: gauge
+        indexes:
+          - labelname: hrDeviceIndex
+            type: Integer
+      - name: hrStorageSize
+        oid: 1.3.6.1.2.1.25.2.3.1.5
+        type: gauge
+        indexes:
+          - labelname: hrStorageIndex
+            type: Integer
+      - name: hrStorageUsed
+        oid: 1.3.6.1.2.1.25.2.3.1.6
+        type: gauge
+        indexes:
+          - labelname: hrStorageIndex
+            type: Integer
+
+  # ─── 3. CPU и память для Cisco (CISCO-PROCESS-MIB) ─────────────────────────
+  cisco_cpu:
+    walk:
+      - 1.3.6.1.4.1.9.9.109.1.1.1.1.7  # cpmCPUTotal1minRev
+      - 1.3.6.1.4.1.9.9.48.1.1.1.5     # ciscoMemoryPoolUsed
+      - 1.3.6.1.4.1.9.9.48.1.1.1.6     # ciscoMemoryPoolFree
+    metrics:
+      - name: cpmCPUTotal1minRev
+        oid: 1.3.6.1.4.1.9.9.109.1.1.1.1.7
+        type: gauge
+        indexes:
+          - labelname: cpmCPUTotalIndex
+            type: Integer
+      - name: ciscoMemoryPoolUsed
+        oid: 1.3.6.1.4.1.9.9.48.1.1.1.5
+        type: gauge
+        indexes:
+          - labelname: ciscoMemoryPoolType
+            type: Integer
+      - name: ciscoMemoryPoolFree
+        oid: 1.3.6.1.4.1.9.9.48.1.1.1.6
+        type: gauge
+        indexes:
+          - labelname: ciscoMemoryPoolType
+            type: Integer
+
+  # ─── 4. CPU и память для Huawei VRP (HUAWEI-ENTITY-EXTENT-MIB) ─────────────
+  huawei_cpu:
+    walk:
+      - 1.3.6.1.4.1.2011.5.25.31.1.1.1.1.5  # hwEntityCpuUsage
+      - 1.3.6.1.4.1.2011.5.25.31.1.1.1.1.7  # hwEntityMemUsage
+    metrics:
+      - name: hwEntityCpuUsage
+        oid: 1.3.6.1.4.1.2011.5.25.31.1.1.1.1.5
+        type: gauge
+        indexes:
+          - labelname: entPhysicalIndex
+            type: Integer
+      - name: hwEntityMemUsage
+        oid: 1.3.6.1.4.1.2011.5.25.31.1.1.1.1.7
+        type: gauge
+        indexes:
+          - labelname: entPhysicalIndex
+            type: Integer

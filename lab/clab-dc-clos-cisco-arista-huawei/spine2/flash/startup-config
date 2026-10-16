@@ -1,4 +1,4 @@
-! Startup-config last modified at Thu Oct 15 23:55:03 2026 by root
+! Startup-config last modified at Fri Oct 16 09:53:26 2026 by root
 ! device: spine-2 (cEOSLab, EOS-4.32.0F-36401836.4320F (engineering build))
 !
 no aaa root
@@ -28,16 +28,21 @@ interface Ethernet1
    no switchport
    ip address 10.10.0.4/31
    ip access-group FABRIC-IN in
+   ip ospf network point-to-point
+   ip ospf area 0.0.0.0
 !
 interface Ethernet2
    description Downlink to leaf2 GE1/0/1
    no switchport
    ip address 10.10.0.6/31
    ip access-group FABRIC-IN in
+   ip ospf network point-to-point
+   ip ospf area 0.0.0.0
 !
 interface Loopback0
    description Router-ID / BGP announce
    ip address 10.255.0.12/32
+   ip ospf area 0.0.0.0
 !
 interface Management0
    ip address 172.20.20.4/24
@@ -45,6 +50,7 @@ interface Management0
 !
 ip access-list FABRIC-IN
    10 permit icmp any any
+   15 permit ospf any any
    20 permit tcp any any eq bgp
    30 permit tcp any eq bgp any
    40 deny tcp any any eq telnet
@@ -80,5 +86,9 @@ router bgp 65000
       neighbor 10.10.0.5 activate
       neighbor 10.10.0.7 activate
       network 10.255.0.12/32
+!
+router ospf 1
+   router-id 10.255.0.12
+   max-lsa 12000
 !
 end

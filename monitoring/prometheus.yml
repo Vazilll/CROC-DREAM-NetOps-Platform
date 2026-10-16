@@ -1,47 +1,145 @@
 global:
   scrape_interval: 10s
   evaluation_interval: 10s
+  external_labels:
+    project: "croc-dream-netops"
+    fabric: "dc-clos"
 
-# Подключаем наши триггеры
 rule_files:
   - "/etc/prometheus/alerts.yml"
 
 scrape_configs:
+  # ─── 1. Метрики NetOps Backend API ────────────────────────────────────────
   - job_name: "netops_backend"
     metrics_path: /metrics
     static_configs:
       - targets: ["api:8000"]
+        labels:
+          component: "backend"
 
+  # ─── 2. Боевой контур Containerlab (СЕТЬ: if_mib) ─────────────────────────
   - job_name: "snmp_fabric"
     metrics_path: /snmp
     params:
       module: [if_mib]
     static_configs:
-      - targets:
-          - 172.20.20.5
-          - 172.20.20.4
-          - 172.20.20.2
-          - 172.20.20.6
+      - targets: ["172.20.20.5"]
+        labels:
+          hostname: "spine-1.croc.lab"
+          vendor: "cisco"
+          os: "cisco_iosxe"
+          role: "spine"
+          tier: "live"
+
+      - targets: ["172.20.20.4"]
+        labels:
+          hostname: "spine-2.croc.lab"
+          vendor: "arista"
+          os: "arista_eos"
+          role: "spine"
+          tier: "live"
+
+      - targets: ["172.20.20.2"]
+        labels:
+          hostname: "leaf-1.croc.lab"
+          vendor: "huawei"
+          os: "huawei_vrp"
+          role: "leaf"
+          tier: "live"
+
+      - targets: ["172.20.20.6"]
+        labels:
+          hostname: "leaf-2.croc.lab"
+          vendor: "huawei"
+          os: "huawei_vrp"
+          role: "leaf"
+          tier: "live"
+
     relabel_configs:
       - source_labels: [__address__]
         target_label: __param_target
       - source_labels: [__param_target]
         target_label: instance
+      - target_label: __address__
+        replacement: snmp-exporter:9116
+
+  # ─── 3. Аппаратные метрики (CPU / RAM) ────────────────────────────────────
+  - job_name: "snmp_hardware"
+    scrape_interval: 15s
+    metrics_path: /snmp
+    params:
+      auth: [public_v2]
+    static_configs:
+      - targets: ["172.20.20.4"]
+        labels:
+          hostname: "spine-2.croc.lab"
+          vendor: "arista"
+          snmp_module: "host_resources"
+
+      - targets: ["172.20.20.5"]
+        labels:
+          hostname: "spine-1.croc.lab"
+          vendor: "cisco"
+          snmp_module: "cisco_cpu"
+
+      - targets: ["172.20.20.2"]
+        labels:
+          hostname: "leaf-1.croc.lab"
+          vendor: "huawei"
+          snmp_module: "huawei_cpu"
+
+      - targets: ["172.20.20.6"]
+        labels:
+          hostname: "leaf-2.croc.lab"
+          vendor: "huawei"
+          snmp_module: "huawei_cpu"
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
       - source_labels: [__param_target]
-        regex: "172\\.20\\.20\\.5"
-        target_label: hostname
-        replacement: "spine-1.croc.lab"
+        target_label: instance
+      - source_labels: [snmp_module]
+        target_label: __param_module
+      - target_label: __address__
+        replacement: snmp-exporter:9116
+
+  # ─── 4. Теоретический контур (Eltex, YADRO, DataRu) ───────────────────────
+  - job_name: "snmp_fabric_theoretical"
+    scrape_interval: 30s
+    scrape_timeout: 5s
+    metrics_path: /snmp
+    params:
+      module: [if_mib]
+    static_configs:
+      - targets: ["172.20.20.21"]
+        labels:
+          hostname: "leaf-3.croc.lab"
+          vendor: "eltex"
+          os: "eltex_mes"
+          role: "leaf"
+          tier: "theoretical"
+
+      - targets: ["172.20.20.22"]
+        labels:
+          hostname: "leaf-4.croc.lab"
+          vendor: "yadro"
+          os: "yadro_kornfe"
+          role: "leaf"
+          tier: "theoretical"
+
+      - targets: ["172.20.20.23"]
+        labels:
+          hostname: "border-1.croc.lab"
+          vendor: "dataru"
+          os: "dataru_nos"
+          role: "border-leaf"
+          tier: "theoretical"
+
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
       - source_labels: [__param_target]
-        regex: "172\\.20\\.20\\.4"
-        target_label: hostname
-        replacement: "spine-2.croc.lab"
-      - source_labels: [__param_target]
-        regex: "172\\.20\\.20\\.2"
-        target_label: hostname
-        replacement: "leaf-1.croc.lab"
-      - source_labels: [__param_target]
-        regex: "172\\.20\\.20\\.6"
-        target_label: hostname
-        replacement: "leaf-2.croc.lab"
+        target_label: instance
       - target_label: __address__
         replacement: snmp-exporter:9116
