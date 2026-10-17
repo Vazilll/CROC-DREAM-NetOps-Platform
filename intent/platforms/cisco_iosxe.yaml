@@ -1,6 +1,6 @@
 platform: cisco_iosxe
 vendor: Cisco Systems
-default_password: admin
+default_password: F5ga6jfkig1
 default_interface: GigabitEthernet2
 offline_ports: [2211]
 offline_interfaces:

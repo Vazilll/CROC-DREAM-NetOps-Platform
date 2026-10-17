@@ -24,6 +24,7 @@ export interface CopilotPanelProps {
   open: boolean;
   onClose: () => void;
   deviceId: number | null;
+  userRole?: import('../../api').UserRole;
   locale?: Locale;
   request: { text: string; n: number } | null;
   activeScreen?: string | null;
@@ -39,6 +40,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
   open,
   onClose,
   deviceId,
+  userRole = 'viewer',
   locale = 'ru',
   request,
   activeScreen = 'dashboard',
@@ -222,7 +224,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
               <div>{m.text}</div>
 
               {/* 1-Click Action Resolution Button */}
-              {m.action && (
+              {m.action && (userRole !== 'viewer' || m.action.type === 'open_diff' || m.action.type === 'open_device') && (
                 <div className="mt-2.5 pt-2 border-t border-white/[0.08] flex items-center justify-start">
                   <button
                     onClick={() => handleExecuteAction(m.action!)}

@@ -8,13 +8,14 @@ import {
   FileDown,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { JobDetail, JobSummary } from '../../api';
+import type { JobDetail, JobSummary, UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
 import { JobStatusBadge } from '../layout/ui';
 
 interface JobsViewProps {
   jobs: JobSummary[];
   selectedJobId: string | null;
+  userRole?: UserRole;
   locale?: Locale;
   onSelectJob: (jobId: string) => void;
   onDeploy: (jobId: string) => void;
@@ -25,12 +26,14 @@ interface JobsViewProps {
 export const JobsView: React.FC<JobsViewProps> = ({
   jobs,
   selectedJobId,
+  userRole = 'viewer',
   locale = 'ru',
   onSelectJob,
   onDeploy,
   onOpenDiff,
   onRefresh,
 }) => {
+  const canOperate = userRole !== 'viewer';
   const t = translations[locale];
   const [activeJobDetail, setActiveJobDetail] = useState<JobDetail | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -223,7 +226,7 @@ ${logsText || 'No logs recorded.'}
                   {t.viewDiffBtn}
                 </button>
 
-                {activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
+                {canOperate && activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
                   <button
                     onClick={() => onDeploy(activeJobDetail.id)}
                     disabled={

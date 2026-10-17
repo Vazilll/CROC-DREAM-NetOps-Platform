@@ -20,6 +20,12 @@ import yaml
 from fastapi import HTTPException, status
 from pydantic import SecretStr
 
+from netops.constants import (
+    const,
+    default_username,
+    fallback_password,
+    unset_password_marker,
+)
 from netops.enums import DeviceRole, Platform
 from netops.intent.models import DeviceIntent, InventoryDevice
 from netops.models import Device
@@ -182,13 +188,23 @@ def _simulate_offline_probe(clean_ip: str, clean_port: int) -> DeviceProbeResult
     profiles = load_platform_profiles()
     domain = _resolve_domain()
     platform = Platform.CISCO_IOSXE
+    matched = False
     for plat_name, cfg in profiles.items():
         if clean_port in (cfg.get("offline_ports") or []):
             try:
                 platform = Platform(plat_name)
+                matched = True
                 break
             except ValueError:
                 continue
+    if not matched and clean_port >= int(const("discovery.offline_port_family_min")):
+        for plat_name, cfg in profiles.items():
+            if any(int(p) // 10 == clean_port // 10 for p in (cfg.get("offline_ports") or [])):
+                try:
+                    platform = Platform(plat_name)
+                    break
+                except ValueError:
+                    continue
     plat_cfg = profiles.get(platform.value) or {}
     is_spine = platform in (Platform.CISCO_IOSXE, Platform.ARISTA_EOS) and (
         clean_port % 10 in (1, 2)
@@ -568,14 +584,14 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
     profiles = load_platform_profiles(container.settings.intent_repo_path)
     detected_platform = detect_platform_from_banner(banner, profiles)
     plat_cfg = profiles.get(detected_platform.value) or {}
-    default_pw = str(plat_cfg.get("default_password") or "admin")
-    req_pw = req.password if (req.password and req.password != "admin") else default_pw
+    default_pw = str(plat_cfg.get("default_password") or fallback_password())
+    req_pw = req.password if (req.password and req.password != unset_password_marker()) else default_pw
     target = DeviceTarget(
         hostname=f"probe-{clean_port}",
         platform=detected_platform,
         host=clean_ip,
         port=clean_port,
-        credentials=Credentials(req.username or "admin", req_pw),
+        credentials=Credentials(req.username or default_username(), req_pw),
     )
     hostname = f"node-{clean_port}"
     os_ver = banner or detected_platform.value
@@ -913,7 +929,9 @@ def _parse_brownfield_intent_from_config(
     asn = int(m_asn.group(1))
     m_rid = re.search(r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE)
     l3_ips = [str(i["ipv4_address"]).split("/")[0] for i in parsed_ifaces if i.get("ipv4_address")]
-    router_id = m_rid.group(1) if m_rid else (l3_ips[0] if l3_ips else "10.255.0.1")
+    router_id = m_rid.group(1) if m_rid else (l3_ips[0] if l3_ips else None)
+    if router_id is None:
+        return None
 
     announced = _parse_bgp_announced_prefixes(cfg, router_id)
     peer_descriptions: dict[str, str] = {}
@@ -997,19 +1015,19 @@ def discover_live_switch_via_ssh(
 
     plat_cfg = profiles.get(detected_platform.value) or {}
 
-    default_pw = str(plat_cfg.get("default_password") or "admin")
+    default_pw = str(plat_cfg.get("default_password") or fallback_password())
     plat_pw = (passwords_by_platform or {}).get(detected_platform.value, "")
-    non_admin_cands = [p for p in (candidate_passwords or []) if p and p != "admin"]
+    non_admin_cands = [p for p in (candidate_passwords or []) if p and p != unset_password_marker()]
     pw_candidates: list[str] = []
     for pw in (
-        *([plat_pw] if plat_pw and plat_pw != "admin" else []),
-        *([password] if password and password != "admin" else []),
+        *([plat_pw] if plat_pw and plat_pw != unset_password_marker() else []),
+        *([password] if password and password != unset_password_marker() else []),
         *non_admin_cands,
         plat_pw,
         password,
         *(candidate_passwords or []),
         default_pw,
-        "admin",
+        fallback_password(),
     ):
         if pw and pw not in pw_candidates:
             pw_candidates.append(pw)
@@ -1018,7 +1036,7 @@ def discover_live_switch_via_ssh(
     fallback_host = default_hostname or f"node-{port}.{domain}"
     os_ver = banner or detected_platform.value
     running_config = ""
-    used_pw = pw_candidates[0] if pw_candidates else "admin"
+    used_pw = pw_candidates[0] if pw_candidates else fallback_password()
     connected = False
     cpu_cores: int | None = None
     ram_gb: float | None = None
@@ -1035,7 +1053,7 @@ def discover_live_switch_via_ssh(
             platform=detected_platform,
             host=host,
             port=port,
-            credentials=Credentials(username or "admin", pw),
+            credentials=Credentials(username or default_username(), pw),
         )
         try:
             with _ParamikoConnAdapter(target, timeout=8) as conn:
@@ -1053,7 +1071,7 @@ def discover_live_switch_via_ssh(
                 collect_metrics_from_cli(
                     hostname, detected_platform.value, lambda c: conn.send_command(c).result
                 )
-                used_pw = pw
+                used_pw = getattr(conn, "authenticated_password", None) or pw
                 connected = True
                 break
         except Exception:
@@ -1070,7 +1088,7 @@ def discover_live_switch_via_ssh(
     short_stem = hostname.split(".")[0].replace("-", "")
 
     auth_profile = f"{short_stem}_auth"
-    _persist_custom_auth(settings, auth_profile, username or "admin", used_pw)
+    _persist_custom_auth(settings, auth_profile, username or default_username(), used_pw)
 
     if (
         settings.network_driver == "offline"
@@ -1145,11 +1163,11 @@ def extract_brownfield_intent(
     plat_cfg = profiles.get(device.platform.value) or {}
     cmds = plat_cfg.get("commands") or {}
     profile = settings.auth_profiles.get(device.auth_profile)
-    user = data.username or (profile.username if profile else "admin")
-    default_pw = str(plat_cfg.get("default_password") or "admin")
+    user = data.username or (profile.username if profile else default_username())
+    default_pw = str(plat_cfg.get("default_password") or fallback_password())
     pw = (
         data.password
-        if (data.password and data.password != "admin")
+        if (data.password and data.password != unset_password_marker())
         else (profile.password.get_secret_value() if profile else default_pw)
     )
     target = DeviceTarget(
@@ -1176,72 +1194,21 @@ def extract_brownfield_intent(
 
 
 def _build_default_device_intent(device: Device) -> dict[str, Any]:
-    idx = (device.id or 5) + 10
-    plat_cfg = load_platform_profiles().get(device.platform.value) or {}
-    default_if = "eth0" if device.platform == Platform.LINUX_SERVER else "GigabitEthernet2"
-    if_name = str(plat_cfg.get("default_interface") or default_if)
-
+    # Brownfield-разбор не удался: пишем каркас без выдуманных адресов, ASN и BGP-пиров,
+    # иначе deploy зальёт на устройство несуществующие настройки.
     if device.role == DeviceRole.SERVER or device.platform == Platform.LINUX_SERVER:
+        plat_cfg = load_platform_profiles().get(device.platform.value) or {}
+        if_name = str(plat_cfg.get("default_interface") or "eth0")
         return {
             "hostname": device.hostname,
             "interfaces": [
-                {
-                    "name": "lo",
-                    "description": "Loopback interface",
-                    "enabled": True,
-                    "mode": "l3",
-                    "ipv4_address": f"10.255.0.{idx}/32",
-                    "mtu": 1500,
-                },
-                {
-                    "name": if_name or "eth0",
-                    "description": "Primary server network interface",
-                    "enabled": True,
-                    "mode": "l3",
-                    "ipv4_address": f"10.0.{idx}.10/24",
-                    "mtu": 1500,
-                },
+                {"name": "lo", "description": "Loopback interface", "enabled": True, "mode": "l3"},
+                {"name": if_name, "description": "Primary server network interface", "enabled": True, "mode": "l3"},
             ],
             "bgp": None,
             "acls": [],
         }
-
-    asn = 65000 if device.role == DeviceRole.SPINE else 65100 + idx
-    lo_ip = f"10.255.0.{idx}"
-    return {
-        "hostname": device.hostname,
-        "interfaces": [
-            {
-                "name": "Loopback0",
-                "description": "Router-ID and BGP source",
-                "enabled": True,
-                "mode": "l3",
-                "ipv4_address": f"{lo_ip}/32",
-                "mtu": 1500,
-            },
-            {
-                "name": if_name,
-                "description": "Fabric link",
-                "enabled": True,
-                "mode": "l3",
-                "ipv4_address": f"10.0.{idx}.0/31",
-                "mtu": 1500,
-            },
-        ],
-        "bgp": {
-            "asn": asn,
-            "router_id": lo_ip,
-            "neighbors": [
-                {
-                    "peer_ip": f"10.0.{idx}.1",
-                    "remote_asn": 65000 if device.role == DeviceRole.LEAF else 65101,
-                    "description": "fabric-peer",
-                    "announced_prefixes": [f"{lo_ip}/32"],
-                }
-            ],
-        },
-        "acls": [],
-    }
+    return {"hostname": device.hostname, "interfaces": [], "bgp": None, "acls": []}
 
 
 def _persist_custom_auth(settings: Any, profile_name: str, username: str, password: str) -> None:
@@ -1272,10 +1239,10 @@ def bind_device_to_sot(
     """Persist custom SSH credentials and generate baseline Git SoT intent if missing."""
     settings = container.settings
     plat_cfg = load_platform_profiles(settings.intent_repo_path).get(data.platform.value) or {}
-    default_pw = str(plat_cfg.get("default_password") or "admin")
-    eff_pw = data.password if (data.password and data.password != "admin") else default_pw
-    if data.username or default_pw != "admin":
-        _persist_custom_auth(settings, data.auth_profile, data.username or "admin", eff_pw)
+    default_pw = str(plat_cfg.get("default_password") or fallback_password())
+    eff_pw = data.password if (data.password and data.password != unset_password_marker()) else default_pw
+    if data.username or default_pw != unset_password_marker():
+        _persist_custom_auth(settings, data.auth_profile, data.username or default_username(), eff_pw)
 
     if _is_protected_repo_path(settings.intent_repo_path):
         return

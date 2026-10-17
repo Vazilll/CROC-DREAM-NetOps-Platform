@@ -49,6 +49,10 @@ def create_app(
             try:
                 rt = settings.apply_runtime_overlay()
                 settings.offline_lab_path.mkdir(parents=True, exist_ok=True)
+                if not os.environ.get("PYTEST_CURRENT_TEST") and str(rt.get("exposure_mode") or "public_tunnel") == "public_tunnel":
+                    from netops.services.bootstrap_exposure import ensure_public_role_tunnels_async
+
+                    ensure_public_role_tunnels_async(settings)
                 if rt.get("bootstrap_completed"):
                     from netops.services import DeviceService
 

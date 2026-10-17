@@ -8,7 +8,13 @@ from typing import Literal, Self
 from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from netops.constants import console_ports, const
 from netops.enums import UserRole
+
+
+def _c(dotted: str, cast=None):
+    """default_factory, читающий значение из config/constants.yaml."""
+    return lambda: cast(const(dotted)) if cast else const(dotted)
 
 
 class ApiPrincipal(BaseModel):
@@ -31,75 +37,68 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_name: str = "CROC DREAM NetOps Platform"
-    database_url: str = "postgresql+psycopg://netops:netops@localhost:5432/netops"
-    redis_url: str = "redis://localhost:6379/0"
+    app_name: str = Field(default_factory=_c("app.name"))
+    database_url: str = Field(default_factory=_c("services.database_url"))
+    redis_url: str = Field(default_factory=_c("services.redis_url"))
 
-    intent_repo_path: Path = Path("intent")
-    inventory_file: str = "inventory.yaml"
-    templates_path: Path = Path("templates")
+    intent_repo_path: Path = Field(default_factory=_c("paths.intent_repo", Path))
+    inventory_file: str = Field(default_factory=_c("paths.inventory_file"))
+    templates_path: Path = Field(default_factory=_c("paths.templates", Path))
     diff_filters_path: Path | None = None
     normalization_rules_path: Path | None = None
 
     # "offline" emulates the lab with running-configs stored as files; the
     # Scrapli/Nornir driver will be registered here once it is ready.
-    network_driver: Literal["offline", "scrapli"] = "offline"
-    offline_lab_path: Path = Path("lab/running")
+    network_driver: Literal["offline", "scrapli"] = Field(default_factory=_c("network.driver"))
+    offline_lab_path: Path = Field(default_factory=_c("paths.offline_lab", Path))
 
-    commit_confirm_timeout_seconds: int = Field(default=180, ge=30, le=3600)
-    max_ping_loss_percent: float = Field(default=20.0, ge=0, le=100)
-    post_check_attempts: int = Field(default=6, ge=1, le=60)
-    post_check_interval_seconds: float = Field(default=10.0, ge=0)
+    commit_confirm_timeout_seconds: int = Field(default_factory=_c("network.commit_confirm_timeout_seconds"), ge=30, le=3600)
+    max_ping_loss_percent: float = Field(default_factory=_c("network.max_ping_loss_percent"), ge=0, le=100)
+    post_check_attempts: int = Field(default_factory=_c("network.post_check_attempts"), ge=1, le=60)
+    post_check_interval_seconds: float = Field(default_factory=_c("network.post_check_interval_seconds"), ge=0)
 
-    drift_scan_interval_seconds: int = Field(default=900, ge=60)
-    metrics_interval_seconds: int = Field(default=60, ge=10)
+    drift_scan_interval_seconds: int = Field(default_factory=_c("scheduling.drift_scan_interval_seconds"), ge=60)
+    metrics_interval_seconds: int = Field(default_factory=_c("scheduling.metrics_interval_seconds"), ge=10)
     # Как часто заново проверять протоколы устройств и переписывать цели сборщиков.
-    collector_targets_interval_seconds: int = Field(default=3600, ge=300)
-    job_timeout_seconds: int = Field(default=3600, ge=60)
+    collector_targets_interval_seconds: int = Field(default_factory=_c("scheduling.collector_targets_interval_seconds"), ge=300)
+    job_timeout_seconds: int = Field(default_factory=_c("scheduling.job_timeout_seconds"), ge=60)
 
     # {"<токен>": {"username": "alice", "role": "admin"}}
     api_tokens: dict[str, ApiPrincipal] = Field(default_factory=dict)
     # {"lab": {"username": "admin", "password": "admin"}}
-    auth_profiles: dict[str, AuthProfile] = Field(
-        default_factory=lambda: {
-            "lab": AuthProfile(username="admin", password=SecretStr("admin")),
-            "spine1_auth": AuthProfile(username="admin", password=SecretStr("F5ga6jfkig1")),
-            "spine2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
-            "leaf1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
-            "leaf2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
-        }
-    )
+    # Профили стендов задаются при подключении (Runtime Overlay) или через NETOPS_AUTH_PROFILES.
+    auth_profiles: dict[str, AuthProfile] = Field(default_factory=dict)
 
     # LLM Risk Assistant settings (Multi-provider cascade: Ollama -> Groq -> Gemini -> MiMo -> Heuristic)
     # 0. Local Ollama / vLLM (Empty URL = disabled; no API key required)
-    ollama_url: str = ""
-    ollama_model: str = "qwen2.5:7b"
-    ollama_timeout_seconds: float = 4.0
+    ollama_url: str = Field(default_factory=_c("llm.ollama.url"))
+    ollama_model: str = Field(default_factory=_c("llm.ollama.model"))
+    ollama_timeout_seconds: float = Field(default_factory=_c("llm.ollama.timeout_seconds"))
 
     # 1. Groq (Ultra-fast Qwen 3.8 27B / GPT-OSS 120B)
     groq_api_key: SecretStr | None = None
-    groq_base_url: str = "https://api.groq.com/openai/v1"
-    groq_model: str = "qwen/qwen3.8-27b"
-    groq_timeout_seconds: float = 2.0
+    groq_base_url: str = Field(default_factory=_c("llm.groq.base_url"))
+    groq_model: str = Field(default_factory=_c("llm.groq.model"))
+    groq_timeout_seconds: float = Field(default_factory=_c("llm.groq.timeout_seconds"))
 
     # 2. Google Gemini (Cloud Backup with fast 2.0s timeout)
     gemini_api_key: SecretStr | None = None
-    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
-    gemini_model: str = "gemini-2.5-flash"
-    gemini_timeout_seconds: float = 2.0
+    gemini_base_url: str = Field(default_factory=_c("llm.gemini.base_url"))
+    gemini_model: str = Field(default_factory=_c("llm.gemini.model"))
+    gemini_timeout_seconds: float = Field(default_factory=_c("llm.gemini.timeout_seconds"))
 
     # 3. Team / Default provider (Xiaomi MiMo or custom proxy)
     llm_api_key: SecretStr | None = None
-    llm_base_url: str = ""
-    llm_model: str = "MiMo-V2.6-Flash"
-    llm_timeout_seconds: float = 2.0
+    llm_base_url: str = Field(default_factory=_c("llm.team.base_url"))
+    llm_model: str = Field(default_factory=_c("llm.team.model"))
+    llm_timeout_seconds: float = Field(default_factory=_c("llm.team.timeout_seconds"))
 
     # Custom dynamic LLM cascade configs: [{"name": "Groq", "base_url": "...", "model": "...", "api_key": "...", "timeout_seconds": 2.0}]
     llm_cascade: list[dict[str, object]] = Field(default_factory=list)
 
     # Time-series forecasting (empty URL = built-in statistical linear trend & quantile envelope)
     forecast_url: str = ""
-    forecast_timeout_seconds: float = 5.0
+    forecast_timeout_seconds: float = Field(default_factory=_c("forecast.timeout_seconds"))
 
     # NetBox as the inventory source (empty URL = inventory.yaml of the intent repository).
     netbox_url: str = ""
@@ -107,7 +106,7 @@ class Settings(BaseSettings):
 
     # Containerlab remote management (for emergency hard reset)
     clab_host: str | None = None
-    clab_port: int = 221
+    clab_port: int = Field(default_factory=_c("network.clab_ssh_port"))
     clab_user: str | None = None
     clab_password: SecretStr | None = None
     clab_key_path: str | None = None
@@ -130,17 +129,21 @@ class Settings(BaseSettings):
     github_repo_url: str = ""
 
     # Web panel URLs & fabric defaults (human-configurable or trigger-populated)
-    frontend_port: int = Field(default=5173, ge=1, le=65535)
+    frontend_port: int = Field(default_factory=_c("console.owner_port"), ge=1, le=65535)
     public_web_url: str = ""
-    default_fabric_id: str = "croc-dc1-pod1"
-    default_domain: str = "croc.lab"
+    default_fabric_id: str = Field(default_factory=_c("app.default_fabric_id"))
+    default_domain: str = Field(default_factory=_c("app.default_domain"))
 
     # Browser origins allowed to call the API (the Vite dev server by default).
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
+        default_factory=lambda: [
+            f"http://{host}:{port}"
+            for host in ("localhost", "127.0.0.1")
+            for port in console_ports()
+        ]
     )
     # Browser cookie session lifetime (one NOC shift by default).
-    session_ttl_seconds: int = Field(default=12 * 3600, ge=60)
+    session_ttl_seconds: int = Field(default_factory=_c("session.ttl_seconds"), ge=60)
 
 
     @field_validator("intent_repo_path", "templates_path", "offline_lab_path", mode="after")

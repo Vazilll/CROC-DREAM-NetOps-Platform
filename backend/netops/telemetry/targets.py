@@ -25,6 +25,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from netops.constants import const
 from netops.db import utcnow
 from netops.enums import TelemetryProtocol
 from netops.intent import InventoryDevice
@@ -183,9 +184,9 @@ def sync_grafana_dashboard_to_db(grafana_url: str | None = None) -> dict[str, An
     if not dash:
         return None
 
-    target_url = (grafana_url or os.environ.get("GRAFANA_URL") or "http://grafana:3000").rstrip("/")
-    user = os.environ.get("GRAFANA_ADMIN_USER", "admin")
-    password = os.environ.get("GRAFANA_ADMIN_PASSWORD", "admin")
+    target_url = (grafana_url or os.environ.get("GRAFANA_URL") or const("services.grafana_url")).rstrip("/")
+    user = os.environ.get("GRAFANA_ADMIN_USER") or const("services.grafana_admin_user")
+    password = os.environ.get("GRAFANA_ADMIN_PASSWORD") or const("services.grafana_admin_password")
     auth_hdr = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
     payload = json.dumps({"dashboard": dash, "overwrite": True}).encode("utf-8")
     with contextlib.suppress(Exception):

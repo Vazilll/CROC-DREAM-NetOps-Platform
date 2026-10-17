@@ -27,7 +27,7 @@ interface MobileNavProps {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
   userRole: UserRole;
-  setUserRole: (role: UserRole) => void;
+  setUserRole?: (role: UserRole) => void;
   setLocale: (l: Locale) => void;
   onToggleCopilot: () => void;
   onOpenSearch: () => void;
@@ -41,7 +41,6 @@ export const MobileNav: React.FC<MobileNavProps> = ({
   theme,
   setTheme,
   userRole,
-  setUserRole,
   setLocale,
   onToggleCopilot,
   onOpenSearch,
@@ -181,29 +180,33 @@ export const MobileNav: React.FC<MobileNavProps> = ({
                 <span>{t.tabDrift}</span>
               </button>
 
-              <button
-                onClick={() => handleSelectTab('lab')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
-                  activeTab === 'lab'
-                    ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-semibold'
-                    : 'text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/[0.04]'
-                }`}
-              >
-                <FlaskConical className="w-4 h-4 text-amber-500" />
-                <span>{t.tabLab}</span>
-              </button>
+              {userRole !== 'viewer' && (
+                <button
+                  onClick={() => handleSelectTab('lab')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
+                    activeTab === 'lab'
+                      ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-semibold'
+                      : 'text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <FlaskConical className="w-4 h-4 text-amber-500" />
+                  <span>{t.tabLab}</span>
+                </button>
+              )}
 
-              <button
-                onClick={() => handleSelectTab('emergency')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
-                  activeTab === 'emergency'
-                    ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold'
-                    : 'text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/[0.04]'
-                }`}
-              >
-                <AlertTriangle className="w-4 h-4 text-rose-500" />
-                <span>{locale === 'en' ? 'Emergency Hub' : 'Аварийный хаб'}</span>
-              </button>
+              {(userRole === 'admin' || userRole === 'owner') && (
+                <button
+                  onClick={() => handleSelectTab('emergency')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
+                    activeTab === 'emergency'
+                      ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 font-semibold'
+                      : 'text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/[0.04]'
+                  }`}
+                >
+                  <AlertTriangle className="w-4 h-4 text-rose-500" />
+                  <span>{locale === 'en' ? 'Emergency Hub' : 'Аварийный хаб'}</span>
+                </button>
+              )}
             </div>
 
             {/* Mobile Controls & Preferences */}
@@ -249,26 +252,14 @@ export const MobileNav: React.FC<MobileNavProps> = ({
 
               <div className="flex items-center justify-between px-2">
                 <span className="text-xs font-medium text-[var(--text-secondary)]">
-                  {locale === 'en' ? 'Security Role' : 'Роль доступа (RBAC)'}
+                  {locale === 'en' ? 'Security Role (RBAC)' : 'Роль доступа (RBAC)'}
                 </span>
-                <div className="flex items-center gap-1">
-                  {(['owner', 'admin', 'operator', 'viewer'] as UserRole[]).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setUserRole(r)}
-                      className={`px-2 py-1 rounded-lg text-[10px] font-mono capitalize transition-all cursor-pointer ${
-                        userRole === r
-                          ? 'bg-cyan-500 text-white font-bold shadow-sm'
-                          : 'bg-black/5 dark:bg-white/[0.05] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
-                      }`}
-                    >
-                      {r}
-                    </button>
-                  ))}
-                </div>
+                <span className="px-2.5 py-1 rounded-lg text-[11px] font-mono uppercase bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 font-semibold">
+                  {userRole}
+                </span>
               </div>
 
-              {onOpenShare && (
+              {onOpenShare && (userRole === 'owner' || userRole === 'admin') && (
                 <button
                   onClick={() => {
                     setMoreMenuOpen(false);

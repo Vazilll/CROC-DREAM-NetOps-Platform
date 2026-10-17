@@ -12,6 +12,7 @@ from typing import Any, Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from netops.constants import const
 from netops.db import build_engine, build_session_factory, utcnow
 from netops.enums import DeviceStatus, DriftStatus, JobStatus
 from netops.models import Device, DriftRecord, Job
@@ -342,7 +343,8 @@ def _bot_username(settings: Settings | None = None) -> str:
 
 def _web_urls(settings: Settings | None = None) -> tuple[str, str]:
     host = _public_host(settings)
-    port = int(getattr(settings, "frontend_port", 5173) or 5173) if settings is not None else 5173
+    owner_port = int(const("console.owner_port"))
+    port = int(getattr(settings, "frontend_port", None) or owner_port) if settings is not None else owner_port
     pub_override = (
         str(getattr(settings, "public_web_url", "") or "").strip().rstrip("/")
         if settings is not None

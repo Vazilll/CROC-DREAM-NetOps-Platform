@@ -45,10 +45,20 @@ except Exception:
 LAB_NAME=$(echo "${PARSE_OUTPUT}" | grep '^LAB_NAME=' | cut -d'=' -f2)
 
 get_node_credentials() {
-  case "${1:-}" in
-    *spine1*|*cisco*) echo "admin:F5ga6jfkig1" ;;
-    *) echo "admin:admin" ;;
-  esac
+  local cfg="${CONFIG_DIR}/${2:-}"
+  if [ -n "${CLAB_NODE_CREDS:-}" ]; then
+    echo "${CLAB_NODE_CREDS}"
+    return
+  fi
+  if [ -f "${cfg}" ]; then
+    local parsed
+    parsed=$(awk '/^username / && /password / {for(i=1;i<=NF;i++) if($i=="password") print $2":"$(i+2)}' "${cfg}" | head -n1)
+    if [ -n "${parsed}" ]; then
+      echo "${parsed}"
+      return
+    fi
+  fi
+  echo "${CLAB_DEFAULT_USER:-admin}:${CLAB_DEFAULT_PASS:-admin}"
 }
 
 # --- 1. Arista cEOS ---
@@ -77,7 +87,7 @@ reset_huawei() {
   local cfg_file="$2"
   local container="clab-${LAB_NAME}-${node}"
   local full_cfg="${CONFIG_DIR}/${cfg_file}"
-  local creds=$(get_node_credentials "${node}")
+  local creds=$(get_node_credentials "${node}" "${cfg_file}")
   local user=$(echo "$creds" | cut -d':' -f1)
   local pass=$(echo "$creds" | cut -d':' -f2)
 
@@ -184,7 +194,7 @@ reset_cisco() {
   local cfg_file="$2"
   local full_cfg="${CONFIG_DIR}/${cfg_file}"
   local container="clab-${LAB_NAME}-${node}"
-  local creds=$(get_node_credentials "${node}")
+  local creds=$(get_node_credentials "${node}" "${cfg_file}")
   local user=$(echo "$creds" | cut -d':' -f1)
   local pass=$(echo "$creds" | cut -d':' -f2)
 
@@ -200,7 +210,7 @@ tn.write(b"\r\n\r\n")
 time.sleep(0.5)
 
 pw_try = 0
-pws = [pwd, "F5ga6jfkig1", "Admin@123"]
+pws = [pwd]
 for _ in range(7):
     idx, _, _ = tn.expect([br"[Uu]sername:", br"[Pp]assword:", br"#", br">"], timeout=2)
     if idx == 0: tn.write(f"{user}\r\n".encode())

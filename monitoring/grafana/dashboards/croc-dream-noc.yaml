@@ -200,7 +200,9 @@ panels:
     gridPos: { h: 8, w: 12, x: 12, y: 13 }
     datasource: { type: postgres, uid: postgres-netops }
     targets:
-      - rawSql: "SELECT hostname, fabric_id, site, platform, role, status, management_ip, last_checked_at FROM devices WHERE ('$__all' IN (${fabric_id:singlequote}) OR fabric_id IN (${fabric_id:singlequote})) ORDER BY fabric_id, hostname;"
+      - rawQuery: true
+        editorMode: code
+        rawSql: "SELECT hostname, fabric_id, COALESCE(site, fabric_id) AS site, platform, role, status, management_ip, last_checked_at FROM devices WHERE ('${fabric_id:raw}' IN ('$__all', '.*', '') OR fabric_id ~ '${fabric_id:regex}') ORDER BY fabric_id, hostname;"
         format: table
         refId: A
 

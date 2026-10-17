@@ -2,7 +2,7 @@ platform: linux_server
 vendor: Linux
 default_password: admin
 default_interface: eth0
-offline_ports: [2231, 2232]
+offline_ports: [2231]
 offline_interfaces:
   - eth0
   - eth1

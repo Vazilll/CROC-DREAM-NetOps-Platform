@@ -37,16 +37,43 @@ _bind_device_to_sot = bind_device_to_sot
 router = APIRouter(tags=["devices"])
 
 
-def device_allowed(device: Device, allowed_system: str | None) -> bool:
+def device_allowed(device: Any, allowed_system: str | None) -> bool:
     if not allowed_system or allowed_system in ("*", "all"):
         return True
-    target = allowed_system.removeprefix("fabric:").removeprefix("site:")
-    return (
-        device.hostname == allowed_system
-        or str(device.id) == allowed_system
-        or getattr(device, "fabric_id", None) in (allowed_system, target)
-        or getattr(device, "site", None) in (allowed_system, target)
-    )
+    plat = getattr(device, "platform", None)
+    plat_str = str(getattr(plat, "value", plat) or "").lower()
+    hostname = str(getattr(device, "hostname", "") or "")
+    dev_id = str(getattr(device, "id", "") or "")
+    fabric = str(getattr(device, "fabric_id", "") or "")
+    site = str(getattr(device, "site", "") or "")
+
+    for raw_token in allowed_system.split(","):
+        token = raw_token.strip().lower()
+        if not token or token in ("*", "all"):
+            return True
+        target = token.removeprefix("fabric:").removeprefix("site:").removeprefix("platform:")
+        if (
+            hostname.lower() == token
+            or hostname.lower() == target
+            or dev_id == token
+            or fabric.lower() in (token, target)
+            or site.lower() in (token, target)
+            or plat_str in (token, target)
+            or (target == "huawei" and "huawei" in plat_str)
+            or (target == "arista" and "arista" in plat_str)
+            or (target == "frr" and "frr" in plat_str)
+            or (target == "server" and "server" in plat_str)
+        ):
+            return True
+    return False
+
+
+def assert_device_allowed(device: Any, allowed_system: str | None) -> None:
+    if not device_allowed(device, allowed_system):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Доступ вашей ссылки ограничен системой {allowed_system}",
+        )
 
 
 @router.get("/devices", response_model=list[DeviceRead], summary="Список устройств")
@@ -82,11 +109,7 @@ def get_device(
     device_id: int, service: DeviceServiceDep, container: ContainerDep, principal: Viewer
 ) -> DeviceDetail:
     device = service.get(device_id)
-    if not device_allowed(device, principal.allowed_system):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"Доступ вашей ссылки ограничен системой {principal.allowed_system}",
-        )
+    assert_device_allowed(device, principal.allowed_system)
     detail = DeviceDetail.model_validate(device)
     try:
         detail.intent = container.intents.load_device_intent(device.hostname)
@@ -162,8 +185,10 @@ def create_device(
 
 @router.patch("/devices/{device_id}", response_model=DeviceRead, summary="Изменить устройство")
 def update_device(
-    device_id: int, data: DeviceUpdate, service: DeviceServiceDep, _: Admin
+    device_id: int, data: DeviceUpdate, service: DeviceServiceDep, admin: Admin
 ) -> Device:
+    device = service.get(device_id)
+    assert_device_allowed(device, admin.allowed_system)
     return service.update(device_id, data)
 
 
@@ -171,11 +196,12 @@ def update_device(
     "/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT, summary="Удалить устройство"
 )
 def delete_device(
-    device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Admin
+    device_id: int, service: DeviceServiceDep, container: ContainerDep, admin: Admin
 ) -> Response:
     from netops.services.notifier import sync_access_registry
 
     device = service.get(device_id)
+    assert_device_allowed(device, admin.allowed_system)
     hostname = device.hostname
     service.delete(device_id)
     remove_device_from_sot(
@@ -192,8 +218,9 @@ def delete_device(
     response_model=DeviceRead,
     summary="Promote device from MONITORING_ONLY to MANAGED",
 )
-def promote_device(device_id: int, service: DeviceServiceDep, _: Admin) -> Device:
+def promote_device(device_id: int, service: DeviceServiceDep, admin: Admin) -> Device:
     device = service.get(device_id)
+    assert_device_allowed(device, admin.allowed_system)
     device.management_mode = "MANAGED"
     service._session.commit()
     return device
@@ -212,6 +239,7 @@ def device_emergency_action(
     admin: Admin,
 ) -> dict[str, Any]:
     device = service.get(device_id)
+    assert_device_allowed(device, admin.allowed_system)
     return execute_device_emergency_action(device, data, container, admin.username)
 
 

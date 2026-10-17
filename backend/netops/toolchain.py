@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from netops.constants import default_username
 from netops.errors import PipelineError
 from netops.intent.models import InventoryDevice
 from netops.intent.repository import IntentRepository
@@ -74,10 +75,24 @@ def build_toolchain(settings: Settings) -> Toolchain:
             deployer = driver
             health_probe = driver
 
+    intents = IntentRepository(settings.intent_repo_path, inventory_file=settings.inventory_file)
     creds_map = {
         name: Credentials(profile.username, profile.password.get_secret_value())
         for name, profile in settings.auth_profiles.items()
     }
+    if "auth_profiles" not in settings.model_fields_set:
+        try:
+            from netops.services.discovery import load_platform_profiles
+
+            plat_profiles = load_platform_profiles(settings.intent_repo_path)
+            for dev in intents.load().inventory.devices:
+                if dev.auth_profile not in creds_map:
+                    plat_cfg = plat_profiles.get(dev.platform.value) or {}
+                    def_pw = str(plat_cfg.get("default_password") or "")
+                    if def_pw:
+                        creds_map[dev.auth_profile] = Credentials(default_username(), def_pw)
+        except Exception:
+            pass
     try:
         from netops.services.state import get_state_manager
 
@@ -94,7 +109,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
         pass
 
     return Toolchain(
-        intents=IntentRepository(settings.intent_repo_path, inventory_file=settings.inventory_file),
+        intents=intents,
         renderer=JinjaConfigRenderer(settings.templates_path),
         normalizer=ConfigNormalizer.from_file(
             settings.diff_filters_path or settings.normalization_rules_path

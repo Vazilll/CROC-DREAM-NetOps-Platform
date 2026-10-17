@@ -10,7 +10,6 @@ import {
   Trash2,
   Zap,
   Lock,
-  ArrowRight,
   Copy,
   Check,
   History,
@@ -27,10 +26,10 @@ const PRESETS: Record<string, string[]> = {
 
 interface EmergencyHubProps {
   currentRole: 'operator' | 'admin';
-  onSwitchRole: (role: 'operator' | 'admin') => void;
+  onSwitchRole?: (role: 'operator' | 'admin') => void;
 }
 
-export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitchRole }) => {
+export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   const [devices, setDevices] = useState<Array<{ hostname: string; platform: string; label: string }>>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
   const [command, setCommand] = useState<string>('show ip bgp summary');
@@ -203,7 +202,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // If Operator, show authorization barrier with easy switch
+  // If non-admin, show strict RBAC authorization barrier without client-side self-elevation
   if (currentRole !== 'admin') {
     return (
       <div className="max-w-4xl mx-auto p-8 animate-fade-in">
@@ -211,19 +210,10 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
           <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
             <Lock className="w-7 h-7" />
           </div>
-          <h2 className="text-xl font-bold text-white">Доступ к Аварийному пульту ограничен</h2>
+          <h2 className="text-xl font-bold text-white">Доступ к Аварийному пульту ограничен (403 RBAC)</h2>
           <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-            Модуль аварийного вмешательства (прямой Web CLI, накатывание хот-патчей и двухуровневый сброс фабрики) доступен только пользователям с ролью <strong className="text-amber-300">Администратор</strong>.
+            Модуль аварийного вмешательства (прямой Web SSH CLI, накатывание хот-патчей и двухуровневый сброс фабрики) доступен только пользователям с ролью <strong className="text-amber-300">Admin</strong> или <strong className="text-amber-300">Owner</strong>.
           </p>
-          <div className="pt-2">
-            <button
-              onClick={() => onSwitchRole('admin')}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-semibold text-sm text-black bg-amber-400 hover:bg-amber-300 transition-all cursor-pointer shadow-lg shadow-amber-500/20"
-            >
-              Переключиться в режим Администратора
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
     );

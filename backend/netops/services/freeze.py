@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from netops.constants import const
 from netops.services.state import get_state_manager
 
 
@@ -28,12 +29,17 @@ def set_factory_freeze(
     return get_state_manager().set_factory_freeze(
         frozen=frozen,
         reason=reason or "",
-        user=user or "operator",
+        user=user or str(const("audit.default_freeze_user")),
         fabric_id=fabric_id,
     )
 
 
 def set_freeze_state(
-    frozen: bool, reason: str = "", by: str = "admin", fabric_id: str | None = None
+    frozen: bool, reason: str = "", by: str | None = None, fabric_id: str | None = None
 ) -> dict[str, Any]:
-    return set_factory_freeze(frozen=frozen, reason=reason, user=by, fabric_id=fabric_id)
+    return set_factory_freeze(
+        frozen=frozen,
+        reason=reason,
+        user=by or str(const("audit.default_actor")),
+        fabric_id=fabric_id,
+    )

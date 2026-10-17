@@ -1,8 +1,8 @@
 platform: huawei_vrp
 vendor: Huawei Technologies
-default_password: admin
+default_password: F5ga6jfkig
 default_interface: GE1/0/0
-offline_ports: [2221, 2222, 2003, 2004]
+offline_ports: [2221]
 offline_interfaces:
   - GE1/0/0
   - GE1/0/1

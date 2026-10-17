@@ -1,8 +1,8 @@
 platform: arista_eos
 vendor: Arista Networks
-default_password: admin
+default_password: F5ga6jfkig2
 default_interface: Ethernet1
-offline_ports: [2212, 2001]
+offline_ports: [2212]
 offline_interfaces:
   - GigabitEthernet1
   - GigabitEthernet2

@@ -2,7 +2,7 @@ platform: juniper_junos
 vendor: Juniper Networks
 default_password: admin
 default_interface: ge-0/0/0
-offline_ports: [2251, 2252]
+offline_ports: [2251]
 offline_interfaces:
   - ge-0/0/0
   - ge-0/0/1

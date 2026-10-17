@@ -12,16 +12,18 @@ import {
   FileDown,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { DriftReportItem } from '../../api';
+import type { DriftReportItem, UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
 
 interface DriftViewProps {
+  userRole?: UserRole;
   locale?: Locale;
   onRemediate: (deviceId: number) => void;
   onScanDrift: () => void;
 }
 
-export const DriftView: React.FC<DriftViewProps> = ({ locale = 'ru', onRemediate, onScanDrift }) => {
+export const DriftView: React.FC<DriftViewProps> = ({ userRole = 'viewer', locale = 'ru', onRemediate, onScanDrift }) => {
+  const canOperate = userRole !== 'viewer';
   const t = translations[locale];
   const [report, setReport] = useState<DriftReportItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,13 +152,15 @@ ${listText || 'Данные отсутствуют'}
             </button>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={onScanDrift}
-              className="flex-1 px-3 py-1.5 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-opacity cursor-pointer"
-            >
-              <RotateCw className="w-3.5 h-3.5" />
-              <span>{t.scanDriftBtn}</span>
-            </button>
+            {canOperate && (
+              <button
+                onClick={onScanDrift}
+                className="flex-1 px-3 py-1.5 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-medium flex items-center justify-center gap-1.5 transition-opacity cursor-pointer"
+              >
+                <RotateCw className="w-3.5 h-3.5" />
+                <span>{t.scanDriftBtn}</span>
+              </button>
+            )}
             <button
               onClick={fetchReport}
               className="p-1.5 bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] rounded-md border border-[var(--border-subtle)] transition-colors cursor-pointer"
@@ -222,7 +226,7 @@ ${listText || 'Данные отсутствуют'}
                   </span>
                 )}
 
-                {item.status === 'DRIFT_DETECTED' && (
+                {canOperate && item.status === 'DRIFT_DETECTED' && (
                   <button
                     onClick={() => onRemediate(item.device_id)}
                     className="px-3 py-1.5 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-mono font-semibold flex items-center gap-1.5 transition-opacity cursor-pointer"

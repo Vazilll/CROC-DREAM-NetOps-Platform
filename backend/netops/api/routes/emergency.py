@@ -296,6 +296,9 @@ def execute_emergency_command(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device '{req.device}' not found in active inventory",
         )
+    from netops.api.routes.devices import assert_device_allowed
+
+    assert_device_allowed(device_obj, principal.allowed_system)
 
     # Offline simulation fallback
     if container.settings.network_driver == "offline":
@@ -371,7 +374,7 @@ def execute_emergency_command(
 def apply_emergency_patch(
     req: EmergencyPatchRequest,
     container: ContainerDep,
-    _: Admin,
+    admin: Admin,
 ) -> dict[str, Any]:
     toolchain = build_toolchain(container.settings)
     snapshot = container.intents.load()
@@ -381,6 +384,9 @@ def apply_emergency_patch(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Device '{req.device}' not found in active inventory",
         )
+    from netops.api.routes.devices import assert_device_allowed
+
+    assert_device_allowed(device_obj, admin.allowed_system)
 
     with container.session_factory() as session:
         from sqlalchemy import select
@@ -405,7 +411,7 @@ def apply_emergency_patch(
             )
 
         state_mgr = get_state_manager()
-        lock_holder = f"emergency_patch:{_.username}"
+        lock_holder = f"emergency_patch:{admin.username}"
         state_mgr.acquire_sync_lock(f"device:{device_obj.hostname}", holder=lock_holder, ttl=600, reason=req.reason)
         db_device = session.scalar(select(Device).where(Device.hostname == device_obj.hostname))
         if db_device is not None:
@@ -428,7 +434,7 @@ def apply_emergency_patch(
         patch_text = "\n".join(lines)
         cfg_path.write_text(f"{existing.rstrip()}\n{patch_text}\n", encoding="utf-8")
         record_audit(
-            user=_.username,
+            user=admin.username,
             action="emergency_patch",
             device=device_obj.hostname,
             payload=patch_text,
@@ -450,7 +456,7 @@ def apply_emergency_patch(
         with _ParamikoConnAdapter(target, timeout=35) as conn:
             res = conn.send_configs(lines)
             record_audit(
-                user=_.username,
+                user=admin.username,
                 action="emergency_patch",
                 device=device_obj.hostname,
                 payload="\n".join(lines),
@@ -468,7 +474,7 @@ def apply_emergency_patch(
             }
     except Exception as exc:
         record_audit(
-            user=_.username,
+            user=admin.username,
             action="emergency_patch",
             device=device_obj.hostname,
             payload="\n".join(lines),

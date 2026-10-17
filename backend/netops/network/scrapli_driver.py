@@ -14,6 +14,7 @@ import threading
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
+from netops.constants import unset_password_marker
 from netops.enums import Platform
 from netops.network.base import (
     BgpSessionState,
@@ -102,6 +103,7 @@ class _ParamikoConnAdapter:
         self.client = None
         self._jump_client = None
         self.shell = None
+        self.authenticated_password: str | None = None
 
     def _resolve_clab_jump_defaults(self) -> tuple[str, str, int, str | None]:
         import os
@@ -178,12 +180,10 @@ class _ParamikoConnAdapter:
                 self._jump_client.close()
             self._jump_client = None
 
-        if not _check_tcp_endpoint(host, port, timeout=2.5):
-            raise TimeoutError(f"Jump host {host}:{port} is unreachable")
+        if not host:
+            raise TimeoutError("Jump host is not configured")
 
         with _JUMP_LOCK:
-            if not _check_tcp_endpoint(host, port, timeout=2.5):
-                raise TimeoutError(f"Jump host {host}:{port} is unreachable")
             jump = paramiko_mod.SSHClient()
             jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
             key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
@@ -197,6 +197,8 @@ class _ParamikoConnAdapter:
                 look_for_keys=not bool(jump_pwd),
                 allow_agent=not bool(jump_pwd),
                 timeout=min(self.timeout, 8),
+                banner_timeout=12,
+                auth_timeout=10,
             )
             self._jump_client = jump
             transport = jump.get_transport()
@@ -205,22 +207,43 @@ class _ParamikoConnAdapter:
             )
 
     def _connect_with_sock(self, paramiko_mod, username: str, password: str, sock=None) -> None:
-        candidate_passwords = [password]
-        for fallback_pw in ("admin", "Admin@123", "F5ga6jfkig1"):
-            if fallback_pw not in candidate_passwords:
+        candidate_passwords: list[str] = []
+        with contextlib.suppress(Exception):
+            from netops.services.discovery import load_platform_profiles
+
+            profiles = load_platform_profiles()
+            plat_key = self.target.platform.value
+            plat_prof = profiles.get(plat_key)
+            own_default = str(plat_prof.get("default_password") or "") if plat_prof else ""
+            other_defaults = {
+                str(p.get("default_password") or "")
+                for k, p in profiles.items()
+                if k != plat_key and p.get("default_password")
+            }
+            if password and password != unset_password_marker() and password not in other_defaults:
+                candidate_passwords.append(password)
+            if own_default and own_default not in candidate_passwords:
+                candidate_passwords.append(own_default)
+            if password and password != unset_password_marker() and password not in candidate_passwords:
+                candidate_passwords.append(password)
+            for prof in profiles.values():
+                dp = str(prof.get("default_password") or "")
+                if dp and dp not in candidate_passwords:
+                    candidate_passwords.append(dp)
+        for fallback_pw in (password,):
+            if fallback_pw and fallback_pw not in candidate_passwords:
                 candidate_passwords.append(fallback_pw)
 
         last_err: Exception | None = None
         for idx, cand_pw in enumerate(candidate_passwords):
-            current_sock = sock
+            current_sock = sock if idx == 0 else None
             if idx > 0 and sock is not None:
-                with contextlib.suppress(Exception):
-                    current_sock = self._open_jump_channel(
-                        paramiko_mod,
-                        self.proxy_jump or "auto",
-                        self.target.host,
-                        self.target.port,
-                    )
+                current_sock = self._open_jump_channel(
+                    paramiko_mod,
+                    self.proxy_jump or "auto",
+                    self.target.host,
+                    self.target.port,
+                )
             try:
                 self.client.connect(
                     self.target.host,
@@ -234,9 +257,10 @@ class _ParamikoConnAdapter:
                     banner_timeout=15,
                     auth_timeout=12,
                 )
+                self.authenticated_password = cand_pw
                 return
-            except paramiko_mod.ssh_exception.AuthenticationException as auth_exc:
-                last_err = auth_exc
+            except paramiko_mod.ssh_exception.BadAuthenticationType as bad_auth_exc:
+                last_err = bad_auth_exc
                 try:
                     transport = self.client.get_transport()
                     if transport is None or not transport.is_active():
@@ -258,12 +282,18 @@ class _ParamikoConnAdapter:
                             pw for _ in prompt_list
                         ],
                     )
+                    self.authenticated_password = cand_pw
                     return
                 except paramiko_mod.ssh_exception.AuthenticationException as interactive_exc:
                     last_err = interactive_exc
                     with contextlib.suppress(Exception):
                         self.client.close()
                     continue
+            except paramiko_mod.ssh_exception.AuthenticationException as auth_exc:
+                last_err = auth_exc
+                with contextlib.suppress(Exception):
+                    self.client.close()
+                continue
         if last_err is not None:
             raise last_err
 
@@ -388,23 +418,42 @@ class _ParamikoConnAdapter:
         while self.shell.recv_ready():
             _ = self.shell.recv(16384)
         self.shell.send(f"{cmd}\n")
-        time.sleep(0.2)
+        time.sleep(0.15)
         output = ""
         cmd_prefix = cmd.strip()[:16]
         deadline = time.time() + self.timeout
+        last_recv_at = time.time()
         while time.time() < deadline:
             if self.shell.recv_ready():
                 output += self.shell.recv(16384).decode("utf-8", errors="ignore")
-                time.sleep(0.08)
+                last_recv_at = time.time()
+                time.sleep(0.05)
             elif output and (not cmd_prefix or cmd_prefix in output):
                 stripped = output.rstrip()
-                if stripped.endswith(("#", ">", "]")):
+                last_line = stripped.rsplit("\n", 1)[-1].strip()
+                has_body = "\n" in stripped
+                if self.target.platform == Platform.HUAWEI_VRP:
+                    is_prompt = has_body and (
+                        (last_line.startswith("<") and last_line.endswith(">"))
+                        or (last_line.startswith("[") and last_line.endswith("]"))
+                    )
+                else:
+                    is_prompt = (
+                        has_body
+                        and last_line != "#"
+                        and len(last_line) > 1
+                        and last_line.endswith(("#", ">", "]", "$", "%"))
+                    )
+                if is_prompt:
+                    time.sleep(0.05)
+                    if not self.shell.recv_ready():
+                        break
+                    continue
+                if has_body and (time.time() - last_recv_at) >= 2.5:
                     break
-                time.sleep(0.2)
-                if not self.shell.recv_ready():
-                    break
+                time.sleep(0.1)
             else:
-                time.sleep(0.15)
+                time.sleep(0.1)
         return _ScrapliResponse(output)
 
     def send_configs(self, lines: Sequence[str]) -> _ScrapliResponse:

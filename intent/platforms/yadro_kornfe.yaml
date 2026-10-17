@@ -2,7 +2,7 @@ platform: yadro_kornfe
 vendor: YADRO
 default_password: admin
 default_interface: Ethernet1
-offline_ports: [2261, 2262]
+offline_ports: [2261]
 offline_interfaces:
   - Ethernet1
   - Ethernet2

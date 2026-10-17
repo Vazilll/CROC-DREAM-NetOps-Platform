@@ -60,7 +60,7 @@ def lint_fabric(
                 desc_lower = (interface.description or "").lower()
                 name_lower = interface.name.lower()
                 ip_str = str(interface.ipv4_address.ip)
-                if "anycast" in desc_lower or name_lower.startswith("vbdif") or ip_str == "10.0.0.15":
+                if "anycast" in desc_lower or name_lower.startswith("vbdif"):
                     continue
                 addresses[ip_str].append(
                     (intent.hostname, f"interfaces.{index}.ipv4_address")

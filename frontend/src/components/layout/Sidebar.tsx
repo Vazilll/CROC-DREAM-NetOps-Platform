@@ -1,40 +1,44 @@
 import React from 'react';
+import type { UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
-import { TAB_DEFINITIONS, type TabItem } from '../../constants';
+import { getVisibleTabs, type TabItem } from '../../constants';
 
 export type { TabItem };
 
 interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  userRole?: UserRole;
   locale?: Locale;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
+  userRole = 'viewer',
   locale = 'ru',
 }) => {
   const t = translations[locale];
+  const visibleTabs = getVisibleTabs(userRole);
 
   const groups = [
     {
       title: t.groupOverview,
-      tabs: TAB_DEFINITIONS.filter((item) => item.groupKey === 'overview'),
+      tabs: visibleTabs.filter((item) => item.groupKey === 'overview'),
     },
     {
       title: t.groupInventory,
-      tabs: TAB_DEFINITIONS.filter((item) => item.groupKey === 'inventory'),
+      tabs: visibleTabs.filter((item) => item.groupKey === 'inventory'),
     },
     {
       title: t.groupAutomation,
-      tabs: TAB_DEFINITIONS.filter((item) => item.groupKey === 'automation'),
+      tabs: visibleTabs.filter((item) => item.groupKey === 'automation'),
     },
     {
       title: t.groupTesting,
-      tabs: TAB_DEFINITIONS.filter((item) => item.groupKey === 'testing'),
+      tabs: visibleTabs.filter((item) => item.groupKey === 'testing'),
     },
-  ];
+  ].filter((g) => g.tabs.length > 0);
 
   return (
     <aside className="hidden lg:flex flex-col justify-between w-56 2xl:w-64 shrink-0 border-r border-[var(--border-subtle)] bg-[var(--bg-main)] sticky top-13 h-[calc(100dvh-3.25rem)] overflow-y-auto py-3.5 px-2.5 transition-colors select-none">

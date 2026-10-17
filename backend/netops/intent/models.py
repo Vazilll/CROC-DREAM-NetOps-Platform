@@ -323,7 +323,7 @@ class ExporterSpec(IntentModel):
 class PlatformProfile(IntentModel):
     platform: Platform | str
     vendor: str = Field(min_length=1)
-    default_password: str = "admin"
+    default_password: str = ""
     default_interface: str = Field(min_length=1)
     offline_ports: list[PortNumber] = Field(default_factory=list)
     offline_interfaces: list[str] = Field(default_factory=list)

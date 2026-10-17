@@ -161,6 +161,7 @@ const PlainCodeFallback: React.FC<{ code: string; label: string; theme: AppTheme
 interface DiffViewerProps {
   jobs: JobSummary[];
   selectedJobId: string | null;
+  userRole?: import('../../api').UserRole;
   locale?: Locale;
   theme?: AppTheme;
   onSelectJob: (jobId: string) => void;
@@ -171,11 +172,13 @@ interface DiffViewerProps {
 const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   jobs,
   selectedJobId,
+  userRole = 'viewer',
   locale = 'ru',
   theme = 'dark',
   onSelectJob,
   onDeploy,
 }) => {
+  const canOperate = userRole !== 'viewer';
   const t = translations[locale];
   const [diffData, setDiffData] = useState<JobDiff | null>(null);
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState(0);
@@ -335,7 +338,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
             )}
           </select>
 
-          {selectedJobId && (
+          {canOperate && selectedJobId && (
             <button
               onClick={handleCommitDiffToGit}
               disabled={committingGit}
@@ -347,7 +350,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
             </button>
           )}
 
-          {selectedJobId && (
+          {canOperate && selectedJobId && (
             <button
               onClick={() => onDeploy(selectedJobId)}
               disabled={!diffData?.devices.some((d) => Boolean(d.remediation_patch?.trim()))}

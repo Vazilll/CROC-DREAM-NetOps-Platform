@@ -104,7 +104,7 @@ const renderFormattedText = (text: string) => {
 
 export const DevicePage: React.FC<Props> = ({
   deviceId,
-  userRole = 'operator',
+  userRole = 'viewer',
   locale = 'ru',
   onBack,
   onRunDryRun,
@@ -202,7 +202,9 @@ export const DevicePage: React.FC<Props> = ({
 
   const isServer = device.platform === 'linux_server' || device.role === 'server';
   const isManaged = device.management_mode === 'MANAGED';
+  const canOperate = userRole !== 'viewer';
   const canAdmin = userRole === 'admin' || userRole === 'owner';
+  const visibleTabs = TABS.filter((t) => t !== 'SSH Терминал' || canAdmin);
 
   // Parse hardware specs
   let specs: DeviceHardwareSpecs | null = null;
@@ -402,19 +404,23 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </button>
           )}
 
-          <button
-            onClick={() => onRunDryRun([device.id])}
-            className={`${btn} bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-semibold shadow-sm`}
-          >
-            <Play className="w-3.5 h-3.5 fill-current" /> Dry-run
-          </button>
+          {canOperate && (
+            <>
+              <button
+                onClick={() => onRunDryRun([device.id])}
+                className={`${btn} bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-semibold shadow-sm`}
+              >
+                <Play className="w-3.5 h-3.5 fill-current" /> Dry-run
+              </button>
 
-          <button
-            onClick={() => onScanDrift([device.id])}
-            className={`${btn} border border-white/[0.1] text-zinc-200 hover:bg-white/[0.05]`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" /> Скан дрейфа
-          </button>
+              <button
+                onClick={() => onScanDrift([device.id])}
+                className={`${btn} border border-white/[0.1] text-zinc-200 hover:bg-white/[0.05]`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" /> Скан дрейфа
+              </button>
+            </>
+          )}
 
           <button
             onClick={() => {
@@ -469,7 +475,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
       {/* Tabs */}
       <div className="flex gap-2 border-b border-white/[0.08]">
-        {TABS.map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -677,7 +683,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </table>
           </div>
 
-          {/* EMBEDDED EMERGENCY DANGER ZONE */}
+          {/* EMBEDDED EMERGENCY DANGER ZONE (Admin / Owner only) */}
+          {canAdmin && (
           <div className="rounded-xl border border-rose-200 dark:border-rose-500/30 bg-rose-50/70 dark:bg-rose-950/10 p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
@@ -795,6 +802,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               </button>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -976,8 +984,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
         </div>
       )}
 
-      {/* TAB 3: SSH ТЕРМИНАЛ (WebTTY Console) */}
-      {tab === 'SSH Терминал' && (
+      {/* TAB 3: SSH ТЕРМИНАЛ (WebTTY Console — Admin / Owner only) */}
+      {tab === 'SSH Терминал' && canAdmin && (
         <div className="rounded-xl border border-white/[0.08] bg-[#07090e] overflow-hidden flex flex-col h-[550px]">
           {/* Terminal Titlebar */}
           <div className="px-4 py-2.5 bg-white/[0.03] border-b border-white/[0.06] flex items-center justify-between">

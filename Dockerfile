@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # ==============================================================================
 # CROC DREAM NetOps Platform — All-in-One Monolithic Container
 # Включает внутри одного контейнера:
@@ -12,18 +11,18 @@
 #   docker run -d --name croc-netops -p 5173:5173 -p 8000:8000 -p 9090:9090 croc-netops
 # ==============================================================================
 
-FROM node:20-alpine AS frontend-build
+FROM mirror.gcr.io/library/node:24-alpine AS frontend-build
 WORKDIR /frontend
 COPY frontend/package*.json ./
 RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-FROM prom/prometheus:v2.54.1 AS prom-bin
-FROM prom/node-exporter:v1.8.2 AS node-exp-bin
-FROM prom/snmp-exporter:v0.26.0 AS snmp-exp-bin
+FROM mirror.gcr.io/prom/prometheus:v3.15.0 AS prom-bin
+FROM mirror.gcr.io/prom/node-exporter:v1.12.1 AS node-exp-bin
+FROM mirror.gcr.io/prom/snmp-exporter:v0.30.1 AS snmp-exp-bin
 
-FROM python:3.11-slim
+FROM mirror.gcr.io/library/python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -44,7 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.12 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /bin/uv
 COPY --from=ghcr.io/openconfig/gnmic:0.49.0 /app/gnmic /usr/local/bin/gnmic
 COPY --from=prom-bin /bin/prometheus /usr/local/bin/prometheus
 COPY --from=node-exp-bin /bin/node_exporter /usr/local/bin/node_exporter

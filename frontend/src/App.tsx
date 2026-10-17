@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { api, getErrorMessage } from './api';
+import { allConsolePorts, api, getErrorMessage, isLocalOwnerConsole, rolePortList } from './api';
 import type { Device, JobSummary, UserRole } from './api';
 import { Header } from './components/layout/Header';
 import type { AppTheme } from './components/layout/Header';
@@ -24,6 +24,7 @@ const DryRunModal = lazy(() => import('./components/modals/DryRunModal').then((m
 const WelcomeModal = lazy(() => import('./components/modals/WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
 const ShareModal = lazy(() => import('./components/modals/ShareModal').then((m) => ({ default: m.ShareModal })));
 const ShortcutsModal = lazy(() => import('./components/modals/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })));
+const AccessCodeModal = lazy(() => import('./components/modals/AccessCodeModal').then((m) => ({ default: m.AccessCodeModal })));
 
 function LoadingFallback() {
   return (
@@ -88,23 +89,28 @@ export function App() {
     const saved = localStorage.getItem('netops_theme');
     return saved === 'light' ? 'light' : 'dark';
   });
-  const [userRole, setUserRole] = useState<UserRole>(() => {
-    return (localStorage.getItem('netops_user_role') as UserRole) || 'viewer';
-  });
+  const [userRole, setUserRole] = useState<UserRole>(() => api.getRole());
+  const isDedicatedRolePort =
+    typeof window !== 'undefined' && rolePortList().includes(window.location.port);
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(() => {
+    if (isDedicatedRolePort) return false;
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       if (params.get('setup') || params.get('welcome')) {
         localStorage.removeItem('netops_onboarding_done');
         return true;
       }
-      if (params.get('token')) {
+      if (params.get('token') || params.get('role')) {
+        return false;
+      }
+      if (!isLocalOwnerConsole()) {
         return false;
       }
     }
     return !localStorage.getItem('netops_onboarding_done');
   });
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
+  const [accessCodeModalOpen, setAccessCodeModalOpen] = useState<boolean>(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
@@ -137,20 +143,23 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
-    const hasInviteToken = Boolean(new URLSearchParams(window.location.search).get('token'));
+    if (isDedicatedRolePort) return;
+    const params = new URLSearchParams(window.location.search);
+    const hasInviteToken = Boolean(params.get('token') || params.get('role'));
+    const localOwner = isLocalOwnerConsole();
     api
       .getBootstrapStatus()
       .then((st) => {
-        if (st && st.bootstrap_completed === false) {
+        if (localOwner && st && st.bootstrap_completed === false) {
           localStorage.removeItem('netops_onboarding_done');
           setWelcomeModalOpen(true);
-        } else if (!hasInviteToken && st && st.bootstrap_completed && st.caller_is_bound_owner) {
+        } else if (!hasInviteToken && st && st.bootstrap_completed && (st.caller_is_bound_owner || localOwner)) {
           localStorage.setItem('netops_onboarding_done', 'true');
           setWelcomeModalOpen(false);
         }
       })
       .catch(() => {});
-  }, []);
+  }, [isDedicatedRolePort]);
 
   // Global window keydown listener with priority Escape order, ?, and Ctrl+K
   useEffect(() => {
@@ -264,8 +273,12 @@ export function App() {
       const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
       if (isAuthErr) {
         authFailedRef.current = true;
-        localStorage.removeItem('netops_onboarding_done');
-        setWelcomeModalOpen(true);
+        if (isLocalOwnerConsole()) {
+          localStorage.removeItem('netops_onboarding_done');
+          setWelcomeModalOpen(true);
+        } else {
+          setAccessCodeModalOpen(true);
+        }
       } else {
         console.error('Failed to load devices', err);
         setApiHealthy(false);
@@ -311,30 +324,31 @@ export function App() {
   useEffect(() => {
     let active = true;
     (async () => {
-      const hasToken = Boolean(
-        localStorage.getItem('netops_auth_token') ||
-          localStorage.getItem('netops_personal_token') ||
-          document.cookie.includes('netops_csrf=') ||
-          ['5173', '5174', '5175', '5176'].includes(window.location.port)
-      );
-      const onboardingDone = localStorage.getItem('netops_onboarding_done') === 'true';
-      if (!hasToken && !onboardingDone) {
-        if (active) setLoading(false);
-        return;
-      }
+      const localOwner = isLocalOwnerConsole();
       try {
         try {
           const me = await api.getMe();
           if (active && me.role) {
             authFailedRef.current = false;
-            setUserRole(me.role);
-            localStorage.setItem('netops_user_role', me.role);
+            setAccessCodeModalOpen(false);
+            const resolvedRole: UserRole = localOwner && me.role === 'viewer' ? 'owner' : (me.role as UserRole);
+            setUserRole(resolvedRole);
+            localStorage.setItem('netops_user_role', resolvedRole);
           }
         } catch (authErr: unknown) {
-          if (active && onboardingDone) {
-            showToast(getErrorMessage(authErr, 'Ошибка авторизации токена'), 'error');
-            api.setRole('viewer');
-            setUserRole('viewer');
+          if (active) {
+            if (localOwner) {
+              api.setRole('owner');
+              setUserRole('owner');
+            } else {
+              authFailedRef.current = true;
+              setAccessCodeModalOpen(true);
+              const params = new URLSearchParams(window.location.search);
+              if (params.get('token') || params.get('code')) {
+                showToast(getErrorMessage(authErr, 'Ошибка авторизации кода/токена'), 'error');
+              }
+              return;
+            }
           }
         }
 
@@ -353,10 +367,13 @@ export function App() {
         if (!active) return;
         const msg = getErrorMessage(err, '');
         const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
-        if (isAuthErr) {
+        if (isAuthErr && localOwner) {
           authFailedRef.current = true;
           localStorage.removeItem('netops_onboarding_done');
           setWelcomeModalOpen(true);
+        } else if (isAuthErr) {
+          authFailedRef.current = true;
+          setAccessCodeModalOpen(true);
         } else {
           console.error('Failed initial load', err);
         }
@@ -378,7 +395,7 @@ export function App() {
           localStorage.getItem('netops_auth_token') ||
           localStorage.getItem('netops_personal_token') ||
           document.cookie.includes('netops_csrf=') ||
-          ['5173', '5174', '5175', '5176'].includes(window.location.port)
+          allConsolePorts().includes(window.location.port)
       );
 
     const onFocusOrVisible = () => {
@@ -589,6 +606,7 @@ export function App() {
         <Sidebar
           activeTab={activeTab === 'device' ? 'devices' : activeTab}
           setActiveTab={setActiveTab}
+          userRole={userRole}
           locale={locale}
         />
         <main className="flex-1 min-w-0 w-full max-w-[2560px] mx-auto p-2.5 sm:p-4 lg:p-6 2xl:p-8 space-y-3 sm:space-y-5 pb-24 lg:pb-8">
@@ -642,6 +660,7 @@ export function App() {
               <JobsView
                 jobs={jobs}
                 selectedJobId={selectedJobId}
+                userRole={userRole}
                 onSelectJob={handleSelectJob}
                 onDeploy={handleDeploy}
                 onOpenDiff={handleOpenDiffJob}
@@ -654,6 +673,7 @@ export function App() {
               <DiffViewer
                 jobs={jobs}
                 selectedJobId={selectedJobId}
+                userRole={userRole}
                 onSelectJob={handleSelectJob}
                 onDeploy={handleDeploy}
                 locale={locale}
@@ -663,17 +683,18 @@ export function App() {
 
             {activeTab === 'drift' && (
               <DriftView
+                userRole={userRole}
                 onRemediate={handleRemediate}
                 onScanDrift={handleScanDriftAll}
                 locale={locale}
               />
             )}
 
-            {activeTab === 'lab' && (
+            {activeTab === 'lab' && userRole !== 'viewer' && (
               <ChaosLabView onRefreshAll={refreshAll} locale={locale} />
             )}
 
-            {activeTab === 'emergency' && (
+            {activeTab === 'emergency' && (userRole === 'admin' || userRole === 'owner') && (
               <EmergencyHub
                 currentRole={userRole === 'admin' || userRole === 'owner' ? 'admin' : 'operator'}
                 onSwitchRole={handleSwitchRole}
@@ -689,6 +710,7 @@ export function App() {
             open={copilotOpen}
             onClose={handleCloseCopilot}
             deviceId={activeTab === 'device' ? deviceId : null}
+            userRole={userRole}
             locale={locale}
             request={copilotRequest}
             activeScreen={activeTab}
@@ -701,7 +723,7 @@ export function App() {
           />
         )}
 
-        {dryRunModalOpen && (
+        {dryRunModalOpen && userRole !== 'viewer' && (
           <DryRunModal
             open={dryRunModalOpen}
             onClose={handleCloseDryRun}
@@ -712,7 +734,7 @@ export function App() {
           />
         )}
 
-        {shareModalOpen && (
+        {shareModalOpen && (userRole === 'owner' || userRole === 'admin') && (
           <ShareModal
             isOpen={shareModalOpen}
             onClose={handleCloseShare}
@@ -721,7 +743,7 @@ export function App() {
           />
         )}
 
-        {welcomeModalOpen && (
+        {welcomeModalOpen && !isDedicatedRolePort && (
           <WelcomeModal
             isOpen={welcomeModalOpen}
             onClose={handleWelcomeClose}
@@ -739,6 +761,19 @@ export function App() {
             locale={locale}
           />
         )}
+
+        {accessCodeModalOpen && (
+          <AccessCodeModal
+            isOpen={accessCodeModalOpen}
+            locale={locale}
+            onSuccess={(role) => {
+              authFailedRef.current = false;
+              setAccessCodeModalOpen(false);
+              setUserRole(role);
+              void refreshAll();
+            }}
+          />
+        )}
       </Suspense>
 
       <CommandPalette
@@ -747,6 +782,7 @@ export function App() {
         devices={devices}
         onOpenDevice={openDevice}
         onOpenTab={setActiveTab}
+        userRole={userRole}
         locale={locale}
       />
 
@@ -757,7 +793,6 @@ export function App() {
         theme={theme}
         setTheme={handleSetTheme}
         userRole={userRole}
-        setUserRole={handleSwitchRole}
         setLocale={handleSetLocale}
         onToggleCopilot={handleToggleCopilot}
         onOpenSearch={handleOpenSearch}

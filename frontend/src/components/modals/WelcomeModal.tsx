@@ -9,7 +9,6 @@ import {
   GitBranch,
   Send,
   ShieldCheck,
-  RefreshCw,
   Cpu,
   ExternalLink,
   Smartphone,
@@ -19,13 +18,24 @@ import {
 import {
   api,
   getErrorMessage,
+  isLoopbackUrl,
   type UserRole,
   type ServerDiscoveryResponse,
-  type DiscoveredSwitchItem,
   type LlmCascadeConfig,
+  allConsolePorts,
+  consoleConfig,
 } from '../../api';
 import type { AppTheme } from '../layout/Header';
 import { translations, type Locale } from '../../i18n';
+import {
+  inferProviderDefaults,
+  inputClass,
+  primaryBtnClass,
+  secondaryBtnClass,
+  utilityPillClass,
+  type WizardStep,
+} from './welcome/WelcomeStepStyles';
+import { WelcomeAiStep, WelcomeServerStep } from './welcome/WelcomeSteps4And5';
 
 interface WelcomeModalProps {
   isOpen: boolean;
@@ -35,85 +45,6 @@ interface WelcomeModalProps {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
 }
-
-type WizardStep = 1 | 2 | 3 | 4 | 5;
-
-const LLM_PRESETS: Array<{
-  label: string;
-  name: string;
-  base_url: string;
-  model: string;
-  timeout_seconds: number;
-}> = [
-  {
-    label: '+ Groq',
-    name: 'Groq',
-    base_url: 'https://api.groq.com/openai/v1',
-    model: 'llama-3.3-70b-versatile',
-    timeout_seconds: 2.5,
-  },
-  {
-    label: '+ Gemini',
-    name: 'Gemini',
-    base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/',
-    model: 'gemini-2.0-flash',
-    timeout_seconds: 3.0,
-  },
-  {
-    label: '+ DeepSeek',
-    name: 'DeepSeek',
-    base_url: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat',
-    timeout_seconds: 3.5,
-  },
-  {
-    label: '+ OpenRouter',
-    name: 'OpenRouter',
-    base_url: 'https://openrouter.ai/api/v1',
-    model: 'deepseek/deepseek-chat',
-    timeout_seconds: 3.5,
-  },
-  {
-    label: '+ Ollama',
-    name: 'Ollama',
-    base_url: 'http://localhost:11434/v1',
-    model: 'qwen2.5-coder:7b',
-    timeout_seconds: 4.0,
-  },
-];
-
-function inferProviderDefaults(name: string, apiKey: string): { name: string; base_url: string; model: string } {
-  const n = name.trim().toLowerCase();
-  const k = apiKey.trim();
-  if (n.includes('groq') || k.startsWith('gsk_')) {
-    return { name: name || 'Groq', base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile' };
-  }
-  if (n.includes('gemini') || k.startsWith('AIza')) {
-    return { name: name || 'Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai/', model: 'gemini-2.0-flash' };
-  }
-  if (n.includes('openrouter') || k.startsWith('sk-or-')) {
-    return { name: name || 'OpenRouter', base_url: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-chat' };
-  }
-  if (n.includes('deepseek')) {
-    return { name: name || 'DeepSeek', base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat' };
-  }
-  if (n.includes('ollama') || n.includes('local')) {
-    return { name: name || 'Ollama', base_url: 'http://localhost:11434/v1', model: 'qwen2.5-coder:7b' };
-  }
-  return { name: name || 'OpenAI', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini' };
-}
-
-const inputClass =
-  'w-full bg-[var(--bg-main)] border border-[var(--border-subtle)] focus:border-[var(--border-hover)] rounded-md px-3 py-1.5 text-xs font-mono text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none transition-colors';
-
-const primaryBtnClass =
-  'px-4 py-2 rounded-md bg-[var(--text-primary)] hover:opacity-90 text-[var(--bg-main)] text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition-opacity disabled:opacity-50';
-
-const secondaryBtnClass =
-  'px-3 py-1.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)] text-xs font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer transition-colors';
-
-const utilityPillClass =
-  'h-7 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] hover:bg-[var(--bg-elevated)] text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
 
 export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   isOpen,
@@ -125,7 +56,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 }) => {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [clusterName, setClusterName] = useState('');
-  const [exposureMode, setExposureMode] = useState<'local_only' | 'public_tunnel'>('local_only');
+  const [exposureMode, setExposureMode] = useState<'local_only' | 'public_tunnel'>('public_tunnel');
   const [ownerToken, setOwnerToken] = useState('');
   const [copiedKey, setCopiedKey] = useState(false);
   const [recoverMode, setRecoverMode] = useState(false);
@@ -232,20 +163,19 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
         cluster_name: clusterName.trim() || '',
         recovery_key: recoveryKeyInput.trim() || undefined,
       });
-      await api.configureBootstrapLayers({
+      const cfg = await api.configureBootstrapLayers({
         cluster_name: clusterName.trim() || '',
         exposure_mode: exposureMode,
         websocket_enabled: true,
         auto_commit_on_diff: true,
       });
-      localStorage.setItem(
-        'netops_share_base_url',
-        exposureMode === 'local_only'
-          ? 'http://127.0.0.1:5173'
-          : serverHost
-            ? `http://${serverHost}:5173`
-            : window.location.origin
-      );
+      if (cfg?.exposure?.public_url && !isLoopbackUrl(cfg.exposure.public_url)) {
+        localStorage.setItem('netops_share_base_url', cfg.exposure.public_url);
+      } else if (serverHost.trim()) {
+        localStorage.setItem('netops_share_base_url', `http://${serverHost.trim()}:${consoleConfig().owner_port}`);
+      } else {
+        localStorage.removeItem('netops_share_base_url');
+      }
       setOwnerToken(res.token);
       localStorage.setItem('netops_user_role', 'owner');
       localStorage.setItem('netops_cluster_name', res.cluster_name);
@@ -418,6 +348,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       }
       await api.configureBootstrapLayers({
         cluster_name: clusterName.trim() || '',
+        exposure_mode: exposureMode,
         bootstrap_completed: true,
       });
       if (!discoveryResult?.synced_total) {
@@ -439,6 +370,8 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     { id: 4, title: isEn ? '4. AI' : '4. ИИ', icon: <Cpu className="w-3.5 h-3.5 shrink-0" /> },
     { id: 5, title: isEn ? '5. Server' : '5. Сервер', icon: <Server className="w-3.5 h-3.5 shrink-0" /> },
   ];
+
+  const displayPublicHost = serverHost.trim() || window.location.hostname;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-[var(--bg-main)]/95 backdrop-blur-xl overflow-y-auto">
@@ -562,6 +495,21 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
+                        onClick={() => setExposureMode('public_tunnel')}
+                        className={`p-2.5 rounded-lg border text-left cursor-pointer ${
+                          exposureMode === 'public_tunnel'
+                            ? 'border-sky-500/60 bg-sky-500/10'
+                            : 'border-[var(--border-subtle)] bg-[var(--bg-main)]'
+                        }`}
+                      >
+                        <div className="text-xs font-semibold">🌐 {isEn ? 'Public Internet Access' : 'Внешний доступ (Интернет)'}</div>
+                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
+                          {displayPublicHost}:{allConsolePorts()[0]}..{allConsolePorts().slice(-1)[0]}
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
                         onClick={() => setExposureMode('local_only')}
                         className={`p-2.5 rounded-lg border text-left cursor-pointer ${
                           exposureMode === 'local_only'
@@ -570,20 +518,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                         }`}
                       >
                         <div className="text-xs font-semibold">🔒 {isEn ? 'Local Only' : 'Только локально'}</div>
-                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">127.0.0.1:5173</div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setExposureMode('public_tunnel')}
-                        className={`p-2.5 rounded-lg border text-left cursor-pointer ${
-                          exposureMode === 'public_tunnel'
-                            ? 'border-sky-500/60 bg-sky-500/10'
-                            : 'border-[var(--border-subtle)] bg-[var(--bg-main)]'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold">🌐 {isEn ? 'Public Access' : 'Внешний доступ'}</div>
-                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">0.0.0.0:5173</div>
+                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">localhost:{consoleConfig().owner_port}</div>
                       </button>
                     </div>
                   </div>
@@ -641,15 +576,15 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                             {sendingTelegramCode ? '...' : isEn ? 'Send Code' : 'Отправить код'}
                           </button>
                           {telegramRecoverLink && (
-                          <a
-                            href={telegramRecoverLink}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[10px] font-mono text-emerald-500 inline-flex items-center gap-1 hover:underline"
-                          >
-                            <span>Bot</span>
-                            <ExternalLink className="w-3 h-3" />
-                          </a>
+                            <a
+                              href={telegramRecoverLink}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[10px] font-mono text-emerald-500 inline-flex items-center gap-1 hover:underline"
+                            >
+                              <span>Bot</span>
+                              <ExternalLink className="w-3 h-3" />
+                            </a>
                           )}
                         </div>
                       </div>
@@ -824,17 +759,23 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                 </div>
               ) : (
                 <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex items-center justify-between gap-2 text-xs font-mono text-[var(--text-secondary)]">
-                  <span>{telegramBotUsername ? `${telegramBotUsername} · /start` : isEn ? 'Add a bot token to get the bot link' : 'Укажите токен бота — появится ссылка'}</span>
+                  <span>
+                    {telegramBotUsername
+                      ? `${telegramBotUsername} · /start`
+                      : isEn
+                        ? 'Add a bot token to get the bot link'
+                        : 'Укажите токен бота — появится ссылка'}
+                  </span>
                   {telegramClaimLink && (
-                  <a
-                    href={telegramClaimLink}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="px-2.5 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[11px] font-mono text-emerald-500 inline-flex items-center gap-1 shrink-0"
-                  >
-                    <span>{isEn ? 'Open Bot (/start)' : 'Открыть бота (/start)'}</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+                    <a
+                      href={telegramClaimLink}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="px-2.5 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[11px] font-mono text-emerald-500 inline-flex items-center gap-1 shrink-0"
+                    >
+                      <span>{isEn ? 'Open Bot (/start)' : 'Открыть бота (/start)'}</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   )}
                 </div>
               )}
@@ -863,249 +804,35 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
           )}
 
           {wizardStep === 4 && (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)]/60 p-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[11px] font-mono font-semibold">
-                    LLM Cascade ({llmCascade.length})
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setLlmCascade((prev) => [
-                        ...prev,
-                        { name: '', base_url: '', model: '', api_key: '', timeout_seconds: 2.5 },
-                      ])
-                    }
-                    className="px-2 py-0.5 rounded border border-emerald-500/40 bg-emerald-500/10 text-[10px] font-mono text-emerald-500 cursor-pointer"
-                  >
-                    + Provider
-                  </button>
-                </div>
-
-                <div className="flex items-center gap-1 flex-wrap">
-                  {LLM_PRESETS.map((preset) => (
-                    <button
-                      key={preset.name}
-                      type="button"
-                      onClick={() =>
-                        setLlmCascade((prev) => {
-                          const row: LlmCascadeConfig = { ...preset, api_key: '' };
-                          const isEmptyFirst =
-                            prev.length === 1 && !prev[0].name.trim() && !(prev[0].api_key || '').trim();
-                          return isEmptyFirst ? [row] : [...prev, row];
-                        })
-                      }
-                      className="px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-emerald-500 cursor-pointer"
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  {llmCascade.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded border border-[var(--border-subtle)] bg-[var(--bg-card)] p-1.5 flex items-center gap-1.5"
-                    >
-                      <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 text-[10px] font-mono font-bold">
-                        #{idx + 1}
-                      </span>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1">
-                        <input
-                          type="text"
-                          value={item.name}
-                          onChange={(e) =>
-                            setLlmCascade((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, name: e.target.value } : p))
-                            )
-                          }
-                          placeholder="Name"
-                          className={inputClass}
-                        />
-                        <input
-                          type="text"
-                          value={item.model}
-                          onChange={(e) =>
-                            setLlmCascade((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, model: e.target.value } : p))
-                            )
-                          }
-                          placeholder="Model"
-                          className={inputClass}
-                        />
-                        <input
-                          type="text"
-                          value={item.base_url}
-                          onChange={(e) =>
-                            setLlmCascade((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, base_url: e.target.value } : p))
-                            )
-                          }
-                          placeholder="Base URL"
-                          className={inputClass}
-                        />
-                        <input
-                          type="password"
-                          value={item.api_key || ''}
-                          onChange={(e) =>
-                            setLlmCascade((prev) =>
-                              prev.map((p, i) => (i === idx ? { ...p, api_key: e.target.value } : p))
-                            )
-                          }
-                          placeholder="API Key"
-                          className={inputClass}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setLlmCascade((prev) => prev.filter((_, i) => i !== idx))}
-                        className="px-1.5 py-1 text-xs font-mono text-rose-500 cursor-pointer"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {aiSavedMsg && (
-                <div className="text-xs font-mono text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded px-3 py-1.5">
-                  {aiSavedMsg}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <button type="button" onClick={() => setWizardStep(3)} className={secondaryBtnClass}>
-                  ← {isEn ? 'Back' : 'Назад'}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveAiCluster}
-                  disabled={savingAi}
-                  className={primaryBtnClass}
-                >
-                  <span>{isEn ? 'Next' : 'Далее'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            <WelcomeAiStep
+              isEn={isEn}
+              llmCascade={llmCascade}
+              setLlmCascade={setLlmCascade}
+              aiSavedMsg={aiSavedMsg}
+              savingAi={savingAi}
+              onSaveAiCluster={handleSaveAiCluster}
+              setWizardStep={setWizardStep}
+            />
           )}
 
           {wizardStep === 5 && (
-            <div className="space-y-3.5">
-              <div className="grid grid-cols-3 gap-2.5">
-                <div className="col-span-2">
-                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    {isEn ? 'Host' : 'Хост'}
-                  </label>
-                  <input
-                    type="text"
-                    value={serverHost}
-                    onChange={(e) => setServerHost(e.target.value)}
-                    placeholder="10.0.0.10"
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    {isEn ? 'SSH Port' : 'SSH Порт'}
-                  </label>
-                  <input
-                    type="number"
-                    value={serverPort}
-                    onChange={(e) => setServerPort(Number(e.target.value) || 221)}
-                    placeholder="221"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                  {isEn ? 'SSH User' : 'Пользователь SSH'}
-                </label>
-                <input
-                  type="text"
-                  value={serverUser}
-                  onChange={(e) => setServerUser(e.target.value)}
-                  className={inputClass}
-                />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                  {isEn ? 'SSH Password' : 'Пароль SSH'}
-                </label>
-                <div className="flex flex-wrap sm:flex-nowrap gap-2">
-                  <input
-                    type="password"
-                    value={serverPassword}
-                    onChange={(e) => setServerPassword(e.target.value)}
-                    placeholder="SSH password"
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={handleDiscoverServer}
-                    disabled={discoveringServer}
-                    className="px-3.5 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${discoveringServer ? 'animate-spin' : ''}`} />
-                    <span>{discoveringServer ? '...' : isEn ? 'Connect SSH' : 'Подключить'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleDiscoverOffline}
-                    disabled={discoveringServer}
-                    className={secondaryBtnClass}
-                  >
-                    <span>{isEn ? 'Offline (Git SoT)' : 'Офлайн-стенд (Git SoT)'}</span>
-                  </button>
-                </div>
-              </div>
-
-              {discoveryResult?.discovered_switches && (
-                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-2.5 space-y-2">
-                  <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1.5">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>
-                      {isEn ? 'Nodes:' : 'Узлов:'} {discoveryResult.synced_total}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1.5">
-                    {discoveryResult.discovered_switches.map((sw: DiscoveredSwitchItem) => (
-                      <div
-                        key={sw.hostname}
-                        className="rounded border border-[var(--border-subtle)] bg-[var(--bg-main)] px-2.5 py-1.5 flex items-center justify-between text-[11px] font-mono"
-                      >
-                        <span className="truncate font-semibold">{sw.hostname}</span>
-                        <span className={sw.reachable ? 'text-emerald-500' : 'text-rose-500'}>
-                          {sw.reachable ? 'SSH OK' : 'OFFLINE'}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {discoveryResult?.status === 'error' && discoveryResult.message && (
-                <div className="text-xs font-mono text-rose-500 bg-rose-500/10 border border-rose-500/20 rounded px-3 py-1.5">
-                  {discoveryResult.message}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <button type="button" onClick={() => setWizardStep(4)} className={secondaryBtnClass}>
-                  ← {isEn ? 'Back' : 'Назад'}
-                </button>
-                <button type="button" onClick={handleFinishWizard} className={primaryBtnClass}>
-                  <span>{isEn ? 'Launch Console' : 'Открыть пульт'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            <WelcomeServerStep
+              isEn={isEn}
+              serverHost={serverHost}
+              setServerHost={setServerHost}
+              serverPort={serverPort}
+              setServerPort={setServerPort}
+              serverUser={serverUser}
+              setServerUser={setServerUser}
+              serverPassword={serverPassword}
+              setServerPassword={setServerPassword}
+              discoveringServer={discoveringServer}
+              discoveryResult={discoveryResult}
+              onDiscoverServer={handleDiscoverServer}
+              onDiscoverOffline={handleDiscoverOffline}
+              onFinishWizard={handleFinishWizard}
+              setWizardStep={setWizardStep}
+            />
           )}
         </div>
       </div>

@@ -142,7 +142,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           onSuccess={() => {
             if (onSyncInventory) onSyncInventory();
           }}
-          userRole={userRole || 'admin'}
+          userRole={userRole || 'viewer'}
         />
       </div>
     );
@@ -373,7 +373,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
               alerts={alerts}
               locale={locale}
               onSelectDevice={onOpenDevice}
-              onRunDryRun={onRunDryRun}
+              onRunDryRun={userRole !== 'viewer' ? onRunDryRun : undefined}
             />
           </BentoCard>
 
@@ -463,21 +463,23 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                       <span>{t.diffBtn}</span>
                     </button>
 
-                    <button
-                      onClick={(e) => handleAlertDryRun(a.device_id, e)}
-                      disabled={dryRunRunning === a.device_id}
-                      className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer disabled:opacity-50"
-                      title="Запустить предиктивный Dry-run"
-                    >
-                      <Play className="w-3 h-3 fill-current" />
-                      <span>
-                        {dryRunSuccess === a.device_id
-                          ? (locale === 'en' ? 'Launched!' : 'Запущен!')
-                          : dryRunRunning === a.device_id
-                          ? '...'
-                          : t.dryRunBtn}
-                      </span>
-                    </button>
+                    {userRole !== 'viewer' && (
+                      <button
+                        onClick={(e) => handleAlertDryRun(a.device_id, e)}
+                        disabled={dryRunRunning === a.device_id}
+                        className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer disabled:opacity-50"
+                        title="Запустить предиктивный Dry-run"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>
+                          {dryRunSuccess === a.device_id
+                            ? (locale === 'en' ? 'Launched!' : 'Запущен!')
+                            : dryRunRunning === a.device_id
+                            ? '...'
+                            : t.dryRunBtn}
+                        </span>
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -554,7 +556,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
       <DeviceDrawer
         deviceId={drawerDeviceId}
         onClose={() => setDrawerDeviceId(null)}
-        userRole={userRole || 'owner'}
+        userRole={userRole || 'viewer'}
         onOpenDiff={onOpenDiff}
         onRunDryRun={onRunDryRun}
         onOpenFullPage={onOpenDevice}

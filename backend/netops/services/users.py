@@ -58,19 +58,33 @@ class UserService:
         user_agent: str | None = None,
         client_ip: str | None = None,
         settings: object | None = None,
+        allow_rebind: bool = False,
     ) -> ApiPrincipal | None:
-        if token.startswith("inv_"):
+        cleaned_token = token.strip()
+        if cleaned_token.lower().startswith("/verify "):
+            cleaned_token = cleaned_token[8:].strip()
+
+        if cleaned_token.startswith("inv_"):
             from netops.services.sessions import consume_invite_code
 
-            inv_username = consume_invite_code(token)
+            inv_username = consume_invite_code(cleaned_token)
             user = (
                 self._session.scalar(select(User).where(User.username == inv_username))
                 if inv_username
                 else None
             )
+        elif cleaned_token.isdigit() and len(cleaned_token) == 6:
+            candidate = self._session.scalar(
+                select(User).where(User.verification_code == cleaned_token)
+            )
+            user = (
+                candidate
+                if candidate is not None and not _is_expired(candidate.verification_expires_at)
+                else None
+            )
         else:
             user = self._session.scalar(
-                select(User).where(User.token_sha256 == hash_token(token))
+                select(User).where(User.token_sha256 == hash_token(cleaned_token))
             )
         if user is None or not user.is_active:
             return None
@@ -97,9 +111,12 @@ class UserService:
 
         if user.bound_client_id is not None:
             if clean_client != user.bound_client_id:
-                raise DeviceBoundConflictError(
-                    f"Ссылка доступа ({user.username}) уже привязана к другому устройству ({user.bound_client_id})."
-                )
+                if not allow_rebind or user.username == "owner":
+                    raise DeviceBoundConflictError(
+                        f"Ссылка доступа ({user.username}) уже привязана к другому устройству ({user.bound_client_id})."
+                    )
+                user.bound_client_id = clean_client
+                should_flush_seen = True
             ip_changed = bool(clean_ip and clean_ip != user.bound_ip)
             ua_changed = bool(clean_ua and clean_ua != user.bound_user_agent)
             if should_flush_seen or ip_changed or ua_changed:

@@ -5,7 +5,7 @@ Implements standard JSON-RPC 2.0 over stdio for LLM agents (Claude Desktop, Curs
 Antigravity, and autonomous network operators). Zero external dependencies (Python stdlib only).
 
 Usage:
-    python -m netops.mcp_server --api-url http://127.0.0.1:8001 --token dev-admin-token
+    python -m netops.mcp_server --api-url http://127.0.0.1:8001 --token <personal-token>
 """
 
 from __future__ import annotations
@@ -311,7 +311,7 @@ def run_server() -> None:
     )
     parser.add_argument(
         "--token",
-        default=os.getenv("NETOPS_API_TOKEN", "dev-admin-token"),
+        default=os.getenv("NETOPS_API_TOKEN", ""),
         help="NetOps API auth Bearer token",
     )
     args = parser.parse_args()

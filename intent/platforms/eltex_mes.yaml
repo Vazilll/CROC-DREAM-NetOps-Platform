@@ -2,7 +2,7 @@ platform: eltex_mes
 vendor: Eltex
 default_password: admin
 default_interface: gigabitethernet 1/0/1
-offline_ports: [2241, 2242]
+offline_ports: [2241]
 offline_interfaces:
   - gigabitethernet 1/0/1
   - gigabitethernet 1/0/2

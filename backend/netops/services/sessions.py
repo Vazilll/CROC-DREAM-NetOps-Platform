@@ -161,5 +161,18 @@ def csrf_ok(request: Request, record: dict[str, Any]) -> bool:
 
 
 def session_is_owner(request: Request, session: Session, settings: Settings) -> bool:
+    auth_header = (request.headers.get("Authorization") or "").strip()
+    if auth_header.lower().startswith("bearer "):
+        tok = auth_header[7:].strip()
+        principal = settings.authenticate(tok)
+        if principal is not None:
+            return principal.role == UserRole.OWNER
+        user = session.scalar(select(User).where(User.token_sha256 == hash_token(tok)))
+        return bool(
+            user
+            and user.is_active
+            and not _is_expired(user.expires_at)
+            and user.role == UserRole.OWNER
+        )
     principal, _ = principal_from_session(request, session, settings)
     return principal is not None and principal.role == UserRole.OWNER

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
-import type { Device } from '../../api';
-import { PLATFORM_NAMES, ROLE_NAMES, TAB_DEFINITIONS } from '../../constants';
+import type { Device, UserRole } from '../../api';
+import { PLATFORM_NAMES, ROLE_NAMES, getVisibleTabs } from '../../constants';
 import { translations, type Locale } from '../../i18n';
 
 interface Props {
@@ -10,6 +10,7 @@ interface Props {
   devices: Device[];
   onOpenDevice: (id: number) => void;
   onOpenTab: (tab: string) => void;
+  userRole?: UserRole;
   locale?: Locale;
 }
 
@@ -19,6 +20,7 @@ export const CommandPalette: React.FC<Props> = ({
   devices,
   onOpenDevice,
   onOpenTab,
+  userRole = 'viewer',
   locale = 'ru',
 }) => {
   const [query, setQuery] = useState('');
@@ -36,6 +38,7 @@ export const CommandPalette: React.FC<Props> = ({
   }
 
   const items = useMemo(() => {
+    const visibleTabs = getVisibleTabs(userRole);
     const all = [
       ...devices.map((d) => ({
         key: `d${d.id}`,
@@ -44,7 +47,7 @@ export const CommandPalette: React.FC<Props> = ({
         searchText: `${d.hostname} ${d.management_ip} ${d.platform} ${PLATFORM_NAMES[d.platform] ?? ''} ${d.role} ${ROLE_NAMES[d.role] ?? ''} ${d.status} ${d.site ?? ''}`.toLowerCase(),
         run: () => onOpenDevice(d.id),
       })),
-      ...TAB_DEFINITIONS.map((tab) => ({
+      ...visibleTabs.map((tab) => ({
         key: tab.id,
         label: t[tab.labelKey],
         hint: locale === 'en' ? 'Section' : 'Раздел',
@@ -58,7 +61,7 @@ export const CommandPalette: React.FC<Props> = ({
     return all
       .filter((item) => tokens.every((tok) => item.searchText.includes(tok)))
       .slice(0, 8);
-  }, [query, devices, onOpenDevice, onOpenTab, t, locale]);
+  }, [query, devices, onOpenDevice, onOpenTab, userRole, t, locale]);
 
   useEffect(() => {
     if (open) input.current?.focus();

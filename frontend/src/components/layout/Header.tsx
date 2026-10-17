@@ -124,8 +124,8 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Share Button */}
-        {onOpenShareModal && (
+        {/* Share Button (Owner & Admin only) */}
+        {onOpenShareModal && (userRole === 'owner' || userRole === 'admin') && (
           <button
             onClick={onOpenShareModal}
             className={ghostBtn}
@@ -169,8 +169,8 @@ export const Header: React.FC<HeaderProps> = ({
           </span>
         </button>
 
-        {/* Cluster Settings & Role Button */}
-        {onOpenWelcomeModal && (
+        {/* Cluster Settings (Owner) or Read-Only Role Badge (Admin / Operator / Viewer) */}
+        {userRole === 'owner' && onOpenWelcomeModal ? (
           <button
             onClick={onOpenWelcomeModal}
             className={`${ghostBtn} font-mono`}
@@ -185,6 +185,16 @@ export const Header: React.FC<HeaderProps> = ({
               {userRole}
             </span>
           </button>
+        ) : (
+          <div
+            className="h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 text-xs font-mono select-none"
+            title={`RBAC Role: ${userRole.toUpperCase()}`}
+          >
+            <Shield className={`w-3 h-3 ${userRole === 'admin' ? 'text-cyan-400' : userRole === 'operator' ? 'text-amber-400' : 'text-zinc-400'}`} />
+            <span className="capitalize font-medium text-[var(--text-primary)]">
+              {userRole === 'viewer' ? (locale === 'en' ? 'Jury (Read-Only)' : 'Жюри (Чтение)') : userRole}
+            </span>
+          </div>
         )}
       </div>
     </header>

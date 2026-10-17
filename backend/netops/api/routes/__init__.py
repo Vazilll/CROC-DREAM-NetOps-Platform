@@ -2,6 +2,7 @@ from fastapi import APIRouter
 
 from netops.api.routes import (
     auth,
+    config,
     devices,
     drift,
     emergency,
@@ -14,6 +15,7 @@ from netops.api.routes import (
 
 api_v1 = APIRouter(prefix="/api/v1")
 api_v1.include_router(auth.router)
+api_v1.include_router(config.router)
 api_v1.include_router(system.api_router)
 api_v1.include_router(devices.router)
 api_v1.include_router(jobs.router)

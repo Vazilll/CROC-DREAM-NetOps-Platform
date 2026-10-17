@@ -23,7 +23,7 @@ services:
     volumes:
       - ${INTENT:-./intent}:/data/intent:rw
       - ${TEMPLATES:-./templates}:/data/templates:ro
-      - ${LAB:-./lab/running}:/data/lab/running:rw
+      - ${LAB:-./lab/running}:/data/lab:rw
       - ${MONITORING:-./monitoring}:/data/monitoring:ro
 
   worker: *live

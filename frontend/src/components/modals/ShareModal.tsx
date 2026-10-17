@@ -8,7 +8,6 @@ import {
   Unlock,
   Trash2,
   GitBranch,
-  Database,
   Send,
   KeyRound,
   CheckCircle2,
@@ -17,6 +16,7 @@ import {
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type {
+  BootstrapExposureInfo,
   UserRole,
   UserAccount,
   UserInviteCreated,
@@ -24,6 +24,8 @@ import type {
 } from '../../api';
 import type { Locale } from '../../i18n';
 import { Modal } from '../layout/ui';
+import { PublicConsolesBanner } from './share/PublicConsolesBanner';
+import { ShareIntegrationsTab } from './share/ShareIntegrationsTab';
 
 interface ShareModalProps {
   isOpen: boolean;
@@ -92,6 +94,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationsStatus | null>(null);
+  const [exposureInfo, setExposureInfo] = useState<BootstrapExposureInfo | null>(null);
   const [deviceTargets, setDeviceTargets] = useState<Array<{ value: string; label: string }>>([]);
   const [syncingGit, setSyncingGit] = useState(false);
   const [telegramNote, setTelegramNote] = useState('');
@@ -101,13 +104,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const refreshAll = useCallback(async (showSpinner = false) => {
     if (showSpinner) setLoading(true);
     try {
-      const [integData, devList] = await Promise.all([
+      const [integData, devList, bootStatus] = await Promise.all([
         api.getIntegrationsStatus(),
         api.getDevices().catch(() => []),
+        api.getBootstrapStatus().catch(() => null),
       ]);
       const userList = await api.getUsers().catch(() => integData.sessions || []);
       setUsers(userList);
       setIntegrations(integData);
+      if (bootStatus?.exposure) {
+        setExposureInfo(bootStatus.exposure);
+      }
       const fabrics = Array.from(
         new Set(devList.map((d) => d.fabric_id).filter((f): f is string => Boolean(f)))
       );
@@ -140,6 +147,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   if (!isOpen) return null;
 
   const systemTargets = [{ value: '', label: 'Вся фабрика' }, ...deviceTargets];
+  const publicConsoles = api.getPublicConsoles(exposureInfo);
 
   const handleCopy = (key: string, text: string) => {
     navigator.clipboard.writeText(text);
@@ -192,8 +200,8 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     await runUserAction(async () => {
       const res = await api.generateUserVerifyCode(u.id!);
       const code = res.verification_code || '';
-      handleCopy(`vcode-${u.username}`, `/verify ${code}`);
-      setStatusMsg(`${u.username}: скопировано /verify ${code}`);
+      handleCopy(`vcode-${u.username}`, code);
+      setStatusMsg(`${u.username}: выдан 6-значный код входа ${code}`);
     });
   };
 
@@ -323,6 +331,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         {activeTab === 'links' ? (
           <div className="space-y-3">
+            <PublicConsolesBanner
+              consoles={publicConsoles}
+              copiedKey={copiedKey}
+              onCopy={handleCopy}
+              ghostBtnClass={ghostBtnClass}
+            />
+
             <div className="p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 space-y-2.5">
               <div className="grid grid-cols-2 sm:grid-cols-[1fr_110px_140px_110px_68px_auto] gap-2 items-center">
                 <input
@@ -384,10 +399,19 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               {newlyCreated.length > 0 && (
                 <div className="p-2 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)] space-y-1 max-h-28 overflow-y-auto">
                   {newlyCreated.map((item) => {
-                    const url = api.buildInviteUrl(item.token);
+                    const url = api.buildInviteUrl(item.token, exposureInfo?.public_url || undefined);
                     return (
                       <div key={item.username} className="flex items-center gap-1.5 text-xs font-mono">
                         <span className="text-[var(--text-primary)] w-24 truncate shrink-0">{item.username}</span>
+                        {item.verification_code && (
+                          <button
+                            onClick={() => handleCopy(`new-code-${item.username}`, item.verification_code!)}
+                            className={`px-2 py-0.5 text-[11px] shrink-0 text-emerald-400 ${ghostBtnClass}`}
+                            title="Скопировать 6-значный код доступа"
+                          >
+                            {copiedKey === `new-code-${item.username}` ? 'ОК' : `Код: ${item.verification_code}`}
+                          </button>
+                        )}
                         <input readOnly value={url} className={`flex-1 min-w-0 px-2 py-0.5 text-[11px] ${ctrlClass}`} />
                         <button
                           onClick={() => handleCopy(`new-${item.username}`, url)}
@@ -406,10 +430,12 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               {users.length === 0 ? (
                 <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">Список пуст</div>
               ) : (
-                <div className="divide-y divide-[var(--border-subtle)] max-h-[360px] overflow-y-auto">
+                <div className="divide-y divide-[var(--border-subtle)] max-h-[300px] overflow-y-auto">
                   {users.map((u) => {
-                    const cachedToken = mintedTokens[u.username];
-                    const inviteUrl = cachedToken ? api.buildInviteUrl(cachedToken) : null;
+                    const cachedToken = mintedTokens[u.username] || u.verification_code || null;
+                    const inviteUrl = cachedToken
+                      ? api.buildInviteUrl(cachedToken, exposureInfo?.public_url || undefined)
+                      : null;
                     const isBound = Boolean(u.bound_client_id);
                     const isActive = u.is_active !== false;
                     const copyId = `row-${u.username}`;
@@ -565,12 +591,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                                 : 'TG: —'}
                             </span>
                             {u.verification_code && (
-                              <button
-                                onClick={() => handleCopy(`vcode-${u.username}`, `/verify ${u.verification_code}`)}
-                                className={`px-1.5 py-0.5 ${ghostBtnClass}`}
-                              >
-                                /verify {u.verification_code}
-                              </button>
+                              <>
+                                <button
+                                  onClick={() => handleCopy(`rawcode-${u.username}`, u.verification_code!)}
+                                  className={`px-1.5 py-0.5 text-emerald-400 ${ghostBtnClass}`}
+                                  title="Скопировать 6-значный код для входа через браузер"
+                                >
+                                  {copiedKey === `rawcode-${u.username}` ? 'ОК' : `Код: ${u.verification_code}`}
+                                </button>
+                                <button
+                                  onClick={() => handleCopy(`vcode-${u.username}`, `/verify ${u.verification_code}`)}
+                                  className={`px-1.5 py-0.5 ${ghostBtnClass}`}
+                                  title="Скопировать команду для Telegram-бота"
+                                >
+                                  /verify {u.verification_code}
+                                </button>
+                              </>
                             )}
                           </div>
                           <div className="truncate text-right">
@@ -585,136 +621,19 @@ export const ShareModal: React.FC<ShareModalProps> = ({
             </div>
           </div>
         ) : (
-          <div className="space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 flex flex-col justify-between gap-2.5">
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
-                      <GitBranch className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-                      <span>GitOps SoT</span>
-                    </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
-                      {integrations?.github_sot?.branch || 'main'} @ {integrations?.github_sot?.commit_short || 'HEAD'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] font-mono text-[var(--text-secondary)] truncate">
-                    {integrations?.github_sot?.github_repo_url || 'Локальный репозиторий'}
-                  </div>
-                </div>
-                <button
-                  onClick={handleGitSync}
-                  disabled={syncingGit}
-                  className={`w-full h-8 px-3 text-xs font-mono flex items-center justify-center gap-1.5 ${ghostBtnClass}`}
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${syncingGit ? 'animate-spin' : ''}`} />
-                  <span>{syncingGit ? 'Синхронизация...' : 'Git Pull + Sync'}</span>
-                </button>
-              </div>
-
-              <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 flex flex-col justify-between gap-2.5">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
-                    <Database className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-                    <span>База данных</span>
-                  </div>
-                  <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-secondary)] border border-[var(--border-subtle)] uppercase inline-flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    <span>{integrations?.database?.engine || 'sqlite'}</span>
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2 text-center font-mono">
-                  <div className="p-2 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)]">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {integrations?.database?.counts?.devices ?? '—'}
-                    </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Устройств</div>
-                  </div>
-                  <div className="p-2 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)]">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {integrations?.database?.counts?.users ?? '—'} / {integrations?.database?.counts?.bound_sessions ?? 0}
-                    </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Сессий</div>
-                  </div>
-                  <div className="p-2 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)]">
-                    <div className="text-sm font-bold text-[var(--text-primary)]">
-                      {integrations?.database?.counts?.jobs ?? '—'}
-                    </div>
-                    <div className="text-[10px] text-[var(--text-muted)]">Задач</div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 flex items-center justify-between gap-3 font-mono">
-              <div className="space-y-0.5 min-w-0">
-                <div className="text-xs font-semibold text-[var(--text-primary)] flex items-center gap-1.5">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      integrations?.prometheus?.reachable ? 'bg-emerald-400' : 'bg-amber-400'
-                    }`}
-                  />
-                  <span>Телеметрия (Prometheus + VictoriaMetrics)</span>
-                </div>
-                <div className="text-[10px] text-[var(--text-muted)] truncate">
-                  {integrations?.prometheus?.url || 'http://prometheus:9090'} · HTTP SD (PostgreSQL) · Интервал {integrations?.prometheus?.collector_interval_sec ?? 10}s
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0 text-[10px]">
-                <span className="px-2 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                  Targets: {integrations?.prometheus?.up_targets ?? 0}/{integrations?.prometheus?.active_targets ?? 0} UP
-                </span>
-                <span className="px-2 py-1 rounded bg-[var(--bg-main)] border border-[var(--border-subtle)] text-[var(--text-secondary)]">
-                  Samples: {integrations?.prometheus?.stored_samples ?? 0}
-                </span>
-              </div>
-            </div>
-
-            <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
-                  <Send className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-                  <span className="font-mono">{integrations?.telegram?.bot_username || '—'}</span>
-                </div>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--bg-main)] text-[var(--text-secondary)] border border-[var(--border-subtle)] inline-flex items-center gap-1.5">
-                  <span
-                    className={`w-1.5 h-1.5 rounded-full ${
-                      integrations?.telegram?.bot_token_set ? 'bg-emerald-400' : 'bg-amber-400'
-                    }`}
-                  />
-                  <span>
-                    {integrations?.telegram?.bot_token_set
-                      ? `Чатов: ${integrations.telegram.chat_ids.length}`
-                      : 'Токен не задан'}
-                  </span>
-                </span>
-              </div>
-
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={telegramNote}
-                  onChange={(e) => setTelegramNote(e.target.value)}
-                  placeholder="Комментарий к сводке..."
-                  className={`flex-1 min-w-0 px-3 h-8 ${ctrlClass}`}
-                />
-                <button
-                  onClick={handleSendTelegram}
-                  disabled={sendingTelegram}
-                  className={`h-8 px-3 text-xs flex items-center justify-center gap-1.5 shrink-0 ${primaryBtnClass}`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>{sendingTelegram ? 'Отправка...' : 'Отправить'}</span>
-                </button>
-              </div>
-
-              {telegramPreview && (
-                <div className="p-2.5 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)] text-[11px] font-mono text-[var(--text-secondary)] whitespace-pre-wrap max-h-32 overflow-y-auto">
-                  {telegramPreview.replace(/<\/?b>/g, '').replace(/<\/?code>/g, '')}
-                </div>
-              )}
-            </div>
-          </div>
+          <ShareIntegrationsTab
+            integrations={integrations}
+            syncingGit={syncingGit}
+            onGitSync={handleGitSync}
+            telegramNote={telegramNote}
+            setTelegramNote={setTelegramNote}
+            sendingTelegram={sendingTelegram}
+            onSendTelegram={handleSendTelegram}
+            telegramPreview={telegramPreview}
+            ctrlClass={ctrlClass}
+            ghostBtnClass={ghostBtnClass}
+            primaryBtnClass={primaryBtnClass}
+          />
         )}
       </div>
     </Modal>

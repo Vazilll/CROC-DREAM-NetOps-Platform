@@ -11,6 +11,8 @@ datasources:
     jsonData:
       timeInterval: "15s"
       httpMethod: POST
+      prometheusType: Prometheus
+      prometheusVersion: "3.15.0"
 
   # Та же PromQL, но с историей на месяцы (Prometheus хранит только 3 дня).
   - name: VictoriaMetrics
@@ -36,5 +38,5 @@ datasources:
       password: netops
     jsonData:
       sslmode: "disable"
-      postgresVersion: 1600
+      postgresVersion: 1700
       timescaledb: false

@@ -305,6 +305,7 @@ def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dic
     tags=["system"],
     summary="Статус экстренной заморозки фабрики (Kill Switch)",
 )
+@api_router.get("/emergency/freeze", tags=["emergency"], include_in_schema=False)
 def get_freeze_status(
     _: Viewer,
     fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
@@ -319,6 +320,7 @@ def get_freeze_status(
     tags=["system"],
     summary="Включение / отключение экстренной заморозки фабрики",
 )
+@api_router.post("/emergency/freeze", tags=["emergency"], include_in_schema=False)
 def toggle_freeze(req: FreezeRequest, user: Operator) -> dict[str, Any]:
     stand = req.fabric_id or req.site
     return set_factory_freeze(req.frozen, req.reason, user.username, fabric_id=stand)
@@ -329,10 +331,11 @@ def toggle_freeze(req: FreezeRequest, user: Operator) -> dict[str, Any]:
     tags=["system"],
     summary="Снятие экстренной заморозки фабрики",
 )
+@api_router.delete("/emergency/freeze", tags=["emergency"], include_in_schema=False)
 def unfreeze(
     user: Operator,
     fabric_id: Annotated[str | None, Query(description="Идентификатор стенда/фабрики")] = None,
-    site: Annotated[str | None, Query(description="Идентификатор площадки/стенда")] = None,
+    site: Annotated[str | None, Query(description="Идентификатор площадки/стенду")] = None,
 ) -> dict[str, Any]:
     stand = fabric_id or site
     return set_factory_freeze(False, "Заморозка снята оператором", user.username, fabric_id=stand)

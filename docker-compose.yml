@@ -13,14 +13,15 @@
 name: netops
 
 x-backend: &backend
-  build: ./backend
   image: netops-backend
+  pull_policy: never
   env_file:
     - path: backend/.env
       required: false
   environment:
     NETOPS_DATABASE_URL: postgresql+psycopg://netops:netops@postgres:5432/netops
     NETOPS_REDIS_URL: redis://redis:6379/0
+    NETOPS_CONSTANTS_PATH: /data/config/constants.yaml
     NETOPS_INTENT_REPO_PATH: /data/intent
     NETOPS_TEMPLATES_PATH: /data/templates
     NETOPS_OFFLINE_LAB_PATH: /data/lab
@@ -34,6 +35,7 @@ x-backend: &backend
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
     - ./lab:/app/lab
     - ./monitoring:/data/monitoring:ro
+    - ./config:/data/config:ro
   restart: unless-stopped
   depends_on:
     api:
@@ -41,11 +43,12 @@ x-backend: &backend
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: mirror.gcr.io/library/postgres:17-alpine
     environment:
       POSTGRES_USER: netops
       POSTGRES_PASSWORD: netops
       POSTGRES_DB: netops
+      PGDATA: /var/lib/postgresql/data/pg17
     ports: ["${POSTGRES_PORT:-5433}:5432"]
     volumes: [postgres-data:/var/lib/postgresql/data]
     restart: unless-stopped
@@ -57,7 +60,7 @@ services:
       start_period: 30s
 
   redis:
-    image: redis:7-alpine
+    image: mirror.gcr.io/library/redis:8-alpine
     ports: ["${REDIS_PORT:-6379}:6379"]
     restart: unless-stopped
     healthcheck:
@@ -67,10 +70,10 @@ services:
 
   api:
     <<: *backend
+    build: ./backend
     command: sh -c "alembic upgrade head && exec uvicorn netops.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
     ports:
       - "${API_PORT:-8001}:8000"
-      - "5177:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -95,12 +98,12 @@ services:
     command: python -m netops.telemetry.bot
 
   node-exporter:
-    image: prom/node-exporter:v1.8.2
+    image: mirror.gcr.io/prom/node-exporter:v1.12.1
     ports: ["${NODE_EXPORTER_PORT:-19100}:9100"]
     restart: unless-stopped
 
   snmp-exporter:
-    image: prom/snmp-exporter:v0.26.0
+    image: mirror.gcr.io/prom/snmp-exporter:v0.30.1
     ports: ["${SNMP_EXPORTER_PORT:-9116}:9116"]
     volumes:
       - ./monitoring/snmp.yml:/etc/snmp_exporter/snmp.yml:ro
@@ -121,7 +124,7 @@ services:
 
   # Долговременное хранилище рядов (Prometheus пишет сюда через remote_write).
   victoriametrics:
-    image: victoriametrics/victoria-metrics:v1.154.0
+    image: mirror.gcr.io/victoriametrics/victoria-metrics:v1.154.0
     command:
       - -storageDataPath=/storage
       - -retentionPeriod=${VM_RETENTION:-12}
@@ -129,18 +132,17 @@ services:
       - -search.maxQueryLen=65536
     ports:
       - "${VM_PORT:-8428}:8428"
-      - "5180:8428"
     volumes: [vm-data:/storage]
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: mirror.gcr.io/prom/prometheus:v3.15.0
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.retention.time=3d
+      - --web.enable-lifecycle
     ports:
       - "${PROMETHEUS_PORT:-9090}:9090"
-      - "5179:9090"
     volumes:
       - ./monitoring:/etc/prometheus:ro
       - prometheus-data:/prometheus
@@ -152,10 +154,9 @@ services:
       - victoriametrics
 
   grafana:
-    image: grafana/grafana:11.2.0
+    image: mirror.gcr.io/grafana/grafana:13.2.4
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
-      - "5178:3000"
     environment:
       GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
