@@ -96,7 +96,7 @@ services:
 
   node-exporter:
     image: prom/node-exporter:v1.8.2
-    ports: ["${NODE_EXPORTER_PORT:-9100}:9100"]
+    ports: ["${NODE_EXPORTER_PORT:-19100}:9100"]
     restart: unless-stopped
 
   snmp-exporter:

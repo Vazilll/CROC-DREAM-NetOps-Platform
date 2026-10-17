@@ -18,20 +18,28 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "system_state",
-        sa.Column("key", sa.String(length=128), nullable=False),
-        sa.Column(
-            "value", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False
-        ),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.PrimaryKeyConstraint("key", name=op.f("pk_system_state")),
-    )
-    op.create_index(op.f("ix_users_bound_client_id"), "users", ["bound_client_id"], unique=False)
-    op.create_index(op.f("ix_users_telegram_chat_id"), "users", ["telegram_chat_id"], unique=False)
-    op.create_index(op.f("ix_devices_site"), "devices", ["site"], unique=False)
-    op.create_index("ix_jobs_type_status", "jobs", ["type", "status"], unique=False)
-    op.create_index(op.f("ix_job_targets_hostname"), "job_targets", ["hostname"], unique=False)
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table("system_state"):
+        op.create_table(
+            "system_state",
+            sa.Column("key", sa.String(length=128), nullable=False),
+            sa.Column(
+                "value", sa.JSON().with_variant(postgresql.JSONB(), "postgresql"), nullable=False
+            ),
+            sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+            sa.PrimaryKeyConstraint("key", name=op.f("pk_system_state")),
+        )
+    indexes = [
+        (op.f("ix_users_bound_client_id"), "users", ["bound_client_id"]),
+        (op.f("ix_users_telegram_chat_id"), "users", ["telegram_chat_id"]),
+        (op.f("ix_devices_site"), "devices", ["site"]),
+        ("ix_jobs_type_status", "jobs", ["type", "status"]),
+        (op.f("ix_job_targets_hostname"), "job_targets", ["hostname"]),
+    ]
+    for idx_name, table_name, columns in indexes:
+        existing_idx = {idx["name"] for idx in inspector.get_indexes(table_name)}
+        if idx_name not in existing_idx:
+            op.create_index(idx_name, table_name, columns, unique=False)
 
 
 def downgrade() -> None:

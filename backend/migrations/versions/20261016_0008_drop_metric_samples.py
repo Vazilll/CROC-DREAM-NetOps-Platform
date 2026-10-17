@@ -21,9 +21,14 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.drop_index(op.f("ix_metric_samples_collected_at"), table_name="metric_samples")
-    op.drop_index("ix_metric_samples_name_collected", table_name="metric_samples")
-    op.drop_table("metric_samples")
+    inspector = sa.inspect(op.get_bind())
+    if inspector.has_table("metric_samples"):
+        existing_idx = {idx["name"] for idx in inspector.get_indexes("metric_samples")}
+        if op.f("ix_metric_samples_collected_at") in existing_idx:
+            op.drop_index(op.f("ix_metric_samples_collected_at"), table_name="metric_samples")
+        if "ix_metric_samples_name_collected" in existing_idx:
+            op.drop_index("ix_metric_samples_name_collected", table_name="metric_samples")
+        op.drop_table("metric_samples")
 
 
 def downgrade() -> None:

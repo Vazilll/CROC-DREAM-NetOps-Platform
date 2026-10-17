@@ -8,9 +8,8 @@ Caches readings in memory to protect live lab devices from excessive SSH polling
 from __future__ import annotations
 
 import contextlib
-import hashlib
 import json
-import math
+import os
 import re
 import threading
 import time
