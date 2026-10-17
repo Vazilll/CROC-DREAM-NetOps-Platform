@@ -68,9 +68,9 @@ class RecordingDispatcher:
 
 @pytest.fixture(autouse=True)
 def _reset_shared_state() -> Iterator[None]:
-    from netops.services.ai_guard import _active_injections  # noqa: PLC0415
-    from netops.services.state import reset_state_manager  # noqa: PLC0415
-    from netops.settings import get_settings  # noqa: PLC0415
+    from netops.services.ai_guard import _active_injections
+    from netops.services.state import reset_state_manager
+    from netops.settings import get_settings
 
     get_settings.cache_clear()
     _active_injections.clear()
@@ -87,7 +87,11 @@ def auth(role: UserRole) -> dict[str, str]:
 
 @pytest.fixture
 def intent_repo(tmp_path: Path) -> Path:
-    return Path(shutil.copytree(FIXTURES / "intent-repo", tmp_path / "intent"))
+    dst = Path(shutil.copytree(FIXTURES / "intent-repo", tmp_path / "intent"))
+    repo_platforms = Path(__file__).resolve().parents[2] / "intent" / "platforms"
+    if repo_platforms.is_dir():
+        shutil.copytree(repo_platforms, dst / "platforms", dirs_exist_ok=True)
+    return dst
 
 
 @pytest.fixture

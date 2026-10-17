@@ -226,7 +226,21 @@ ${logsText || 'No logs recorded.'}
                 {activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
                   <button
                     onClick={() => onDeploy(activeJobDetail.id)}
-                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                    disabled={
+                      activeJobDetail.logs.length > 0 &&
+                      !activeJobDetail.logs.some(
+                        (l) => l.step.toLowerCase() === 'diff' && !l.message.includes('matches the intended config')
+                      )
+                    }
+                    title={
+                      activeJobDetail.logs.length > 0 &&
+                      !activeJobDetail.logs.some(
+                        (l) => l.step.toLowerCase() === 'diff' && !l.message.includes('matches the intended config')
+                      )
+                        ? 'Все устройства в синхроне — изменения для деплоя отсутствуют'
+                        : 'Применить деплой патча'
+                    }
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
                   >
                     <Play className="w-3 h-3 fill-current" />
                     <span>{t.applyDeployBtn}</span>

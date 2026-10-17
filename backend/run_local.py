@@ -40,7 +40,7 @@ else:
 
 is_offline = not is_live
 default_driver = "scrapli" if is_live else "offline"
-default_inventory = "inventory.live.yaml" if is_live else "inventory.yaml"
+default_inventory = "inventory.yaml"
 
 # Default environment variables for standalone local run
 os.environ.setdefault("NETOPS_DATABASE_URL", "postgresql+psycopg://netops:netops@127.0.0.1:5432/netops")
@@ -108,46 +108,6 @@ def init_local_environment() -> None:
 
     logger.info("Initializing database schema at %s...", settings.database_url)
     Base.metadata.create_all(engine)
-    with engine.begin() as conn:
-        from sqlalchemy import inspect as sa_inspect  # noqa: PLC0415
-        from sqlalchemy import text as sa_text
-
-        user_cols = {c["name"] for c in sa_inspect(conn).get_columns("users")}
-        if "allowed_system" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN allowed_system VARCHAR(128)"))
-        if "bound_client_id" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_client_id VARCHAR(128)"))
-        if "bound_ip" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_ip VARCHAR(64)"))
-        if "bound_user_agent" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_user_agent VARCHAR(255)"))
-        if "bound_at" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN bound_at TIMESTAMP"))
-        if "last_seen_at" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN last_seen_at TIMESTAMP"))
-        if "expires_at" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN expires_at TIMESTAMP"))
-        if "telegram_chat_id" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_chat_id VARCHAR(64)"))
-        if "telegram_username" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_username VARCHAR(64)"))
-        if "telegram_verified_at" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN telegram_verified_at TIMESTAMP"))
-        if "verification_code" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_code VARCHAR(32)"))
-        if "verification_expires_at" not in user_cols:
-            conn.execute(sa_text("ALTER TABLE users ADD COLUMN verification_expires_at TIMESTAMP"))
-
-        device_cols = {c["name"] for c in sa_inspect(conn).get_columns("devices")}
-        if "fabric_id" not in device_cols:
-            conn.execute(
-                sa_text("ALTER TABLE devices ADD COLUMN fabric_id VARCHAR(64) DEFAULT 'croc-dc1-pod1'")
-            )
-            conn.execute(
-                sa_text("CREATE INDEX IF NOT EXISTS ix_devices_fabric_id ON devices (fabric_id)")
-            )
-        if "site" not in device_cols:
-            conn.execute(sa_text("ALTER TABLE devices ADD COLUMN site VARCHAR(64)"))
 
     # Make sure lab running configs exist
     lab_dir = Path(settings.offline_lab_path)
@@ -198,12 +158,12 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
       every scan refreshes oper/intent status, so a node that comes back is picked up by itself;
     - stale jobs cleanup every STALE_JOBS_CHECK_INTERVAL_SECONDS.
     """
-    import threading  # noqa: PLC0415
-    import time  # noqa: PLC0415
-    from datetime import timedelta  # noqa: PLC0415
+    import threading
+    import time
+    from datetime import timedelta
 
-    from netops.pipeline import fail_stale_jobs  # noqa: PLC0415
-    from netops.services import JobService  # noqa: PLC0415
+    from netops.pipeline import fail_stale_jobs
+    from netops.services import JobService
 
     first_delay = int(os.environ.get("NETOPS_BEAT_FIRST_DELAY_SECONDS", "3600"))
 
@@ -222,7 +182,7 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
             _cleanup(timedelta(0))
             if settings.apply_runtime_overlay().get("bootstrap_completed"):
                 with session_factory() as session:
-                    from netops.telemetry import collector  # noqa: PLC0415
+                    from netops.telemetry import collector
 
                     toolchain = build_toolchain(settings)
                     samples = collector.collect(
@@ -242,7 +202,7 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
                     continue
                 with session_factory() as session:
                     try:
-                        from netops.telemetry import collector  # noqa: PLC0415
+                        from netops.telemetry import collector
 
                         toolchain = build_toolchain(settings)
                         samples = collector.collect(
@@ -280,7 +240,7 @@ def _start_beat(settings, session_factory, dispatcher) -> None:
         first_delay,
     )
 
-    from netops.telemetry.bot import build_bot  # noqa: PLC0415
+    from netops.telemetry.bot import build_bot
 
     def _bot_loop() -> None:
         alert_interval = int(os.environ.get("NETOPS_DRIFT_SCAN_INTERVAL_SECONDS", "3600"))

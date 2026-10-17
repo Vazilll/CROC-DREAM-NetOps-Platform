@@ -1,17 +1,21 @@
 from __future__ import annotations
 
-import asyncio
-import secrets
-import time
 from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from netops.api.deps import ContainerDep, Operator, SessionDep, Viewer
+from netops.api.deps import ContainerDep, Operator, Owner, SessionDep, Viewer
 from netops.db import Base
 from netops.enums import DeviceStatus, IntentSource, UserRole
 from netops.intent.netbox import load_netbox_inventory
@@ -37,6 +41,8 @@ from netops.services.notifier import (
     send_telegram_message,
     sync_access_registry,
 )
+from netops.services.sessions import create_session
+from netops.services.telemetry import check_prometheus_status
 from netops.settings import ApiPrincipal
 from netops.telemetry import collector, metrics
 from netops.telemetry.bot import bind_telegram_chat_user, ensure_user_token
@@ -49,7 +55,6 @@ router = APIRouter()
 api_router = APIRouter()
 
 _verified_dbs: set[str] = set()
-_ws_tickets: dict[str, dict[str, Any]] = {}
 
 
 def _unavailable(reason: str) -> JSONResponse:
@@ -81,67 +86,71 @@ def readiness(session: SessionDep) -> JSONResponse:
 
 
 def _render_prometheus_metrics(session: SessionDep) -> PlainTextResponse:
+    from netops.services.state import get_state_manager
+
     lines = [
         "# HELP netops_up Whether NetOps Platform API is operational",
         "# TYPE netops_up gauge",
     ]
     try:
-        dev_counts = session.execute(
-            select(Device.status, func.count(Device.id)).group_by(Device.status)
-        ).all()
-        lines.extend(
-            [
+        sm = get_state_manager()
+        cached_block = sm.get("netops:metrics:db_counts") if sm.is_redis_connected else None
+        if cached_block:
+            lines.append(cached_block)
+        else:
+            db_lines: list[str] = [
                 "netops_up 1",
                 "",
                 "# HELP netops_devices_total Total network devices by operational sync status",
                 "# TYPE netops_devices_total gauge",
             ]
-        )
-        status_map = {
-            (row[0].value if hasattr(row[0], "value") else str(row[0])): row[1]
-            for row in dev_counts
-        }
-        for st in ("IN_SYNC", "DRIFT_DETECTED", "UNREACHABLE", "UNKNOWN"):
-            lines.append(f'netops_devices_total{{status="{st.lower()}"}} {status_map.get(st, 0)}')
+            dev_counts = session.execute(
+                select(Device.status, func.count(Device.id)).group_by(Device.status)
+            ).all()
+            status_map = {
+                (row[0].value if hasattr(row[0], "value") else str(row[0])): row[1]
+                for row in dev_counts
+            }
+            for st in ("IN_SYNC", "DRIFT_DETECTED", "UNREACHABLE", "UNKNOWN"):
+                db_lines.append(
+                    f'netops_devices_total{{status="{st.lower()}"}} {status_map.get(st, 0)}'
+                )
 
-        lines.append("")
-        lines.append("# HELP netops_jobs_total Total executed orchestration jobs by type and status")
-        lines.append("# TYPE netops_jobs_total counter")
-        job_counts = session.execute(
-            select(Job.type, Job.status, func.count(Job.id)).group_by(Job.type, Job.status)
-        ).all()
-        for row in job_counts:
-            j_type = row[0].value if hasattr(row[0], "value") else str(row[0])
-            j_status = row[1].value if hasattr(row[1], "value") else str(row[1])
-            lines.append(
-                f'netops_jobs_total{{type="{j_type.lower()}",status="{j_status.lower()}"}} {row[2]}'
+            db_lines.append("")
+            db_lines.append(
+                "# HELP netops_jobs_total Total executed orchestration jobs by type and status"
             )
+            db_lines.append("# TYPE netops_jobs_total counter")
+            job_counts = session.execute(
+                select(Job.type, Job.status, func.count(Job.id)).group_by(Job.type, Job.status)
+            ).all()
+            for row in job_counts:
+                j_type = row[0].value if hasattr(row[0], "value") else str(row[0])
+                j_status = row[1].value if hasattr(row[1], "value") else str(row[1])
+                db_lines.append(
+                    f'netops_jobs_total{{type="{j_type.lower()}",status="{j_status.lower()}"}} {row[2]}'
+                )
 
-        lines.append("")
-        lines.append("# HELP netops_drift_records_total Total configuration drift records recorded")
-        lines.append("# TYPE netops_drift_records_total counter")
-        drift_count = session.scalar(select(func.count(DriftRecord.id))) or 0
-        lines.append(f"netops_drift_records_total {drift_count}")
+            db_lines.append("")
+            db_lines.append(
+                "# HELP netops_drift_records_total Total configuration drift records recorded"
+            )
+            db_lines.append("# TYPE netops_drift_records_total counter")
+            drift_count = session.scalar(select(func.count(DriftRecord.id))) or 0
+            db_lines.append(f"netops_drift_records_total {drift_count}")
+
+            rendered_db = "\n".join(db_lines)
+            if sm.is_redis_connected:
+                sm.set("netops:metrics:db_counts", rendered_db, ex=10)
+            lines.append(rendered_db)
 
         samples, collected_at = collector.latest()
-        hw_samples = [
-            s
-            for s in samples
-            if s.name
-            in (
-                metrics.DEVICE_REACHABLE,
-                metrics.BGP_SESSION_UP,
-                metrics.BGP_PREFIXES_ACCEPTED,
-                metrics.INTERFACE_UP,
-                metrics.PING_LOSS,
-                metrics.CPU_USAGE,
-                metrics.MEMORY_USAGE,
-                metrics.UPLINK_UTIL,
-            )
+        filtered_samples = [
+            s for s in samples if s.name not in (metrics.DEVICES_TOTAL, metrics.JOBS_TOTAL)
         ]
-        if hw_samples:
+        if filtered_samples:
             lines.append("")
-            lines.append(metrics.render(hw_samples, collected_at).rstrip())
+            lines.append(metrics.render(filtered_samples, collected_at).rstrip())
     except Exception:
         lines.append("netops_up 0")
 
@@ -157,10 +166,10 @@ def _render_prometheus_metrics(session: SessionDep) -> PlainTextResponse:
     summary="Метрики для Prometheus",
     response_class=PlainTextResponse,
 )
-def prometheus_metrics(session: SessionDep) -> PlainTextResponse:
+def prometheus_metrics() -> PlainTextResponse:
     samples, collected_at = collector.latest()
     return PlainTextResponse(
-        content=metrics.render(samples, collected_at),
+        metrics.render(samples, collected_at),
         media_type="text/plain; version=0.0.4; charset=utf-8",
     )
 
@@ -177,6 +186,9 @@ def metrics_api(session: SessionDep) -> PlainTextResponse:
 
 class ChaosRequest(BaseModel):
     scenario: str
+    target_hostname: str | None = None
+    interface_name: str | None = None
+    acl_name: str | None = None
 
 
 class FreezeRequest(BaseModel):
@@ -195,7 +207,7 @@ class TelegramTestRequest(BaseModel):
 
 
 class ClaimOwnerRequest(BaseModel):
-    cluster_name: str = "CROC-FABRIC-PROD-01"
+    cluster_name: str = ""
     owner_username: str = "owner"
     recovery_key: str | None = None
 
@@ -216,8 +228,14 @@ class BootstrapConfigureRequest(BaseModel):
     github_pat: str | None = None
     github_webhook_secret: str | None = None
     webhook_public_url: str | None = None
+    public_web_url: str | None = None
+    frontend_port: int | None = None
     telegram_bot_token: str | None = None
+    telegram_bot_username: str | None = None
     telegram_chat_id: str | None = None
+    default_fabric_id: str | None = None
+    default_domain: str | None = None
+    clab_topology_path: str | None = None
     groq_api_key: str | None = None
     gemini_api_key: str | None = None
     ollama_url: str | None = None
@@ -238,11 +256,11 @@ class ServerDiscoverRequest(BaseModel):
     mode: str = "ssh"
     host: str = ""
     port: int = 221
-    username: str = "crocdream"
+    username: str = ""
     password: str | None = None
-    switch_password_huawei: str = "admin"
-    switch_password_arista: str = "admin"
-    switch_password_cisco: str = "admin"
+    switch_password_huawei: str = ""
+    switch_password_arista: str = ""
+    switch_password_cisco: str = ""
 
 
 @api_router.get(
@@ -273,7 +291,13 @@ def lint_intent(
 
 @api_router.post("/system/chaos", tags=["system"], summary="Simulate network incident")
 def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dict[str, str]:
-    return execute_chaos_scenario(req.scenario, container)
+    return execute_chaos_scenario(
+        req.scenario,
+        container,
+        target_hostname=req.target_hostname,
+        interface_name=req.interface_name,
+        acl_name=req.acl_name,
+    )
 
 
 @api_router.get(
@@ -439,10 +463,10 @@ def github_webhook(
         if request is not None
         else ""
     )
-    if secret and sig_header:
-        import hashlib  # noqa: PLC0415
-        import hmac  # noqa: PLC0415
-        import json as _json  # noqa: PLC0415
+    if secret:
+        import hashlib
+        import hmac
+        import json as _json
 
         raw_body = getattr(request, "_body", None) or _json.dumps(payload).encode("utf-8")
         expected = (
@@ -510,7 +534,7 @@ def get_integrations_status(
 
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     issues = container.intents.lint()
-    tg_targets = resolve_telegram_targets(settings, discover=True)
+    tg_targets = resolve_telegram_targets(settings, discover=False)
     tg_configured = bool(settings.telegram_bot_token and tg_targets)
     git_info = {
         **git_meta,
@@ -519,14 +543,11 @@ def get_integrations_status(
     }
 
     rt_overlay = settings.apply_runtime_overlay()
-    if rt_overlay.get("telegram_owner_linked"):
-        for cid in tg_targets:
-            if str(cid).lstrip("-").isdigit():
-                bind_telegram_chat_user(session, int(cid), settings=settings)
+    owner_cid = str(rt_overlay.get("telegram_chat_id") or settings.telegram_chat_id or "").strip()
+    if rt_overlay.get("telegram_owner_linked") and owner_cid.lstrip("-").isdigit():
+        bind_telegram_chat_user(session, int(owner_cid), settings=settings)
 
     db_users = list(session.scalars(select(User).order_by(User.username)).all())
-    for u in db_users:
-        ensure_user_token(session, u, settings)
 
     bound_count = sum(1 for u in db_users if u.bound_client_id is not None)
     counts = {
@@ -541,18 +562,21 @@ def get_integrations_status(
 
     is_admin = user.role.grants(UserRole.ADMIN)
     registry = sync_access_registry(session, settings) if is_admin else {}
-    raw_tokens = load_user_tokens(settings)
+    raw_tokens = load_user_tokens(settings) if is_admin else {}
     if user.role == UserRole.OWNER:
-        user_tokens = raw_tokens
-    elif is_admin:
-        user_tokens = {k: v for k, v in raw_tokens.items() if k != "owner"}
-    else:
         user_tokens = {
-            k: (v if k == user.username else f"{v[:6]}...")
-            for k, v in raw_tokens.items()
-            if k != "owner"
+            u.username: raw_tokens.get(u.username) or ensure_user_token(session, u, settings)
+            for u in db_users
         }
-    tg_bindings = load_telegram_bindings(settings)
+    elif is_admin:
+        user_tokens = {
+            u.username: raw_tokens.get(u.username) or ensure_user_token(session, u, settings)
+            for u in db_users
+            if u.username != "owner"
+        }
+    else:
+        user_tokens = {}
+    tg_bindings = load_telegram_bindings(settings) if is_admin else {}
     all_users = [UserRead.model_validate(u).model_dump(mode="json") for u in db_users] if is_admin else []
 
     return {
@@ -576,6 +600,7 @@ def get_integrations_status(
             else f"Git SoT + {db_engine.upper()}",
         },
         "prometheus": {
+            **check_prometheus_status(settings.prometheus_url),
             "configured": bool(settings.prometheus_url),
             "url": settings.prometheus_url or None,
             "scrape_endpoint": "/metrics",
@@ -585,7 +610,7 @@ def get_integrations_status(
         "telegram": {
             "configured": tg_configured,
             "bot_token_set": bool(settings.telegram_bot_token),
-            "bot_username": "@Croc_Dream_bot",
+            "bot_username": (f"@{settings.telegram_bot_username.lstrip('@')}" if settings.telegram_bot_username else ""),
             "chat_ids": [int(c) for c in tg_targets if str(c).lstrip("-").isdigit()],
             "chat_ids_count": len(tg_targets),
             "bindings": list(tg_bindings.values()),
@@ -605,6 +630,7 @@ def get_integrations_status(
                 "/unblock",
                 "/role",
                 "/unbind",
+                "/recover",
             ],
         },
     }
@@ -647,6 +673,7 @@ def trigger_telegram_summary(
     delivered = send_telegram_message(container.settings, summary_html)
     tg_targets = resolve_telegram_targets(container.settings, discover=False)
     configured = bool(container.settings.telegram_bot_token and tg_targets)
+    bot_handle = f"@{(container.settings.telegram_bot_username or '').lstrip('@')}"
     return {
         "status": "delivered" if delivered else "preview_only",
         "configured": configured,
@@ -657,7 +684,7 @@ def trigger_telegram_summary(
         "message_preview": summary_html,
         "hint": None
         if delivered
-        else "Токен @Croc_Dream_bot подключён! Напишите /start боту @Croc_Dream_bot в Telegram и нажмите кнопку ещё раз для автопривязки чата.",
+        else f"Токен {bot_handle} подключён! Напишите /start боту {bot_handle} в Telegram и нажмите кнопку ещё раз для автопривязки чата.",
     }
 
 
@@ -674,6 +701,22 @@ def get_bootstrap_status(
     return build_bootstrap_status(request, session, container)
 
 
+def _open_owner_session(
+    result: dict[str, Any], request: Request, response: Response, container: ContainerDep
+) -> dict[str, Any]:
+    token = result.get("token")
+    if token:
+        result["csrf_token"] = create_session(
+            response,
+            request,
+            ApiPrincipal(username="owner", role=UserRole.OWNER),
+            token=token,
+            settings=container.settings,
+            db_user=True,
+        )
+    return result
+
+
 @api_router.post(
     "/system/bootstrap/claim-owner",
     tags=["system"],
@@ -682,10 +725,12 @@ def get_bootstrap_status(
 def claim_owner_bootstrap(
     req: ClaimOwnerRequest,
     request: Request,
+    response: Response,
     session: SessionDep,
     container: ContainerDep,
 ) -> dict[str, Any]:
-    return claim_owner(req, request, session, container)
+    result = claim_owner(req, request, session, container)
+    return _open_owner_session(result, request, response, container)
 
 
 @api_router.post(
@@ -696,10 +741,12 @@ def claim_owner_bootstrap(
 def recover_owner_access(
     req: RecoverOwnerRequest,
     request: Request,
+    response: Response,
     session: SessionDep,
     container: ContainerDep,
 ) -> dict[str, Any]:
-    return recover_owner(req, request, session, container)
+    result = recover_owner(req, request, session, container)
+    return _open_owner_session(result, request, response, container)
 
 
 @api_router.post(
@@ -711,6 +758,7 @@ def configure_bootstrap_layers(
     req: BootstrapConfigureRequest,
     container: ContainerDep,
     session: SessionDep,
+    _: Owner,
 ) -> dict[str, Any]:
     return configure_layers(req, container, session)
 
@@ -724,6 +772,7 @@ def discover_and_attach_server(
     req: ServerDiscoverRequest,
     session: SessionDep,
     container: ContainerDep,
+    _: Owner,
 ) -> dict[str, Any]:
     if req.mode == "ssh" and not req.host.strip():
         if container.settings.clab_host:
@@ -735,75 +784,3 @@ def discover_and_attach_server(
             )
     return discover_server(req, session, container)
 
-
-@api_router.post(
-    "/ws/ticket",
-    tags=["system"],
-    summary="Выпуск одноразового 30-секундного билета (Ephemeral Ticket) для авторизации WebSocket",
-)
-def issue_websocket_ticket(
-    request: Request,
-    container: ContainerDep,
-    user: Viewer,
-) -> dict[str, Any]:
-    rt = container.settings.apply_runtime_overlay()
-    ws_enabled = bool(rt.get("websocket_enabled", False))
-    client_id = (request.headers.get("X-Client-Id") or "").strip() or "browser-client"
-    client_ip = request.client.host if request.client else "127.0.0.1"
-
-    now = time.time()
-    expired = [k for k, v in _ws_tickets.items() if float(v.get("expires_at", 0)) < now]
-    for k in expired:
-        _ws_tickets.pop(k, None)
-
-    ticket = f"wst_{secrets.token_urlsafe(24)}"
-    _ws_tickets[ticket] = {
-        "username": user.username,
-        "role": user.role.value,
-        "client_id": client_id,
-        "ip": client_ip,
-        "expires_at": now + 30.0,
-    }
-    return {
-        "ticket": ticket,
-        "ttl_seconds": 30,
-        "websocket_enabled": ws_enabled,
-        "ws_path": f"/api/v1/ws/stream?ticket={ticket}",
-        "bound_to": {
-            "username": user.username,
-            "role": user.role.value,
-            "client_id": client_id,
-            "ip": client_ip,
-        },
-    }
-
-
-@api_router.websocket("/ws/stream")
-async def websocket_event_stream(
-    websocket: WebSocket,
-    ticket: str = "",
-) -> None:
-    now = time.time()
-    meta = _ws_tickets.pop(ticket, None) if ticket else None
-    if not meta or float(meta.get("expires_at", 0)) < now:
-        await websocket.close(code=1008, reason="Invalid or expired one-time WebSocket ticket")
-        return
-
-    await websocket.accept()
-    try:
-        await websocket.send_json(
-            {
-                "event": "ws_authenticated",
-                "username": meta["username"],
-                "role": meta["role"],
-                "client_id": meta["client_id"],
-                "auth_scheme": "ephemeral_one_time_ticket",
-                "timestamp": int(now),
-            }
-        )
-        while True:
-            msg = await asyncio.wait_for(websocket.receive_text(), timeout=25.0)
-            if msg == "ping":
-                await websocket.send_json({"event": "pong", "ts": int(time.time())})
-    except (WebSocketDisconnect, TimeoutError, Exception):
-        return

@@ -2,32 +2,36 @@
 hostname: "spine-2.croc.lab"
 
 interfaces:
+  - name: "Ethernet1"
+    description: "Downlink to leaf1 GE1/0/1"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.4/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+    ospf_area: "0.0.0.0"
+
+  - name: "Ethernet2"
+    description: "Downlink to leaf2 GE1/0/1"
+    enabled: true
+    mode: "l3"
+    ipv4_address: "10.10.0.6/31"
+    mtu: 1500
+    acl_in: "FABRIC-IN"
+    ospf_area: "0.0.0.0"
+
   - name: "Loopback0"
     description: "Router-ID / BGP announce"
     enabled: true
     mode: "l3"
     ipv4_address: "10.255.0.12/32"
     mtu: 1500
-
-  - name: "Ethernet1"
-    description: "Downlink to leaf1 GigabitEthernet0/0/2"
-    enabled: true
-    mode: "l3"
-    ipv4_address: "10.10.0.4/31"
-    mtu: 1500
-    acl_in: "FABRIC-IN"
-
-  - name: "Ethernet2"
-    description: "Downlink to leaf2 GigabitEthernet0/0/2"
-    enabled: true
-    mode: "l3"
-    ipv4_address: "10.10.0.6/31"
-    mtu: 1500
-    acl_in: "FABRIC-IN"
+    ospf_area: "0.0.0.0"
 
 bgp:
   asn: 65000
   router_id: "10.255.0.12"
+  evpn: true
   neighbors:
     - peer_ip: "10.10.0.5"
       remote_asn: 65001
@@ -47,6 +51,9 @@ acls:
       - sequence: 10
         action: "permit"
         protocol: "icmp"
+      - sequence: 15
+        action: "permit"
+        protocol: "ospf"
       - sequence: 20
         action: "permit"
         protocol: "tcp"

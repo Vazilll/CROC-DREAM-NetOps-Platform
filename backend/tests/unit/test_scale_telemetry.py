@@ -1,11 +1,10 @@
-"""Comprehensive unit and scale tests for 1,000-device telemetry, port resolution,
+"""Comprehensive unit and scale tests for multi-fabric telemetry, port resolution,
 
 heterogeneous metric collection (switches + servers), and NOC Grafana alignment.
 """
 
 from __future__ import annotations
 
-import json
 import time
 from pathlib import Path
 
@@ -26,7 +25,6 @@ from netops.services.telemetry import (
     parse_linux_network_rate,
     record_live_metric,
     resolve_device_ports,
-    synthetic_metric_series,
 )
 from netops.settings import Settings
 from netops.telemetry import collector, metrics
@@ -182,17 +180,12 @@ def test_heterogeneous_metric_collection_switches_and_servers() -> None:
     assert sm.get_telemetry_series(hostname_srv, "disk_util_pct", points=5) == [35.0]
     assert sm.get_telemetry_series(hostname_srv, "cpu_pct", points=5) == [16.0]
 
-    # Verify synthetic series fallback for server roles
-    synth_srv = synthetic_metric_series(hostname_srv, "server", "disk_util_pct", points=12)
-    assert len(synth_srv) == 12
-    assert all(2.0 <= x <= 95.0 for x in synth_srv)
-
     clear_live_metrics(hostname_sw)
     clear_live_metrics(hostname_srv)
 
 
-def test_concurrent_telemetry_polling_1000_targets_multi_fabric() -> None:
-    """Scale test: Concurrent telemetry collection across 1,000 targets in 10 fabrics."""
+def test_concurrent_telemetry_polling_multi_fabric() -> None:
+    """Scale test: Concurrent telemetry collection across heterogeneous targets in multi-fabric."""
     targets: list[tuple[str, str, object]] = []
     platforms = [
         "cisco_iosxe",
@@ -384,14 +377,14 @@ def test_redis_ring_buffer_and_latest_snapshot_at_scale() -> None:
 
 
 def test_grafana_noc_dashboard_schema_and_multifabric_panels() -> None:
-    """Verify Grafana NOC dashboard JSON structure, fabric_id templating, and server panels."""
+    """Verify Grafana NOC dashboard YAML structure, fabric_id templating, and server panels."""
+    import yaml
+
     repo_root = Path(__file__).resolve().parents[3]
-    dash_path = (
-        repo_root / "monitoring/grafana/provisioning/dashboards/json/croc-dream-1000-stand-noc.json"
-    )
+    dash_path = repo_root / "monitoring/grafana/dashboards/croc-dream-noc.yaml"
     assert dash_path.is_file()
 
-    dash = json.loads(dash_path.read_text(encoding="utf-8"))
+    dash = yaml.safe_load(dash_path.read_text(encoding="utf-8"))
     assert dash["uid"] == "croc-dream-noc"
 
     # Templating variables

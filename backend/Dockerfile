@@ -31,4 +31,4 @@ RUN useradd --create-home --uid 1000 netops && chown -R netops:netops /app
 USER netops
 
 EXPOSE 8000
-CMD ["uvicorn", "netops.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "netops.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]

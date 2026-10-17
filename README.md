@@ -95,18 +95,17 @@ CROC-DREAM-NetOps-Platform/
 │   └── run_local.py           # Автономный лаунчер без Docker (SQLite + Eager Celery + авто-сидинг)
 ├── frontend/                  # Клиентский интерфейс NOC на React 19 + TypeScript (см. frontend/README.md)
 │   └── src/
-│       ├── api.ts             # Строго типизированный HTTP/WS клиент
+│       ├── api.ts             # Строго типизированный HTTP-клиент API
 │       ├── App.tsx            # Корневой оркестратор состояния и хоткеев
 │       └── components/
 │           ├── layout/        # Каркас и дизайн-система (Header, Sidebar, MobileNav, CommandPalette, ui)
 │           ├── views/         # Рабочие экраны (Dashboard, DeviceList, DevicePage, DiffViewer, DriftView, JobsView, ChaosLabView, EmergencyHub, SlidesPresentation)
 │           ├── modals/        # Модальные окна и дроверы (WelcomeModal, ShareModal, DryRunModal, AddDeviceModal, DeviceDrawer, DeviceDetailModal, CopilotPanel, ShortcutsModal)
 │           └── charts/        # Визуализация (TopologyMap 2D, Topology3D, ForecastChart)
-├── intent/                    # Git Source of Truth: inventory.yaml, devices/*.yaml, diff_filters.yaml (см. intent/README.md)
+├── intent/                    # Git Source of Truth: inventory.yaml, inventory.live.yaml, devices/*.yaml, diff_filters.yaml (см. intent/README.md)
 ├── templates/                 # Шаблоны Jinja2 для 6 платформ: cisco_iosxe, arista_eos, huawei_vrp, eltex_mes, juniper_junos, yadro_kornfe (см. templates/README.md)
 ├── lab/                       # Лабораторный стенд: golden_configs/, running/, reset_lab.sh (см. lab/README.md)
 ├── scripts/                   # Инженерные CLI-утилиты: doctor.py, verify_live_lab.py, reset_lab.py, automate_netops.py (см. scripts/README.md)
-├── tools/                     # MCP-серверы для агентной интеграции (mcp_netops_platform, mcp_server_monitor)
 ├── monitoring/                # Конфигурация сбора метрик Prometheus (prometheus.yml)
 └── docs/                      # Архитектурная документация и гайды (backend-architecture.md, LIVE_LAB_GUIDE.md, templates-integration.md)
 ```

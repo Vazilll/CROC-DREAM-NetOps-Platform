@@ -43,12 +43,14 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
   const [isApplyingPatch, setIsApplyingPatch] = useState<boolean>(false);
   const [patchResult, setPatchResult] = useState<{ status: string; message: string } | null>(null);
 
-  // Recovery
+  // Recovery & Freeze
   const [isSoftResetting, setIsSoftResetting] = useState<boolean>(false);
   const [isHardResetting, setIsHardResetting] = useState<boolean>(false);
   const [resetModal, setResetModal] = useState<'soft' | 'hard' | null>(null);
   const [resetLog, setResetLog] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
+  const [isFrozen, setIsFrozen] = useState<boolean>(false);
+  const [isTogglingFreeze, setIsTogglingFreeze] = useState<boolean>(false);
 
   // Audit Logs
   const [auditLogs, setAuditLogs] = useState<EmergencyAuditLog[]>([]);
@@ -68,6 +70,12 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
 
   useEffect(() => {
     let active = true;
+    api
+      .getFreezeStatus()
+      .then((st) => {
+        if (active) setIsFrozen(Boolean(st.frozen));
+      })
+      .catch(() => {});
     api
       .getDevices()
       .then((list) => {
@@ -98,6 +106,28 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
       active = false;
     };
   }, []);
+
+  const handleToggleFreeze = async () => {
+    setIsTogglingFreeze(true);
+    try {
+      const next = !isFrozen;
+      const st = await api.setFreezeStatus(
+        next,
+        next ? 'Аварийная заморозка фабрики через Emergency Hub' : 'Снятие заморозки фабрики'
+      );
+      setIsFrozen(Boolean(st.frozen));
+      setResetLog(
+        st.frozen
+          ? '[FREEZE АКТИВИРОВАН]: Все плановые пайплайны деплоя и ремедиации заблокированы.'
+          : '[FREEZE СНЯТ]: Штатные пайплайны деплоя разблокированы.'
+      );
+      loadAudit();
+    } catch (err: unknown) {
+      setResetLog(`[ОШИБКА FREEZE]: ${getErrorMessage(err)}`);
+    } finally {
+      setIsTogglingFreeze(false);
+    }
+  };
 
   const activeDeviceObj = devices.find((d) => d.hostname === selectedDevice) || devices[0];
   const activePresets = (activeDeviceObj && PRESETS[activeDeviceObj.platform]) || PRESETS.arista_eos;
@@ -220,8 +250,20 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole, onSwitc
           </div>
         </div>
 
-        {/* 2-Tier Recovery Quick Buttons */}
-        <div className="flex items-center gap-2.5">
+        {/* 2-Tier Recovery & Freeze Quick Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={handleToggleFreeze}
+            disabled={isTogglingFreeze}
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+              isFrozen
+                ? 'text-cyan-700 dark:text-cyan-200 bg-cyan-500/20 border-cyan-500/40'
+                : 'text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
+            }`}
+          >
+            <Lock className="w-3.5 h-3.5" />
+            <span>{isFrozen ? 'Разморозить фабрику' : 'Заморозка (Change Freeze)'}</span>
+          </button>
           <button
             onClick={() => setResetModal('soft')}
             disabled={isSoftResetting || isHardResetting}

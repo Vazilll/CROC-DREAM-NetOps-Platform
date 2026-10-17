@@ -6,9 +6,9 @@ import yaml
 
 from netops.enums import TelemetryProtocol
 from netops.telemetry.targets import (
-    EXPORTER_TARGETS_FILE,
     GNMIC_TARGETS_FILE,
-    SNMP_TARGETS_FILE,
+    get_exporter_sd_targets,
+    get_snmp_sd_targets,
     is_externally_collected,
     last_collector_plan,
     refresh_collector_targets,
@@ -44,17 +44,22 @@ def test_refresh_collector_targets_writes_files_without_secrets(
     assert gnmic[hosts[0]]["insecure"] is True
     assert gnmic[hosts[0]]["event-tags"]["hostname"] == hosts[0]
 
-    exporter = json.loads((out / EXPORTER_TARGETS_FILE).read_text())
+    exporter = get_exporter_sd_targets()
     assert exporter[0]["labels"]["__metrics_path__"] == "/app"
     assert exporter[0]["targets"][0].endswith(":9101")
-    snmp = json.loads((out / SNMP_TARGETS_FILE).read_text())
+    snmp = get_snmp_sd_targets()
     assert [t["labels"]["hostname"] for t in snmp] == [hosts[2]]
     assert snmp[0]["labels"]["snmp_module"] in ("host_resources", "cisco_cpu", "huawei_cpu")
 
-    for name in (GNMIC_TARGETS_FILE, EXPORTER_TARGETS_FILE, SNMP_TARGETS_FILE):
-        text = (out / name).read_text()
-        assert "admin" not in text
-        assert "password" not in text
+    # Verify no .json files were written to out dir and no secrets leaked
+    assert list(out.glob("*.json")) == []
+    for serialized in (
+        (out / GNMIC_TARGETS_FILE).read_text(),
+        json.dumps(exporter),
+        json.dumps(snmp),
+    ):
+        assert "admin" not in serialized
+        assert "password" not in serialized
 
     assert summary["protocols"]["gnmi"] == 1
     assert sum(summary["protocols"].values()) == len(hosts)
@@ -65,4 +70,5 @@ def test_refresh_collector_targets_writes_files_without_secrets(
     if len(hosts) > 3:
         assert is_externally_collected(hosts[-1]) is False
     assert is_externally_collected("nonexistent.croc.lab") is False
+
 

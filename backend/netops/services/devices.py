@@ -57,14 +57,16 @@ class DeviceService:
         device_ids = [d.id for d in devices]
         drifts: dict[int, DriftRecord] = {}
         if device_ids:
-            drift_query = (
-                select(DriftRecord)
+            from sqlalchemy import func
+
+            latest_ids = (
+                select(func.max(DriftRecord.id))
                 .where(DriftRecord.device_id.in_(device_ids))
-                .order_by(DriftRecord.device_id, DriftRecord.checked_at.desc())
+                .group_by(DriftRecord.device_id)
             )
+            drift_query = select(DriftRecord).where(DriftRecord.id.in_(latest_ids))
             for record in self._session.scalars(drift_query):
-                if record.device_id not in drifts:
-                    drifts[record.device_id] = record
+                drifts[record.device_id] = record
 
         for device in devices:
             self._enrich_device(device, drifts.get(device.id))
@@ -85,13 +87,9 @@ class DeviceService:
 
     def _enrich_device(self, device: Device, latest_drift: DriftRecord | None = None) -> Device:
         role_str = str(device.role.value if hasattr(device.role, "value") else device.role)
-        sparkline = metric_series(
-            device.hostname, role_str, "uplink_util_pct", points=24, allow_synthetic_offline=True
-        )
+        sparkline = metric_series(device.hostname, role_str, "uplink_util_pct", points=24)
         if not sparkline:
-            sparkline = metric_series(
-                device.hostname, role_str, "cpu_pct", points=24, allow_synthetic_offline=True
-            )
+            sparkline = metric_series(device.hostname, role_str, "cpu_pct", points=24)
         oper_status = self._derive_oper_status(device, sparkline, latest_drift)
         state_timeline = self._build_state_timeline(oper_status, sparkline)
         device.oper_status = oper_status
@@ -155,9 +153,9 @@ class DeviceService:
         return device
 
     def delete(self, device_id: int) -> None:
-        from sqlalchemy import delete  # noqa: PLC0415
+        from sqlalchemy import delete
 
-        from netops.models import Job, JobTarget  # noqa: PLC0415
+        from netops.models import Job, JobTarget
 
         device = self.get(device_id)
         if device.status is DeviceStatus.IN_PROGRESS:

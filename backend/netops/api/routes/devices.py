@@ -37,6 +37,18 @@ _bind_device_to_sot = bind_device_to_sot
 router = APIRouter(tags=["devices"])
 
 
+def device_allowed(device: Device, allowed_system: str | None) -> bool:
+    if not allowed_system or allowed_system in ("*", "all"):
+        return True
+    target = allowed_system.removeprefix("fabric:").removeprefix("site:")
+    return (
+        device.hostname == allowed_system
+        or str(device.id) == allowed_system
+        or getattr(device, "fabric_id", None) in (allowed_system, target)
+        or getattr(device, "site", None) in (allowed_system, target)
+    )
+
+
 @router.get("/devices", response_model=list[DeviceRead], summary="Список устройств")
 def list_devices(
     service: DeviceServiceDep,
@@ -61,11 +73,7 @@ def list_devices(
         )
     )
     if principal.allowed_system:
-        return [
-            d
-            for d in devices
-            if d.hostname == principal.allowed_system or str(d.id) == principal.allowed_system
-        ]
+        return [d for d in devices if device_allowed(d, principal.allowed_system)]
     return devices
 
 
@@ -74,11 +82,7 @@ def get_device(
     device_id: int, service: DeviceServiceDep, container: ContainerDep, principal: Viewer
 ) -> DeviceDetail:
     device = service.get(device_id)
-    if (
-        principal.allowed_system
-        and device.hostname != principal.allowed_system
-        and str(device.id) != principal.allowed_system
-    ):
+    if not device_allowed(device, principal.allowed_system):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Доступ вашей ссылки ограничен системой {principal.allowed_system}",
@@ -109,10 +113,10 @@ def probe_device(req: DeviceProbeRequest, container: ContainerDep, _: Admin) -> 
 def create_device(
     data: DeviceCreate, service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> Device:
-    from sqlalchemy import select  # noqa: PLC0415
+    from sqlalchemy import select
 
-    from netops.errors import ConflictError  # noqa: PLC0415
-    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+    from netops.errors import ConflictError
+    from netops.services.notifier import sync_access_registry
 
     try:
         device = service.create(data)
@@ -169,7 +173,7 @@ def update_device(
 def delete_device(
     device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> Response:
-    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+    from netops.services.notifier import sync_access_registry
 
     device = service.get(device_id)
     hostname = device.hostname
@@ -219,7 +223,7 @@ def device_emergency_action(
 def sync_inventory(
     service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> InventorySyncResult:
-    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+    from netops.services.notifier import sync_access_registry
 
     settings = container.settings
     if settings.netbox_url and settings.netbox_token:

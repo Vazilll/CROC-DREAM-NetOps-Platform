@@ -51,10 +51,12 @@ def collect(
     return samples
 
 
-# Публикует срез последнего сбора в Redis (StateManager). Историю здесь не храним:
-# Prometheus скрейпит /metrics и пишет ряды в VictoriaMetrics. TTL нужен, чтобы
-# /metrics не отдавал «вечно живые» значения, если сборщик остановился.
+# Публикует срез последнего сбора в Redis (StateManager) и пушит ряды напрямую в VictoriaMetrics TSDB.
+# TTL нужен, чтобы /metrics не отдавал «вечно живые» значения, если сборщик остановился.
 def publish(samples: Sequence[Sample], *, ttl_seconds: int | None = None) -> datetime:
+    import os
+    import urllib.request
+
     collected_at = utcnow()
     get_state_manager().set_json(
         LATEST_SNAPSHOT_KEY,
@@ -64,6 +66,20 @@ def publish(samples: Sequence[Sample], *, ttl_seconds: int | None = None) -> dat
         },
         ex=ttl_seconds,
     )
+    vm_url = os.environ.get("NETOPS_VICTORIAMETRICS_URL", "").strip().rstrip("/")
+    if vm_url and "PYTEST_CURRENT_TEST" not in os.environ and samples:
+        try:
+            body = metrics.render(samples, collected_at).encode("utf-8")
+            req = urllib.request.Request(
+                f"{vm_url}/api/v1/import/prometheus",
+                data=body,
+                headers={"Content-Type": "text/plain"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=2.0):
+                pass
+        except Exception as exc:
+            logger.debug("VictoriaMetrics direct push skipped: %s", exc)
     return collected_at
 
 
@@ -253,7 +269,7 @@ def device_samples(
     max_workers: int = 16,
     include_fabric_label: bool = False,
 ) -> list[Sample]:
-    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor
 
     snapshot = None
     try:
@@ -293,10 +309,13 @@ def device_samples(
     status_changed = False
     for device, labels, health, err, _ports in results:
         if err is not None or health is None:
+            from netops.services.telemetry import clear_live_metrics
+
             logger.info("Телеметрия с %s не снята: %s", device.hostname, err)
             if device.status not in (DeviceStatus.UNREACHABLE, DeviceStatus.UNKNOWN):
                 device.status = DeviceStatus.UNREACHABLE
                 status_changed = True
+            clear_live_metrics(device.hostname)
             samples.append(Sample(metrics.DEVICE_REACHABLE, 0.0, labels))
             continue
 

@@ -36,7 +36,7 @@ const PlainDiffFallback: React.FC<PlainDiffProps> = ({ original, modified, isMob
       }`}
     >
       <div
-        className={`grid ${isMobile ? 'grid-cols-1' : 'grid-cols-2'} divide-x ${
+        className={`grid ${isMobile ? 'grid-cols-1 divide-y' : 'grid-cols-2 divide-x'} ${
           theme === 'light' ? 'divide-slate-200' : 'divide-white/[0.08]'
         }`}
       >
@@ -69,36 +69,34 @@ const PlainDiffFallback: React.FC<PlainDiffProps> = ({ original, modified, isMob
           </div>
         </div>
 
-        {!isMobile && (
-          <div>
-            <div
-              className={`sticky top-0 px-3 py-1.5 font-bold text-[10px] uppercase tracking-wider border-b ${
-                theme === 'light'
-                  ? 'bg-slate-100 text-slate-700 border-slate-200'
-                  : 'bg-zinc-900/90 text-zinc-400 border-white/[0.08]'
-              }`}
-            >
-              Целевая эталонная (Intended Git SoT)
-            </div>
-            <div className="p-2 space-y-0.5">
-              {modLines.map((line, idx) => {
-                const origLine = origLines[idx];
-                const isDiff = line !== origLine;
-                return (
-                  <div
-                    key={`mod-${idx}`}
-                    className={`flex items-start px-2 py-0.5 rounded-xs ${
-                      isDiff && line ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium' : ''
-                    }`}
-                  >
-                    <span className="w-8 select-none text-right pr-3 opacity-40 text-[10px]">{idx + 1}</span>
-                    <span className="whitespace-pre overflow-x-auto flex-1">{line || ' '}</span>
-                  </div>
-                );
-              })}
-            </div>
+        <div>
+          <div
+            className={`sticky top-0 px-3 py-1.5 font-bold text-[10px] uppercase tracking-wider border-b ${
+              theme === 'light'
+                ? 'bg-slate-100 text-slate-700 border-slate-200'
+                : 'bg-zinc-900/90 text-zinc-400 border-white/[0.08]'
+            }`}
+          >
+            Целевая эталонная (Intended Git SoT)
           </div>
-        )}
+          <div className="p-2 space-y-0.5">
+            {modLines.map((line, idx) => {
+              const origLine = origLines[idx];
+              const isDiff = line !== origLine;
+              return (
+                <div
+                  key={`mod-${idx}`}
+                  className={`flex items-start px-2 py-0.5 rounded-xs ${
+                    isDiff && line ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium' : ''
+                  }`}
+                >
+                  <span className="w-8 select-none text-right pr-3 opacity-40 text-[10px]">{idx + 1}</span>
+                  <span className="whitespace-pre overflow-x-auto flex-1">{line || ' '}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -201,6 +199,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
     setPrevSelectedJobId(selectedJobId);
     setAiAnalysis(null);
     setGitCommitNote('');
+    if (!selectedJobId) setDiffData(null);
     setLoading(Boolean(selectedJobId));
   }
 
@@ -216,9 +215,6 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
       const readyJob = diffJobs.find((j) => j.status === 'SUCCESS' || j.status === 'FAILED') || diffJobs[0];
       if (readyJob) {
         onSelectJob(readyJob.id);
-      } else {
-        setDiffData(null);
-        setLoading(false);
       }
       return;
     }
@@ -354,7 +350,13 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
           {selectedJobId && (
             <button
               onClick={() => onDeploy(selectedJobId)}
-              className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+              disabled={!diffData?.devices.some((d) => Boolean(d.remediation_patch?.trim()))}
+              title={
+                !diffData?.devices.some((d) => Boolean(d.remediation_patch?.trim()))
+                  ? 'Все устройства в синхроне (In Sync) — изменения для деплоя отсутствуют'
+                  : 'Запустить транзакционный деплой патча'
+              }
+              className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
             >
               <Play className="w-3 h-3 fill-current shrink-0" />
               <span>Деплой (Commit Confirmed)</span>
@@ -537,7 +539,11 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
                   viewEngine === 'plain' ? (
                     <PlainDiffFallback
                       original={activeDeviceDiff.running_config || '# Running config empty'}
-                      modified={activeDeviceDiff.intended_config || '# Intended config empty'}
+                      modified={
+                        activeDeviceDiff.intended_config ||
+                        activeDeviceDiff.running_config ||
+                        '# Intended config empty'
+                      }
                       isMobile={isMobile}
                       theme={theme}
                     />
@@ -546,14 +552,22 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
                       height="100%"
                       theme={theme === 'light' ? 'vs' : 'vs-dark'}
                       original={activeDeviceDiff.running_config || '# Running config empty'}
-                      modified={activeDeviceDiff.intended_config || '# Intended config empty'}
+                      modified={
+                        activeDeviceDiff.intended_config ||
+                        activeDeviceDiff.running_config ||
+                        '# Intended config empty'
+                      }
                       language="shell"
                       keepCurrentOriginalModel={true}
                       keepCurrentModifiedModel={true}
                       loading={
                         <PlainDiffFallback
                           original={activeDeviceDiff.running_config || '# Running config empty'}
-                          modified={activeDeviceDiff.intended_config || '# Intended config empty'}
+                          modified={
+                            activeDeviceDiff.intended_config ||
+                            activeDeviceDiff.running_config ||
+                            '# Intended config empty'
+                          }
                           isMobile={isMobile}
                           theme={theme}
                         />

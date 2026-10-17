@@ -23,6 +23,12 @@ interface {{ iface.name }}
    ip access-group {{ iface.acl_in }} in
 {% endif %}
 {% endif %}
+{% if iface.ospf_area is not none %}
+{% if not iface.name.lower().startswith("loopback") %}
+   ip ospf network point-to-point
+{% endif %}
+   ip ospf area {{ iface.ospf_area }}
+{% endif %}
 {% if not iface.enabled %}
    shutdown
 {% endif %}

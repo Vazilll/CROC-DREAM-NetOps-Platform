@@ -11,7 +11,6 @@ import contextlib
 import hashlib
 import json
 import math
-import os
 import re
 import threading
 import time
@@ -45,67 +44,25 @@ METRICS: dict[str, MetricSpec] = {
 # Live metric cache: hostname -> metric_name -> list of recent floats
 _LIVE_METRIC_CACHE: dict[str, dict[str, list[float]]] = {}
 _CACHE_LOCK = threading.Lock()
-_CACHE_FILE = Path(__file__).resolve().parents[3] / "lab" / "running" / "telemetry_cache.json"
-
-try:
-    if _CACHE_FILE.exists():
-        with open(_CACHE_FILE, encoding="utf-8") as _f:
-            _LIVE_METRIC_CACHE = json.load(_f)
-except Exception:
-    pass
-
-
-_LAST_DISK_DUMP: float = 0.0
 
 
 def record_live_metric(hostname: str, metric: str, value: float) -> None:
     """Store a live measurement parsed from real hardware CLI."""
-    global _LAST_DISK_DUMP  # noqa: PLW0603
-    from netops.services.state import get_state_manager  # noqa: PLC0415
+    from netops.services.state import get_state_manager
 
     get_state_manager().append_telemetry(hostname, metric, value, max_points=POINTS_PER_DAY)
-    should_dump = False
-    dump_data = None
     with _CACHE_LOCK:
-        if hostname not in _LIVE_METRIC_CACHE:
-            _LIVE_METRIC_CACHE[hostname] = {}
-        if metric not in _LIVE_METRIC_CACHE[hostname]:
-            _LIVE_METRIC_CACHE[hostname][metric] = []
-        series = _LIVE_METRIC_CACHE[hostname][metric]
+        series = _LIVE_METRIC_CACHE.setdefault(hostname, {}).setdefault(metric, [])
         is_pct = metric.endswith(("_pct", "percent", "utilization"))
         clamped_val = round(max(0.0, min(100.0, value)), 2) if is_pct else round(max(0.0, value), 2)
         series.append(clamped_val)
         if len(series) > POINTS_PER_DAY:
             series.pop(0)
-        now = time.monotonic()
-        if (
-            "PYTEST_CURRENT_TEST" not in os.environ
-            and (now - _LAST_DISK_DUMP) > 2.0
-            and _CACHE_FILE.parent.exists()
-        ):
-            _LAST_DISK_DUMP = now
-            should_dump = True
-            dump_data = {
-                h: {m: list(pts) for m, pts in mdict.items()}
-                for h, mdict in _LIVE_METRIC_CACHE.items()
-            }
-    if should_dump and dump_data is not None:
-        try:
-            with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
-                json.dump(dump_data, _f)
-        except Exception:
-            pass
-        try:
-            from netops.services.forecast import clear_forecast_cache  # noqa: PLC0415
-
-            clear_forecast_cache()
-        except Exception:
-            pass
 
 
 def clear_live_metrics(hostname: str | None = None) -> None:
-    """Clear metric cache in memory and on disk."""
-    from netops.services.state import get_state_manager  # noqa: PLC0415
+    """Clear metric cache in memory and StateManager."""
+    from netops.services.state import get_state_manager
 
     get_state_manager().clear_telemetry(hostname)
     with _CACHE_LOCK:
@@ -113,14 +70,8 @@ def clear_live_metrics(hostname: str | None = None) -> None:
             _LIVE_METRIC_CACHE.clear()
         else:
             _LIVE_METRIC_CACHE.pop(hostname, None)
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            try:
-                with open(_CACHE_FILE, "w", encoding="utf-8") as _f:
-                    json.dump(_LIVE_METRIC_CACHE, _f)
-            except Exception:
-                pass
     try:
-        from netops.services.forecast import clear_forecast_cache  # noqa: PLC0415
+        from netops.services.forecast import clear_forecast_cache
 
         clear_forecast_cache()
     except Exception:
@@ -348,9 +299,9 @@ def load_profile_for_platform(
     repo_path: Path | None = None,
 ) -> Any | None:
     """Dynamically load and validate a declarative PlatformProfile from intent/platforms/*.yaml."""
-    import yaml  # noqa: PLC0415
+    import yaml
 
-    from netops.intent.models import PlatformProfile  # noqa: PLC0415
+    from netops.intent.models import PlatformProfile
 
     plat_key = str(getattr(platform, "value", platform)).lower()
     cache_key = (plat_key, str(repo_path) if repo_path else None)
@@ -565,8 +516,8 @@ def detect_optimal_telemetry_protocol(
     exporter — HTTP answer in Prometheus text format; SNMP — UDP answer to a v2c GET with
     the configured community. Otherwise the device stays on ssh_cli.
     """
-    from netops.enums import TelemetryProtocol  # noqa: PLC0415
-    from netops.services import protocol_probe  # noqa: PLC0415
+    from netops.enums import TelemetryProtocol
+    from netops.services import protocol_probe
 
     profile = platform_profile or load_profile_for_platform(platform, repo_path=repo_path)
     ports = resolve_device_ports(
@@ -656,7 +607,7 @@ def collect_fleet_metrics_parallel(
 
     Uses a bounded ThreadPoolExecutor.
     """
-    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+    from concurrent.futures import ThreadPoolExecutor
 
     if not items:
         return {}
@@ -677,38 +628,7 @@ def collect_fleet_metrics_parallel(
     return dict(pairs)
 
 
-def synthetic_metric_series(
-    hostname: str, role: str, metric: str, points: int = POINTS_PER_DAY
-) -> list[float]:
-    """Deterministic synthetic time-series strictly for offline mode."""
-    seed = int(hashlib.md5(f"{hostname}:{metric}".encode()).hexdigest()[:8], 16)
-    if "server" in role.lower() or "host" in hostname.lower():
-        base = 25.0
-        if metric == "cpu_pct":
-            base = 14.0
-        elif metric == "memory_pct":
-            base = 32.0
-        elif metric == "disk_util_pct":
-            base = 40.0
-        elif metric == "network_rate_mbps":
-            base = 50.0
-        elif metric == "load_1m":
-            base = 1.2
-    else:
-        base = 22.0 if "spine" in role.lower() else 18.0
-        if metric == "cpu_pct":
-            base = 15.0 if "spine" in role.lower() else 12.0
-        elif metric == "memory_pct":
-            base = 28.0
-        elif metric == "disk_util_pct":
-            base = 30.0
-
-    series: list[float] = []
-    for i in range(points):
-        wave = math.sin((i + (seed % 24)) * 0.15) * 6.0 + math.cos((i + (seed % 11)) * 0.05) * 3.5
-        val = round(max(2.0, min(95.0, base + (seed % 9) + wave)), 2)
-        series.append(val)
-    return series
+_PROM_QUERY_CACHE: dict[tuple[str, str, str, int], tuple[float, list[float] | None]] = {}
 
 
 def check_prometheus_status(prometheus_url: str) -> dict[str, object]:
@@ -763,6 +683,12 @@ def query_prometheus_metric(
     """Fetch real metric time-series from Prometheus range query API."""
     if not prometheus_url:
         return None
+
+    cache_key = (prometheus_url, hostname, metric, points)
+    now_mono = time.monotonic()
+    cached_entry = _PROM_QUERY_CACHE.get(cache_key)
+    if cached_entry is not None and (now_mono - cached_entry[0]) < 10.0:
+        return list(cached_entry[1]) if cached_entry[1] is not None else None
 
     short_host = hostname.split(".", maxsplit=1)[0]
     by_metric: dict[str, tuple[str, ...]] = {
@@ -847,13 +773,20 @@ def query_prometheus_metric(
                     values = results[0].get("values", [])
                     pts = [round(float(v[1]), 2) for v in values if len(v) >= 2]
                     if len(pts) >= 2:
-                        return pts[-points:]
+                        res_pts = pts[-points:]
+                        if len(_PROM_QUERY_CACHE) >= 512:
+                            _PROM_QUERY_CACHE.clear()
+                        _PROM_QUERY_CACHE[cache_key] = (now_mono, res_pts)
+                        return list(res_pts)
         except urllib.error.HTTPError:
             continue
         except urllib.error.URLError:
             break
         except Exception:
             continue
+    if len(_PROM_QUERY_CACHE) >= 512:
+        _PROM_QUERY_CACHE.clear()
+    _PROM_QUERY_CACHE[cache_key] = (now_mono, None)
     return None
 
 
@@ -862,31 +795,26 @@ def metric_series(
     role: str,
     metric: str,
     points: int = POINTS_PER_DAY,
-    *,
-    allow_synthetic_offline: bool = False,
 ) -> list[float]:
-    """Return Prometheus or live SSH cache in online mode;
-
-    synthetic series only when allow_synthetic_offline=True in offline mode.
-    """
-    from netops.services.state import get_state_manager  # noqa: PLC0415
+    """Return real telemetry readings from Redis/live cache or Prometheus TSDB; empty list if none."""
+    from netops.services.state import get_state_manager
 
     cached = get_state_manager().get_telemetry_series(hostname, metric, points)
     if not cached:
         cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
+    if len(cached) >= min(points, 4):
+        return cached[-points:]
 
     try:
-        from netops.settings import get_settings  # noqa: PLC0415
+        from netops.settings import get_settings
 
         settings = get_settings()
+        if "PYTEST_CURRENT_TEST" not in os.environ:
+            settings.apply_runtime_overlay(respect_explicit=True)
         if settings.prometheus_url:
             prom = query_prometheus_metric(settings.prometheus_url, hostname, metric, points)
             if prom:
                 return prom
-        if cached:
-            return cached
-        if allow_synthetic_offline and settings.network_driver == "offline":
-            return synthetic_metric_series(hostname, role, metric, points)
     except Exception:
         pass
     return cached

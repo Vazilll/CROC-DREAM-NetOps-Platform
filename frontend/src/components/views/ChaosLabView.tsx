@@ -11,6 +11,7 @@ interface ChaosLabViewProps {
 export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRefreshAll }) => {
   const t = translations[locale];
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleInjectChaos = async (
@@ -18,13 +19,15 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
   ) => {
     setLoading(true);
     setStatusMessage(null);
+    setErrorMessage(null);
 
     try {
       const data = await api.injectChaos(scenario);
       setStatusMessage(data.message || (locale === 'en' ? 'Scenario injected successfully!' : 'Сценарий успешно применен!'));
       onRefreshAll();
-    } catch {
-      setStatusMessage(locale === 'en' ? `Scenario '${scenario}' registered.` : `Сценарий '${scenario}' зафиксирован.`);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setErrorMessage(msg || (locale === 'en' ? `Failed to execute '${scenario}'.` : `Ошибка выполнения сценария '${scenario}'.`));
       onRefreshAll();
     } finally {
       setLoading(false);
@@ -55,6 +58,13 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
         <div className="p-3 rounded-lg bg-emerald-500/10 border border-emerald-500/25 text-emerald-600 dark:text-emerald-300 text-xs font-mono flex items-center gap-2">
           <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{statusMessage}</span>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/25 text-rose-600 dark:text-rose-300 text-xs font-mono flex items-center gap-2">
+          <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+          <span>{errorMessage}</span>
         </div>
       )}
 

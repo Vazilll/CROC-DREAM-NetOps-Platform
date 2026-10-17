@@ -41,13 +41,15 @@ def start_scan(
 )
 def drift_report(
     session: SessionDep,
-    _: Viewer,
+    principal: Viewer,
     since: datetime | None = None,
     until: datetime | None = None,
     status_filter: Annotated[DriftStatus | None, Query(alias="status")] = None,
     fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
     site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
 ) -> list[DriftReportItem]:
+    from netops.api.routes.devices import device_allowed
+
     records = latest_drift_records(
         session,
         since=_as_utc(since),
@@ -58,6 +60,8 @@ def drift_report(
     )
     items = []
     for record in records:
+        if not device_allowed(record.device, principal.allowed_system):
+            continue
         all_lines = (record.unauthorized_lines or []) + (record.missing_lines or [])
         safe, risky, risk_level = classify_drift_lines(all_lines)
         items.append(

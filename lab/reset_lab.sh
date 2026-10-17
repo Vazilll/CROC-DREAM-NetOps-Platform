@@ -16,10 +16,10 @@ if [ $# -ge 1 ] && [ -f "$1" ]; then
   SELECTED_TOPO="$1"
 else
   shopt -s nullglob
-  TOPO_FILES=(*.clab.yaml *.clab.yml ../*.clab.yaml ../*.clab.yml)
-  [ ${#TOPO_FILES[@]} -eq 0 ] && TOPO_FILES=(*.yaml *.yml)
+  TOPO_FILES=("${SCRIPT_DIR}"/*.clab.yaml "${SCRIPT_DIR}"/*.clab.yml *.clab.yaml *.clab.yml ../*.clab.yaml ../*.clab.yml)
+  [ ${#TOPO_FILES[@]} -eq 0 ] && TOPO_FILES=("${SCRIPT_DIR}"/*.yaml *.yaml *.yml)
   shopt -u nullglob
-  SELECTED_TOPO="${TOPO_FILES[0]:-fabric.clab.yaml}"
+  SELECTED_TOPO="${TOPO_FILES[0]:-${SCRIPT_DIR}/fabric.clab.yaml}"
 fi
 
 echo "=============================================="
@@ -45,7 +45,10 @@ except Exception:
 LAB_NAME=$(echo "${PARSE_OUTPUT}" | grep '^LAB_NAME=' | cut -d'=' -f2)
 
 get_node_credentials() {
-  echo "admin:admin"
+  case "${1:-}" in
+    *spine1*|*cisco*) echo "admin:F5ga6jfkig1" ;;
+    *) echo "admin:admin" ;;
+  esac
 }
 
 # --- 1. Arista cEOS ---
@@ -196,15 +199,22 @@ tn = telnetlib.Telnet("127.0.0.1", 5000, timeout=10)
 tn.write(b"\r\n\r\n")
 time.sleep(0.5)
 
-for _ in range(5):
+pw_try = 0
+pws = [pwd, "F5ga6jfkig1", "Admin@123"]
+for _ in range(7):
     idx, _, _ = tn.expect([br"[Uu]sername:", br"[Pp]assword:", br"#", br">"], timeout=2)
     if idx == 0: tn.write(f"{user}\r\n".encode())
-    elif idx == 1: tn.write(f"{pwd}\r\n".encode())
+    elif idx == 1:
+        tn.write(f"{pws[min(pw_try, len(pws) - 1)]}\r\n".encode())
+        pw_try += 1
     elif idx == 2: break
     elif idx == 3:
         tn.write(b"enable\r\n")
-        if tn.expect([br"[Pp]assword:", br"#"], timeout=2)[0] == 0:
-            tn.write(f"{pwd}\r\n".encode())
+        for epw in pws:
+            if tn.expect([br"[Pp]assword:", br"#"], timeout=2)[0] == 0:
+                tn.write(f"{epw}\r\n".encode())
+            else:
+                break
         break
 
 tn.write(b"\r\nterminal length 0\r\nconf t\r\n")

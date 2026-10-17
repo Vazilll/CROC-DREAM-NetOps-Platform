@@ -85,8 +85,10 @@ export const Sparkline: React.FC<{
       ? [points[0], points[0], points[0], points[0]]
       : [0, 0, 0, 0];
 
-  const min = Math.min(...normalized, 0);
-  const max = Math.max(...normalized, 100);
+  const dataMin = Math.min(...normalized);
+  const dataMax = Math.max(...normalized);
+  const min = Math.max(0, dataMin - 6);
+  const max = Math.min(100, Math.max(dataMax + 6, min + 14));
   const range = max - min || 1;
   const pad = 2;
   const w = width - pad * 2;
@@ -94,12 +96,17 @@ export const Sparkline: React.FC<{
 
   const xy = normalized.map((v, i) => {
     const x = pad + (i / (normalized.length - 1)) * w;
-    const y = height - pad - ((v - min) / range) * h;
+    const y = height - pad - (Math.min(Math.max(v, min), max) - min) / range * h;
     return { x, y };
   });
 
-  const lineCoords = xy.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
-  const areaCoords = `${xy[0].x.toFixed(1)},${height} ${lineCoords} ${xy[xy.length - 1].x.toFixed(1)},${height}`;
+  const smoothLinePath = xy.reduce((acc, p, i, arr) => {
+    if (i === 0) return `M${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+    const prev = arr[i - 1];
+    const cx = ((prev.x + p.x) / 2).toFixed(1);
+    return `${acc} C${cx},${prev.y.toFixed(1)} ${cx},${p.y.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
+  }, '');
+  const smoothAreaPath = `${smoothLinePath} L${xy[xy.length - 1].x.toFixed(1)},${height} L${xy[0].x.toFixed(1)},${height} Z`;
 
   const first = normalized[0];
   const last = normalized[normalized.length - 1];
@@ -118,23 +125,23 @@ export const Sparkline: React.FC<{
       >
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.22" />
-            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.0" />
+            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.28" />
+            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.02" />
           </linearGradient>
         </defs>
-        <polygon points={areaCoords} fill={`url(#${gradId})`} />
-        <polyline
+        <path d={smoothAreaPath} fill={`url(#${gradId})`} />
+        <path
           fill="none"
           stroke={strokeColor}
-          strokeWidth="1.5"
+          strokeWidth="1.75"
           strokeLinecap="round"
           strokeLinejoin="round"
-          points={lineCoords}
+          d={smoothLinePath}
         />
         <circle
           cx={xy[xy.length - 1].x}
           cy={xy[xy.length - 1].y}
-          r="2"
+          r="2.2"
           fill={strokeColor}
         />
       </svg>

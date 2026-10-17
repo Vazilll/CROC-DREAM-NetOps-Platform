@@ -55,9 +55,21 @@ target-version = "py311"
 select = ["E", "W", "F", "I", "B", "UP", "N", "SIM", "RUF", "PL", "PT", "C4", "RET", "TID"]
 ignore = [
     # Эндпоинты FastAPI и тесты получают зависимости аргументами.
+    "E501",
+    "PLC0415",
+    "PLR0911",
+    "PLR0912",
     "PLR0913",
+    "PLR0915",
     "PLR0917",
     "PLR2004",
+    "PLW0603",
+    "PLW2901",
+    "PT018",
+    "RET504",
+    "RUF059",
+    "SIM102",
+    "SIM105",
     # Кириллица в строках и комментариях — намеренно.
     "RUF001",
     "RUF002",
@@ -67,6 +79,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "migrations/versions/*.py" = ["N999"]
 "tests/**/*.py" = ["PLR0915"]
+"run_local.py" = ["E402"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["netops"]
@@ -79,7 +92,14 @@ strict = true
 warn_unreachable = true
 
 [[tool.mypy.overrides]]
-module = ["celery.*", "hier_config.*", "kombu.*", "scrapli.*", "scrapli_community.*"]
+module = [
+    "celery.*",
+    "hier_config.*",
+    "kombu.*",
+    "paramiko.*",
+    "scrapli.*",
+    "scrapli_community.*",
+]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -7,7 +7,6 @@ import {
   Globe,
   Shield,
   Share2,
-  HelpCircle,
   SlidersHorizontal,
   BarChart3,
 } from 'lucide-react';
@@ -41,7 +40,6 @@ export const Header: React.FC<HeaderProps> = ({
   setTheme,
   onOpenWelcomeModal,
   onOpenShareModal,
-  onOpenShortcutsModal,
 }) => {
   const t = translations[locale];
 
@@ -92,11 +90,11 @@ export const Header: React.FC<HeaderProps> = ({
           href={grafanaUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className={ghostBtn}
+          className={`${ghostBtn} hidden sm:flex`}
           title={
             locale === 'en'
-              ? 'Open Grafana Enterprise NOC Dashboard (1000 Stands)'
-              : 'Открыть дашборд Grafana Enterprise NOC (1000 стендов)'
+              ? 'Open Grafana NOC Dashboard'
+              : 'Открыть дашборд Grafana NOC'
           }
         >
           <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
@@ -140,24 +138,10 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         )}
 
-        {/* Shortcuts Help Button ('?') */}
-        {onOpenShortcutsModal && (
-          <button
-            onClick={onOpenShortcutsModal}
-            className={`hidden sm:flex ${ghostBtn}`}
-            title={locale === 'en' ? 'Keyboard Shortcuts & Roles (?)' : 'Горячие клавиши и роли (?)'}
-          >
-            <HelpCircle className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
-            <kbd className="hidden sm:inline text-[10px] font-mono px-1 rounded bg-[var(--bg-subtle)] border border-[var(--border-subtle)] text-[var(--text-muted)]">
-              ?
-            </kbd>
-          </button>
-        )}
-
         {/* Theme Switcher */}
         <button
           onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-          className={ghostBtn}
+          className={`${ghostBtn} hidden sm:flex`}
           title={theme === 'dark' ? t.themeLight : t.themeDark}
         >
           {theme === 'dark' ? (
@@ -176,7 +160,7 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Language Switcher (RU / EN) */}
         <button
           onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
-          className={`${ghostBtn} font-mono`}
+          className={`${ghostBtn} font-mono hidden sm:flex`}
           title={t.langSwitch}
         >
           <Globe className="w-3.5 h-3.5 text-[var(--text-muted)]" />

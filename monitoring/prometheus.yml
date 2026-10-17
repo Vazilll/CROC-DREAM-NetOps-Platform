@@ -10,9 +10,8 @@ rule_files:
 remote_write:
   - url: http://victoriametrics:8428/api/v1/write
 
-# Цели SNMP / exporter / gNMI пишет платформа (backend/netops/telemetry/targets.py) после
-# проверки протокола. Ручных списков IP здесь нет: метки hostname/fabric_id/platform
-# приходят из файлов целей.
+# Цели SNMP / exporter сохраняет платформа в PostgreSQL (backend/netops/telemetry/targets.py) после
+# проверки протокола и отдаёт через HTTP Service Discovery (/api/v1/telemetry/sd/*).
 scrape_configs:
   - job_name: "netops_backend"
     metrics_path: /metrics
@@ -26,9 +25,8 @@ scrape_configs:
     params:
       auth: [public_v2]
       module: [if_mib]
-    file_sd_configs:
-      - files:
-          - /app/lab/running/prometheus_targets.json
+    http_sd_configs:
+      - url: http://api:8000/api/v1/telemetry/sd/snmp
         refresh_interval: 30s
     relabel_configs:
       - source_labels: [__address__]
@@ -44,9 +42,8 @@ scrape_configs:
     metrics_path: /snmp
     params:
       auth: [public_v2]
-    file_sd_configs:
-      - files:
-          - /app/lab/running/prometheus_targets.json
+    http_sd_configs:
+      - url: http://api:8000/api/v1/telemetry/sd/snmp
         refresh_interval: 30s
     relabel_configs:
       - source_labels: [snmp_module]
@@ -63,12 +60,12 @@ scrape_configs:
 
   - job_name: "node_exporter_fleet"
     scrape_interval: 30s
-    file_sd_configs:
-      - files:
-          - /app/lab/running/exporter_targets.json
+    http_sd_configs:
+      - url: http://api:8000/api/v1/telemetry/sd/exporter
         refresh_interval: 30s
 
   - job_name: "gnmic"
     scrape_interval: 30s
     static_configs:
       - targets: ["gnmic:9804"]
+

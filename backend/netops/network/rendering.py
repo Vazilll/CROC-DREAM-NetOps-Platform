@@ -28,8 +28,9 @@ class JinjaConfigRenderer:
         )
 
     def render(self, device: InventoryDevice, intent: DeviceIntent) -> str:
-        import hashlib  # noqa: PLC0415
-        from netops.services.state import get_state_manager  # noqa: PLC0415
+        import hashlib
+
+        from netops.services.state import get_state_manager
 
         state_mgr = get_state_manager()
         cache_seed = f"{self._root.resolve()}:{device.platform.value}:{device.model_dump_json()}:{intent.model_dump_json()}"

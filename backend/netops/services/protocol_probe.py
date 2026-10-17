@@ -79,7 +79,8 @@ def prometheus_exporter_ok(host: str, port: int, path: str, timeout: float) -> b
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 return False
-            head = resp.read(65536).decode("utf-8", "replace")
+            body = resp.read()
+            head = body[:65536].decode("utf-8", "replace")
     except (urllib.error.URLError, OSError, ValueError):
         return False
     return "# TYPE " in head or "# HELP " in head

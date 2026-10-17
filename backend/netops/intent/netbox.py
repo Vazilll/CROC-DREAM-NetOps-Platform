@@ -18,7 +18,7 @@ Fetch = Callable[[str, str], dict[str, Any]]
 
 def _http_get(url: str, token: str) -> dict[str, Any]:
     req = urllib.request.Request(url, headers={"Authorization": f"Token {token}", "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=10) as resp:  # noqa: S310 - URL comes from settings
+    with urllib.request.urlopen(req, timeout=10) as resp:
         return json.loads(resp.read())
 
 

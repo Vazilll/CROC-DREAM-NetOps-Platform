@@ -1,4 +1,4 @@
-"""Telemetry API router for heterogeneous 1,000-device telemetry and port resolution."""
+"""Telemetry API router for heterogeneous multi-fabric telemetry and port resolution."""
 
 from __future__ import annotations
 
@@ -93,7 +93,7 @@ def get_device_telemetry_series(
             status_code=400,
             detail=f"Unknown metric '{metric}'. Supported: {list(METRICS.keys())}",
         )
-    data = metric_series(hostname, role, metric, points=points, allow_synthetic_offline=True)
+    data = metric_series(hostname, role, metric, points=points)
     spec = METRICS[metric]
     return TelemetrySeriesResponse(
         hostname=hostname,
@@ -107,7 +107,7 @@ def get_device_telemetry_series(
 @router.get(
     "/summary",
     response_model=TelemetrySummaryResponse,
-    summary="Overview of telemetry collection status across 1,000-device fabrics",
+    summary="Overview of telemetry collection status across fabrics",
 )
 def get_telemetry_summary(
     service: DeviceServiceDep,
@@ -160,7 +160,7 @@ def get_collector_plan(_: Viewer) -> dict[str, Any]:
 def refresh_collector_plan(
     container: ContainerDep, background: BackgroundTasks, _: Operator
 ) -> dict[str, str]:
-    # Проба 1 000 устройств занимает минуты — отвечаем сразу, результат смотреть в GET.
+    # Фоновый опрос всех устройств фабрики: отвечаем сразу, результат смотреть в GET.
     def _run() -> None:
         with container.session_factory() as session:
             targets.refresh_collector_targets(
@@ -169,3 +169,20 @@ def refresh_collector_plan(
 
     background.add_task(_run)
     return {"status": "scheduled"}
+
+
+@router.get(
+    "/sd/snmp",
+    summary="Prometheus HTTP Service Discovery for SNMP targets stored in PostgreSQL",
+)
+def get_snmp_http_sd() -> list[dict[str, Any]]:
+    return targets.get_snmp_sd_targets()
+
+
+@router.get(
+    "/sd/exporter",
+    summary="Prometheus HTTP Service Discovery for Node Exporter targets stored in PostgreSQL",
+)
+def get_exporter_http_sd() -> list[dict[str, Any]]:
+    return list(targets.get_exporter_sd_targets())
+

@@ -3,17 +3,16 @@
 Для каждого устройства из базы определяем лучший доказанно работающий протокол
 (detect_optimal_telemetry_protocol) и раскладываем устройства по целям внешних сборщиков:
 
-- gnmic_targets.yaml      — file loader gnmic (gNMI-подписки, без паролей: они в env gnmic);
-- prometheus_targets.json — file_sd джобы snmp_fabric (snmp-exporter);
-- exporter_targets.json   — file_sd джобы node_exporter_fleet.
+- gnmic_targets.yaml             — file loader gnmic (gNMI-подписки, без паролей: они в env gnmic);
+- prometheus_snmp_targets (БД)     — http_sd джобы snmp_fabric / snmp_hardware (snmp-exporter);
+- prometheus_exporter_targets (БД) — http_sd джобы node_exporter_fleet.
 
 Устройства, для которых ничего не доказано, остаются на SSH CLI-опросе платформы.
-Файлы пишутся атомарно (tmp + os.replace): Prometheus и gnmic перечитывают их сами.
+Цели для Prometheus отдаются напрямую из БД через HTTP SD endpoints без JSON-файлов на диске.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 from collections import Counter
@@ -41,8 +40,8 @@ from netops.toolchain import Toolchain
 logger = logging.getLogger(__name__)
 
 GNMIC_TARGETS_FILE = "gnmic_targets.yaml"
-SNMP_TARGETS_FILE = "prometheus_targets.json"
-EXPORTER_TARGETS_FILE = "exporter_targets.json"
+SNMP_TARGETS_FILE = "prometheus_snmp_targets"
+EXPORTER_TARGETS_FILE = "prometheus_exporter_targets"
 PROTOCOLS_STATE_KEY = "netops:telemetry:protocols"
 
 
@@ -141,20 +140,94 @@ def refresh_collector_targets(
         out_dir / GNMIC_TARGETS_FILE,
         yaml.safe_dump(files[GNMIC_TARGETS_FILE], sort_keys=True, allow_unicode=True),
     )
-    for name in (SNMP_TARGETS_FILE, EXPORTER_TARGETS_FILE):
-        _atomic_write(out_dir / name, json.dumps(files[name], ensure_ascii=False, indent=2))
+    sm = get_state_manager()
+    sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
+    sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
 
     summary = {
         "refreshed_at": utcnow().isoformat(),
         "protocols": dict(Counter(item["protocol"] for item in plan.values())),
         "devices": plan,
     }
-    get_state_manager().set_json(PROTOCOLS_STATE_KEY, summary)
+    sm.set_json(PROTOCOLS_STATE_KEY, summary)
+    sm.set_db_state(PROTOCOLS_STATE_KEY, summary)
+    sync_grafana_dashboard_to_db()
     return summary
 
 
+def sync_grafana_dashboard_to_db(grafana_url: str | None = None) -> dict[str, Any] | None:
+    """Load NOC dashboard from configurable YAML, save to PostgreSQL system_state & Grafana DB."""
+    import base64
+    import contextlib
+    import json
+    import urllib.request
+
+    rel = "grafana/dashboards/croc-dream-noc.yaml"
+    candidates = [
+        Path(f"/data/monitoring/{rel}"),
+        Path(f"/app/monitoring/{rel}"),
+        Path(__file__).resolve().parents[3] / f"monitoring/{rel}",
+    ]
+    yaml_path = next((p for p in candidates if p.is_file()), None)
+    sm = get_state_manager()
+    dash: dict[str, Any] | None = None
+    if yaml_path is not None:
+        loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+        if isinstance(loaded, dict):
+            dash = loaded
+            sm.set_db_state("grafana_noc_dashboard", dash)
+    if dash is None:
+        raw = sm.get_db_state("grafana_noc_dashboard")
+        if isinstance(raw, dict):
+            dash = raw
+    if not dash:
+        return None
+
+    target_url = (grafana_url or os.environ.get("GRAFANA_URL") or "http://grafana:3000").rstrip("/")
+    user = os.environ.get("GRAFANA_ADMIN_USER", "admin")
+    password = os.environ.get("GRAFANA_ADMIN_PASSWORD", "admin")
+    auth_hdr = "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii")
+    payload = json.dumps({"dashboard": dash, "overwrite": True}).encode("utf-8")
+    with contextlib.suppress(Exception):
+        req = urllib.request.Request(
+            f"{target_url}/api/dashboards/db",
+            data=payload,
+            headers={"Content-Type": "application/json", "Authorization": auth_hdr},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=2.0) as resp:
+            resp.read()
+        pref_payload = json.dumps({"homeDashboardUID": dash.get("uid", "croc-dream-noc")}).encode(
+            "utf-8"
+        )
+        pref_req = urllib.request.Request(
+            f"{target_url}/api/org/preferences",
+            data=pref_payload,
+            headers={"Content-Type": "application/json", "Authorization": auth_hdr},
+            method="PUT",
+        )
+        with urllib.request.urlopen(pref_req, timeout=2.0) as resp:
+            resp.read()
+    return dash
+
+
+def get_snmp_sd_targets() -> list[dict[str, Any]]:
+    raw = get_state_manager().get_db_state(SNMP_TARGETS_FILE, [])
+    return raw if isinstance(raw, list) else []
+
+
+def get_exporter_sd_targets() -> list[dict[str, Any]]:
+    raw = get_state_manager().get_db_state(EXPORTER_TARGETS_FILE, [])
+    return raw if isinstance(raw, list) else []
+
+
 def last_collector_plan() -> dict[str, Any] | None:
-    return get_state_manager().get_json(PROTOCOLS_STATE_KEY)
+    sm = get_state_manager()
+    cached = sm.get_json(PROTOCOLS_STATE_KEY)
+    if isinstance(cached, dict):
+        return cached
+    db_val = sm.get_db_state(PROTOCOLS_STATE_KEY)
+    return db_val if isinstance(db_val, dict) else None
 
 
 def is_externally_collected(hostname: str) -> bool:

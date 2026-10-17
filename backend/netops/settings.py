@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     auth_profiles: dict[str, AuthProfile] = Field(
         default_factory=lambda: {
             "lab": AuthProfile(username="admin", password=SecretStr("admin")),
-            "spine1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
+            "spine1_auth": AuthProfile(username="admin", password=SecretStr("F5ga6jfkig1")),
             "spine2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
             "leaf1_auth": AuthProfile(username="admin", password=SecretStr("admin")),
             "leaf2_auth": AuthProfile(username="admin", password=SecretStr("admin")),
@@ -90,7 +90,7 @@ class Settings(BaseSettings):
 
     # 3. Team / Default provider (Xiaomi MiMo or custom proxy)
     llm_api_key: SecretStr | None = None
-    llm_base_url: str = "https://api.hcnsec.cn/v1"
+    llm_base_url: str = ""
     llm_model: str = "MiMo-V2.6-Flash"
     llm_timeout_seconds: float = 2.0
 
@@ -111,7 +111,7 @@ class Settings(BaseSettings):
     clab_user: str | None = None
     clab_password: SecretStr | None = None
     clab_key_path: str | None = None
-    clab_topology_path: str = "/home/crocdream/clab-quickstart/fabric.clab.yaml"
+    clab_topology_path: str = ""
 
     # Prometheus-compatible query API (Prometheus или VictoriaMetrics; empty URL = falls back to
     # the SSH CLI cache; no data is invented)
@@ -122,16 +122,25 @@ class Settings(BaseSettings):
 
     # Telegram Incident Alerting & Broadcast
     telegram_bot_token: SecretStr | None = None
+    telegram_bot_username: str = ""
     telegram_chat_id: str | None = None
     telegram_chat_ids: list[int] = Field(default_factory=list)
 
     # GitHub / Git SoT repository metadata
-    github_repo_url: str = "https://github.com/Vazilll/CROC-DREAM-NetOps-Platform"
+    github_repo_url: str = ""
+
+    # Web panel URLs & fabric defaults (human-configurable or trigger-populated)
+    frontend_port: int = Field(default=5173, ge=1, le=65535)
+    public_web_url: str = ""
+    default_fabric_id: str = "croc-dc1-pod1"
+    default_domain: str = "croc.lab"
 
     # Browser origins allowed to call the API (the Vite dev server by default).
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
+    # Browser cookie session lifetime (one NOC shift by default).
+    session_ttl_seconds: int = Field(default=12 * 3600, ge=60)
 
 
     @field_validator("intent_repo_path", "templates_path", "offline_lab_path", mode="after")
@@ -164,14 +173,8 @@ class Settings(BaseSettings):
                 pass
         elif self.telegram_chat_ids and not self.telegram_chat_id:
             self.telegram_chat_id = str(self.telegram_chat_ids[0])
-        if (
-            self.network_driver == "scrapli"
-            and self.inventory_file == "inventory.yaml"
-            and (self.intent_repo_path / "inventory.live.yaml").is_file()
-        ):
-            self.inventory_file = "inventory.live.yaml"
-        import os  # noqa: PLC0415
-        import sys  # noqa: PLC0415
+        import os
+        import sys
 
         in_pytest = "PYTEST_CURRENT_TEST" in os.environ or "pytest" in sys.modules
         if not in_pytest or "offline_lab_path" in self.model_fields_set:
@@ -179,42 +182,37 @@ class Settings(BaseSettings):
         return self
 
     def apply_runtime_overlay(self, *, respect_explicit: bool = False) -> dict[str, object]:
-        import json  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
+        state = get_state_manager(self)
         explicit = self.model_fields_set if respect_explicit else set()
-        custom_auth = self.offline_lab_path / "custom_auth_profiles.json"
-        if custom_auth.is_file() and "auth_profiles" not in explicit:
+        if "auth_profiles" not in explicit:
             try:
-                raw_profiles = json.loads(custom_auth.read_text(encoding="utf-8"))
-                for prof_name, creds in raw_profiles.items():
-                    if isinstance(creds, dict) and "username" in creds and "password" in creds:
-                        self.auth_profiles[prof_name] = AuthProfile(
-                            username=str(creds["username"]),
-                            password=SecretStr(str(creds["password"])),
-                        )
+                raw_profiles = state.get_db_state(
+                    "custom_auth_profiles", {}, database_url=self.database_url
+                )
+                if isinstance(raw_profiles, dict):
+                    for prof_name, creds in raw_profiles.items():
+                        if isinstance(creds, dict) and creds.get("username") and creds.get("password"):
+                            self.auth_profiles[prof_name] = AuthProfile(
+                                username=str(creds["username"]),
+                                password=SecretStr(str(creds["password"])),
+                            )
             except Exception:
                 pass
 
-        rt_file = self.offline_lab_path / "runtime_settings.json"
-        if not rt_file.is_file():
-            return {}
         try:
-            data = json.loads(rt_file.read_text(encoding="utf-8"))
-            if not isinstance(data, dict):
+            data = state.get_db_state("runtime_settings", {}, database_url=self.database_url)
+            if not isinstance(data, dict) or not data:
                 return {}
             if data.get("github_repo_url") and "github_repo_url" not in explicit:
                 self.github_repo_url = str(data["github_repo_url"])
             if data.get("network_driver") in ("offline", "scrapli") and "network_driver" not in explicit:
                 self.network_driver = data["network_driver"]
-                if (
-                    self.network_driver == "scrapli"
-                    and (self.intent_repo_path / "inventory.live.yaml").is_file()
-                ):
-                    self.inventory_file = "inventory.live.yaml"
-                elif self.network_driver == "offline":
-                    self.inventory_file = "inventory.yaml"
             if data.get("telegram_bot_token") and "telegram_bot_token" not in explicit:
                 self.telegram_bot_token = SecretStr(str(data["telegram_bot_token"]))
+            if data.get("telegram_bot_username") and "telegram_bot_username" not in explicit:
+                self.telegram_bot_username = str(data["telegram_bot_username"]).lstrip("@")
             if data.get("telegram_chat_id") and "telegram_chat_id" not in explicit:
                 self.telegram_chat_id = str(data["telegram_chat_id"])
                 try:
@@ -242,6 +240,11 @@ class Settings(BaseSettings):
                 self.clab_user = str(data["clab_user"])
             if data.get("clab_password") and "clab_password" not in explicit:
                 self.clab_password = SecretStr(str(data["clab_password"]))
+            if data.get("clab_topology_path") and "clab_topology_path" not in explicit:
+                self.clab_topology_path = str(data["clab_topology_path"])
+            for str_field in ("public_web_url", "default_fabric_id", "default_domain"):
+                if data.get(str_field) and str_field not in explicit:
+                    setattr(self, str_field, str(data[str_field]))
             if data.get("groq_api_key") and "groq_api_key" not in explicit:
                 self.groq_api_key = SecretStr(str(data["groq_api_key"]))
             if data.get("gemini_api_key") and "gemini_api_key" not in explicit:
@@ -258,6 +261,7 @@ class Settings(BaseSettings):
                 "metrics_interval_seconds",
                 "drift_scan_interval_seconds",
                 "commit_confirm_timeout_seconds",
+                "frontend_port",
             ):
                 if data.get(int_field) is not None and int_field not in explicit:
                     try:
@@ -277,37 +281,15 @@ class Settings(BaseSettings):
             return {}
 
     def save_runtime_overlay(self, updates: dict[str, object]) -> dict[str, object]:
-        import json  # noqa: PLC0415
-        import os  # noqa: PLC0415
-        import tempfile  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
-        rt_file = self.offline_lab_path / "runtime_settings.json"
-        rt_file.parent.mkdir(parents=True, exist_ok=True)
-        existing: dict[str, object] = {}
-        if rt_file.is_file():
-            try:
-                loaded = json.loads(rt_file.read_text(encoding="utf-8"))
-                if isinstance(loaded, dict):
-                    existing = loaded
-            except Exception:
-                existing = {}
+        state = get_state_manager(self)
+        loaded = state.get_db_state("runtime_settings", {}, database_url=self.database_url)
+        existing: dict[str, object] = dict(loaded) if isinstance(loaded, dict) else {}
         for k, v in updates.items():
             if v is not None:
                 existing[k] = v
-        payload = json.dumps(existing, ensure_ascii=False, indent=2)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(rt_file.parent), prefix=".runtime_settings_", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(payload)
-            os.replace(tmp_path, rt_file)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            rt_file.write_text(payload, encoding="utf-8")
+        state.set_db_state("runtime_settings", existing, database_url=self.database_url)
         self.apply_runtime_overlay()
         return existing
 

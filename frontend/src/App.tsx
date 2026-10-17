@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState, useCallback } from 'react';
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { api, getErrorMessage } from './api';
 import type { Device, JobSummary, UserRole } from './api';
 import { Header } from './components/layout/Header';
@@ -19,7 +19,6 @@ const DiffViewer = lazy(() => import('./components/views/DiffViewer').then((m) =
 const DriftView = lazy(() => import('./components/views/DriftView').then((m) => ({ default: m.DriftView })));
 const ChaosLabView = lazy(() => import('./components/views/ChaosLabView').then((m) => ({ default: m.ChaosLabView })));
 const EmergencyHub = lazy(() => import('./components/views/EmergencyHub').then((m) => ({ default: m.EmergencyHub })));
-const SlidesPresentation = lazy(() => import('./components/views/SlidesPresentation').then((m) => ({ default: m.SlidesPresentation })));
 const CopilotPanel = lazy(() => import('./components/modals/CopilotPanel').then((m) => ({ default: m.CopilotPanel })));
 const DryRunModal = lazy(() => import('./components/modals/DryRunModal').then((m) => ({ default: m.DryRunModal })));
 const WelcomeModal = lazy(() => import('./components/modals/WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
@@ -90,7 +89,7 @@ export function App() {
     return saved === 'light' ? 'light' : 'dark';
   });
   const [userRole, setUserRole] = useState<UserRole>(() => {
-    return (localStorage.getItem('netops_user_role') as UserRole) || 'owner';
+    return (localStorage.getItem('netops_user_role') as UserRole) || 'viewer';
   });
   const [welcomeModalOpen, setWelcomeModalOpen] = useState<boolean>(() => {
     if (typeof window !== 'undefined') {
@@ -174,11 +173,20 @@ export function App() {
 
       if (e.key === 'Escape') {
         // Priority closure order:
-        // 1. ShortcutsModal -> 2. DryRunModal -> 3. CommandPalette -> 4. CopilotPanel
+        // 1. ShortcutsModal -> 2. ShareModal -> 3. WelcomeModal -> 4. DryRunModal -> 5. CommandPalette -> 6. CopilotPanel
         if (shortcutsModalOpen) {
           e.preventDefault();
           e.stopPropagation();
           setShortcutsModalOpen(false);
+        } else if (shareModalOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          setShareModalOpen(false);
+        } else if (welcomeModalOpen) {
+          e.preventDefault();
+          e.stopPropagation();
+          localStorage.setItem('netops_onboarding_done', 'true');
+          setWelcomeModalOpen(false);
         } else if (dryRunModalOpen) {
           e.preventDefault();
           e.stopPropagation();
@@ -197,7 +205,7 @@ export function App() {
 
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
-  }, [shortcutsModalOpen, dryRunModalOpen, searchOpen, copilotOpen]);
+  }, [shortcutsModalOpen, shareModalOpen, welcomeModalOpen, dryRunModalOpen, searchOpen, copilotOpen]);
 
   const openDevice = useCallback((id: number) => {
     setDeviceId(id);
@@ -208,8 +216,16 @@ export function App() {
     if (targetDeviceId) {
       setDeviceId(targetDeviceId);
     }
+    setSelectedJobId((current) => {
+      const currentJob = jobs.find((j) => j.id === current);
+      if (currentJob && (currentJob.type === 'DRY_RUN' || currentJob.type === 'DEPLOY')) {
+        return current;
+      }
+      const diffJob = jobs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
+      return diffJob?.id ?? current;
+    });
     setActiveTab('diff');
-  }, []);
+  }, [jobs]);
 
   const handleOpenDiffJob = useCallback((jobId?: string) => {
     if (jobId) {
@@ -235,20 +251,32 @@ export function App() {
     }, 4000);
   }, []);
 
+  const authFailedRef = useRef<boolean>(false);
+
   const fetchDevices = useCallback(async () => {
     try {
       const data = await api.getDevices();
+      authFailedRef.current = false;
       setDevices((prev) => (areDevicesEqual(prev, data) ? prev : data));
       setApiHealthy((prev) => (prev ? prev : true));
     } catch (err: unknown) {
-      console.error('Failed to load devices', err);
-      setApiHealthy(false);
+      const msg = getErrorMessage(err, '');
+      const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
+      if (isAuthErr) {
+        authFailedRef.current = true;
+        localStorage.removeItem('netops_onboarding_done');
+        setWelcomeModalOpen(true);
+      } else {
+        console.error('Failed to load devices', err);
+        setApiHealthy(false);
+      }
     }
   }, []);
 
   const fetchJobs = useCallback(async () => {
     try {
       const data = await api.getJobs();
+      authFailedRef.current = false;
       setJobs((prev) => (areJobsEqual(prev, data) ? prev : data));
       setSelectedJobId((current) => {
         if (current && data.some((j) => j.id === current)) return current;
@@ -256,7 +284,13 @@ export function App() {
         return diffJob?.id ?? data[0]?.id ?? null;
       });
     } catch (err: unknown) {
-      console.error('Failed to load jobs', err);
+      const msg = getErrorMessage(err, '');
+      const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
+      if (isAuthErr) {
+        authFailedRef.current = true;
+      } else {
+        console.error('Failed to load jobs', err);
+      }
     }
   }, []);
 
@@ -277,15 +311,27 @@ export function App() {
   useEffect(() => {
     let active = true;
     (async () => {
+      const hasToken = Boolean(
+        localStorage.getItem('netops_auth_token') ||
+          localStorage.getItem('netops_personal_token') ||
+          document.cookie.includes('netops_csrf=') ||
+          ['5173', '5174', '5175', '5176'].includes(window.location.port)
+      );
+      const onboardingDone = localStorage.getItem('netops_onboarding_done') === 'true';
+      if (!hasToken && !onboardingDone) {
+        if (active) setLoading(false);
+        return;
+      }
       try {
         try {
           const me = await api.getMe();
-          if (active && me.id !== null) {
+          if (active && me.role) {
+            authFailedRef.current = false;
             setUserRole(me.role);
             localStorage.setItem('netops_user_role', me.role);
           }
         } catch (authErr: unknown) {
-          if (active) {
+          if (active && onboardingDone) {
             showToast(getErrorMessage(authErr, 'Ошибка авторизации токена'), 'error');
             api.setRole('viewer');
             setUserRole('viewer');
@@ -294,6 +340,7 @@ export function App() {
 
         const [devs, jbs] = await Promise.all([api.getDevices(), api.getJobs()]);
         if (!active) return;
+        authFailedRef.current = false;
         setDevices((prev) => (areDevicesEqual(prev, devs) ? prev : devs));
         setJobs((prev) => (areJobsEqual(prev, jbs) ? prev : jbs));
         setSelectedJobId((current) => {
@@ -304,7 +351,15 @@ export function App() {
         setApiHealthy(true);
       } catch (err: unknown) {
         if (!active) return;
-        console.error('Failed initial load', err);
+        const msg = getErrorMessage(err, '');
+        const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
+        if (isAuthErr) {
+          authFailedRef.current = true;
+          localStorage.removeItem('netops_onboarding_done');
+          setWelcomeModalOpen(true);
+        } else {
+          console.error('Failed initial load', err);
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -316,8 +371,18 @@ export function App() {
 
   // Periodic polling & visibility-based updates
   useEffect(() => {
+    const canPoll = () =>
+      !authFailedRef.current &&
+      Boolean(
+        localStorage.getItem('netops_onboarding_done') === 'true' ||
+          localStorage.getItem('netops_auth_token') ||
+          localStorage.getItem('netops_personal_token') ||
+          document.cookie.includes('netops_csrf=') ||
+          ['5173', '5174', '5175', '5176'].includes(window.location.port)
+      );
+
     const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible') {
+      if (document.visibilityState === 'visible' && canPoll()) {
         fetchDevices();
         fetchJobs();
       }
@@ -327,7 +392,7 @@ export function App() {
 
     const pollMs = hasActiveJob ? 1500 : 5000;
     const interval = setInterval(() => {
-      if (document.visibilityState === 'hidden') return;
+      if (document.visibilityState === 'hidden' || !canPoll()) return;
       fetchJobs();
       fetchDevices();
     }, pollMs);
@@ -445,10 +510,6 @@ export function App() {
     handleDeleteDevice(id, false);
   }, [handleDeleteDevice]);
 
-  const handleLaunchSlidesDemo = useCallback(() => {
-    openDryRunModal(devices.map((d) => d.id));
-  }, [openDryRunModal, devices]);
-
   const handleScanDriftAll = useCallback(() => {
     handleScanDrift();
   }, [handleScanDrift]);
@@ -469,6 +530,7 @@ export function App() {
   const handleSelectJob = useCallback((id: string) => setSelectedJobId(id), []);
 
   const handleWelcomeClose = useCallback(async (role: UserRole) => {
+    authFailedRef.current = false;
     setUserRole(role);
     setWelcomeModalOpen(false);
     const t = translations[locale];
@@ -559,13 +621,6 @@ export function App() {
               />
             )}
 
-            {activeTab === 'slides' && (
-              <SlidesPresentation
-                onLaunchDemo={handleLaunchSlidesDemo}
-                onOpenTab={setActiveTab}
-              />
-            )}
-
             {activeTab === 'devices' && (
               <DeviceList
                 devices={devices}
@@ -620,7 +675,7 @@ export function App() {
 
             {activeTab === 'emergency' && (
               <EmergencyHub
-                currentRole={userRole === 'admin' ? 'admin' : 'operator'}
+                currentRole={userRole === 'admin' || userRole === 'owner' ? 'admin' : 'operator'}
                 onSwitchRole={handleSwitchRole}
               />
             )}

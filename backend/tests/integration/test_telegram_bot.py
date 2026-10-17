@@ -329,3 +329,46 @@ def test_owner_bot_commands_manage_users_and_access(
     assert updated.role == UserRole.OPERATOR
     assert updated.bound_client_id is None
 
+
+def test_bot_subscriber_without_user_row_defaults_to_viewer_and_ai_guard_alerts(
+    session_factory: sessionmaker[Session], session: Session, devices: dict[str, Device]
+) -> None:
+    from netops.services.ai_guard import AiTelemetryGuard
+
+    api = FakeTelegram(
+        [
+            _command("/users", update_id=1, chat_id=777),
+            _command("/fabrics", update_id=2, chat_id=777),
+        ]
+    )
+    bot = MetricsBot(
+        session_factory,
+        api,
+        chat_ids=[CHAT_ID, 777],
+        admin_chat_ids=[CHAT_ID],
+    )
+    bot.catch_up()
+    bot.poll_once()
+
+    out = api.texts()
+    assert "Недостаточно прав" in out
+    assert "Zero-Secret Chat" in out
+
+    # Proactive silent anomaly alert via send_alerts()
+    api.sent.clear()
+    AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "blackhole")
+    bot.send_alerts()
+    bot.send_alerts()  # Should not duplicate
+    alert_texts = [t for cid, t in api.sent if cid == CHAT_ID]
+    assert len(alert_texts) == 1
+    assert "[AI GUARD ALERT] leaf-1.croc.lab" in alert_texts[0]
+
+    # Recovery notification when anomaly clears
+    api.sent.clear()
+    AiTelemetryGuard.inject_anomaly("leaf-1.croc.lab", "clear")
+    bot.send_alerts()
+    rec_texts = [t for cid, t in api.sent if cid == CHAT_ID]
+    assert len(rec_texts) == 1
+    assert "телеметрия вернулась в норму (AI Guard)" in rec_texts[0]
+
+

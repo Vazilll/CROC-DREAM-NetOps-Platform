@@ -58,13 +58,13 @@ SYSTEM_PROMPT = (
 
 
 def _check_bgp_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
-    if "router bgp" not in text and "neighbor" not in text:
+    if not any(k in text for k in ("router bgp", "neighbor", "bgp ", "peer ")):
         return None, [], []
-    if "remote-as" in text or "password" in text or "shutdown" in text:
+    if any(k in text for k in ("remote-as", "as-number", "password", "shutdown", "undo peer")):
         return (
             "HIGH",
-            ["Модификация параметров BGP пиринга (remote-as / password / shutdown)."],
-            ["Проверьте состояние BGP сессий (show ip bgp summary) сразу после наката."],
+            ["Модификация параметров BGP пиринга (remote-as / as-number / password / shutdown)."],
+            ["Проверьте состояние BGP сессий (show ip bgp summary / display bgp peer) сразу после наката."],
         )
     return (
         "MEDIUM",
@@ -74,19 +74,21 @@ def _check_bgp_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
 
 
 def _check_acl_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
-    if "access-list" not in text and "ip access-group" not in text:
+    if not any(
+        k in text for k in ("access-list", "ip access-group", "acl name", "traffic-filter", "rule ")
+    ):
         return None, [], []
-    if "deny" in text or "permit ip any any" in text:
+    if any(k in text for k in ("deny", "permit ip any any", "undo rule", "no rule", "10.99.0.0")):
         return (
             "HIGH",
-            ["Изменение списков контроля доступа (ACL) с правилами фильтрации."],
-            ["Проверьте доступность управляющего IP-адреса перед подтверждением."],
+            ["Изменение списков контроля доступа (ACL) с правилами фильтрации трафика."],
+            ["Проверьте доступность управляющего IP-адреса и BGP-сессий перед подтверждением."],
         )
     return "MEDIUM", ["Добавление или корректировка правил ACL."], []
 
 
 def _check_interface_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
-    if "shutdown" in text and "no shutdown" not in text:
+    if "shutdown" in text and "no shutdown" not in text and "undo shutdown" not in text:
         return (
             "CRITICAL",
             ["Команда shutdown переводит сетевой интерфейс в состояние down."],
@@ -221,9 +223,9 @@ def normalize_llm_cascade_item(item: dict[str, Any], idx: int = 0) -> dict[str, 
         )
     else:
         def_title, def_url, def_model, def_key = (
-            f"Provider-{idx + 1}" if raw_name == "" else "MiMo",
-            "https://api.hcnsec.cn/v1",
-            "MiMo-V2.6-Flash",
+            f"Provider-{idx + 1}",
+            "",
+            "",
             raw_key,
         )
 
@@ -296,6 +298,53 @@ def _llm_candidates(settings: Settings) -> list[tuple[str, str, str, str, float]
     return candidates
 
 
+_RISK_ORDER: dict[str, int] = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+
+_SECRET_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(
+            r"\b(password(?:\s+cipher|\s+simple|\s+\d+)?|"
+            r"(?:enable|username\s+\S+(?:\s+privilege\s+\d+)?)\s+secret(?:\s+\d+)?|"
+            r"snmp-server\s+community|snmp-agent\s+community(?:\s+read|\s+write)?|"
+            r"(?:tacacs-server|radius-server|ntp\s+authentication-key)\s+key)\s+\S+",
+            re.IGNORECASE,
+        ),
+        r"\1 [REDACTED]",
+    ),
+    (
+        re.compile(
+            r"\b(gsk_[A-Za-z0-9]{16,}|ghp_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{16,}|"
+            r"AIza[A-Za-z0-9_-]{20,}|sk-[A-Za-z0-9_-]{16,}|crk_[A-Za-z0-9_-]{10,}|"
+            r"inv_[A-Za-z0-9_-]{10,}|wst_[A-Za-z0-9_-]{10,})\b"
+        ),
+        "[REDACTED_TOKEN]",
+    ),
+)
+
+_INJECTION_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"ignore\s+(?:all\s+|any\s+)?(?:previous|prior|above)\s+instructions?", re.IGNORECASE),
+    re.compile(r"игнорируй(?:те)?\s+(?:все\s+)?(?:предыдущие|системные)\s+инструкции", re.IGNORECASE),
+    re.compile(r"(?:^|\n)\s*ACTION\s*:", re.IGNORECASE),
+)
+
+
+def sanitize_for_llm(text: str) -> str:
+    """Redact credentials/tokens and neutralize prompt-injection markers before LLM calls."""
+    if not text:
+        return ""
+    cleaned = text
+    for pat, repl in _SECRET_PATTERNS:
+        cleaned = pat.sub(repl, cleaned)
+    for pat in _INJECTION_PATTERNS:
+        cleaned = pat.sub("[FILTERED_DIRECTIVE]", cleaned)
+    return cleaned
+
+
+def _max_risk_level(a: str, b: RiskLevel) -> RiskLevel:
+    norm_a: RiskLevel = a if a in _RISK_ORDER else "MEDIUM"  # type: ignore[assignment]
+    return norm_a if _RISK_ORDER[norm_a] >= _RISK_ORDER[b] else b
+
+
 async def chat_with_llm(
     settings: Settings, system_prompt: str, user_prompt: str, timeout_floor: float = 2.0
 ) -> tuple[str, str] | None:
@@ -303,13 +352,14 @@ async def chat_with_llm(
 
     Chat answers are bounded by `timeout_floor` (default 10.0s) to guarantee response.
     """
+    safe_user_prompt = sanitize_for_llm(user_prompt)
     for name, base_url, token, model_name, timeout in _llm_candidates(settings):
         try:
             payload = {
                 "model": model_name,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": safe_user_prompt},
                 ],
                 "temperature": 0.3,
             }
@@ -340,24 +390,27 @@ async def explain_change_with_llm(
     rollback_patch: str,
 ) -> RiskExplanation:
     """Analyze remediation patch using multi-provider cascade with fast failover."""
+    heuristic = analyze_diff_heuristic(hostname, platform, remediation_patch, rollback_patch)
     if not remediation_patch.strip():
         logger.info("Patch empty; using deterministic rule-engine.")
-        return analyze_diff_heuristic(hostname, platform, remediation_patch, rollback_patch)
+        return heuristic
 
     candidates = _llm_candidates(settings)
     if not candidates:
         logger.info("No LLM API tokens configured; using deterministic rule-engine fallback.")
-        return analyze_diff_heuristic(hostname, platform, remediation_patch, rollback_patch)
+        return heuristic
 
+    safe_rem = sanitize_for_llm(remediation_patch)
+    safe_rb = sanitize_for_llm(rollback_patch)
     user_prompt = f"""Проанализируй следующий конфигурационный патч:
 Устройство: {hostname}
 Платформа: {platform}
 
 === HierConfig Remediation Patch (что будет применено) ===
-{remediation_patch}
+{safe_rem}
 
 === Rollback Patch (обратный откат в случае сбоя) ===
-{rollback_patch}
+{safe_rb}
 """
 
     for prov_name, base_url, token, model_name, timeout in candidates:
@@ -390,12 +443,23 @@ async def explain_change_with_llm(
             match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_content, re.DOTALL)
             clean_json = match.group(1) if match else raw_content.strip()
             parsed = json.loads(clean_json)
+            raw_level = str(parsed.get("risk_level", "MEDIUM")).upper()
+            final_level = _max_risk_level(raw_level, heuristic.risk_level)
+            final_safe = (
+                bool(parsed.get("is_safe", False))
+                and heuristic.is_safe
+                and final_level == "LOW"
+            )
+            llm_points = list(parsed.get("key_points") or [])
+            for hp in heuristic.key_points:
+                if hp not in llm_points:
+                    llm_points.append(hp)
             return RiskExplanation(
-                risk_level=parsed.get("risk_level", "MEDIUM"),
-                summary=parsed.get("summary", ""),
-                key_points=parsed.get("key_points", []),
-                recommendations=parsed.get("recommendations", []),
-                is_safe=parsed.get("is_safe", False),
+                risk_level=final_level,
+                summary=parsed.get("summary") or heuristic.summary,
+                key_points=llm_points,
+                recommendations=list(parsed.get("recommendations") or heuristic.recommendations),
+                is_safe=final_safe,
                 provider=f"{prov_name} ({model_name})",
             )
         except Exception as exc:
@@ -409,6 +473,6 @@ async def explain_change_with_llm(
             )
 
     logger.warning("All LLM providers in cascade failed; using deterministic rule-engine.")
-    fallback = analyze_diff_heuristic(hostname, platform, remediation_patch, rollback_patch)
-    fallback.provider = "Deterministic Rule-Engine (Cascade Failover)"
-    return fallback
+    heuristic.provider = "Deterministic Rule-Engine (Cascade Failover)"
+    return heuristic
+

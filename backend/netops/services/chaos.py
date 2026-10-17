@@ -5,13 +5,12 @@ Extracted from `api/routes/system.py` to keep HTTP controllers thin.
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Any
 
 from netops.network import JinjaConfigRenderer
 from netops.services.forecast import record_chaos_event
-
-
-from pathlib import Path
 
 
 def _push_live_configs(container: Any, hostname: str, lines: list[str]) -> str:
@@ -19,8 +18,8 @@ def _push_live_configs(container: Any, hostname: str, lines: list[str]) -> str:
     if container.settings.network_driver != "scrapli":
         return ""
     try:
-        from netops.network.scrapli_driver import _ParamikoConnAdapter  # noqa: PLC0415
-        from netops.toolchain import build_toolchain  # noqa: PLC0415
+        from netops.network.scrapli_driver import _ParamikoConnAdapter
+        from netops.toolchain import build_toolchain
 
         toolchain = build_toolchain(container.settings)
         snapshot = container.intents.load()
@@ -42,6 +41,13 @@ def _inventory_devices(container: Any) -> list[Any]:
         return []
 
 
+def _device_intent(container: Any, hostname: str) -> Any | None:
+    try:
+        return container.intents.load().intent_for(hostname)
+    except Exception:
+        return None
+
+
 def _device_platform(container: Any, hostname: str, lab_dir: Path) -> str:
     for d in _inventory_devices(container):
         if str(d.hostname) == hostname:
@@ -58,38 +64,119 @@ def _pick_target(
     container: Any,
     lab_dir: Path,
     *,
+    explicit_target: str | None = None,
     preferred_platform: str | None = None,
     index: int = 0,
-    fallback: str = "leaf-1.croc.lab",
+    fallback: str | None = None,
 ) -> str:
+    if explicit_target and explicit_target.strip():
+        return explicit_target.strip()
     devs = _inventory_devices(container)
-    if container.settings.network_driver == "scrapli" and preferred_platform:
-        for d in devs:
-            plat = d.platform.value if hasattr(d.platform, "value") else str(d.platform)
-            if plat == preferred_platform:
-                return str(d.hostname)
-    if (lab_dir / f"{fallback}.cfg").exists():
-        return fallback
+    default_domain = getattr(container.settings, "default_domain", "croc.lab") or "croc.lab"
+    resolved_fallback = fallback or (
+        str(devs[index % len(devs)].hostname) if devs else f"leaf-{index + 1}.{default_domain}"
+    )
     if preferred_platform:
         for d in devs:
             plat = d.platform.value if hasattr(d.platform, "value") else str(d.platform)
+            if plat == preferred_platform and (
+                container.settings.network_driver == "scrapli"
+                or (lab_dir / f"{d.hostname}.cfg").exists()
+            ):
+                return str(d.hostname)
+        for d in devs:
+            plat = d.platform.value if hasattr(d.platform, "value") else str(d.platform)
             if plat == preferred_platform:
                 return str(d.hostname)
+    if (lab_dir / f"{resolved_fallback}.cfg").exists():
+        return resolved_fallback
     if devs:
         return str(devs[index % len(devs)].hostname)
-    return fallback
+    return resolved_fallback
 
 
-def _scenario_acl_drift(container: Any, lab_dir: Path) -> dict[str, str]:
-    target_host = _pick_target(
-        container, lab_dir, preferred_platform="cisco_iosxe", index=0, fallback="leaf-1.croc.lab"
+def _resolve_acl_name(container: Any, hostname: str, override: str | None = None) -> str:
+    if override and override.strip():
+        return override.strip()
+    intent = _device_intent(container, hostname)
+    if intent is not None and getattr(intent, "acls", None):
+        return str(intent.acls[0].name)
+    return "FABRIC-IN"
+
+
+def _resolve_uplink_interface(
+    container: Any, hostname: str, plat: str, override: str | None = None
+) -> str:
+    if override and override.strip():
+        return override.strip()
+    intent = _device_intent(container, hostname)
+    if intent is not None and getattr(intent, "interfaces", None):
+        uplinks = [
+            iface.name
+            for iface in intent.interfaces
+            if getattr(iface, "enabled", True)
+            and not getattr(iface, "shutdown", False)
+            and getattr(iface, "mode", "l3") == "l3"
+            and not iface.name.lower().startswith(("loopback", "vbdif", "vlan"))
+        ]
+        if uplinks:
+            return str(uplinks[-1])
+    if plat == "huawei_vrp":
+        return "GE1/0/1"
+    if plat == "arista_eos":
+        return "Ethernet2"
+    return "GigabitEthernet3"
+
+
+def _shutdown_interface_in_cfg(content: str, iface_name: str) -> str:
+    pattern = re.compile(
+        rf"(^interface {re.escape(iface_name)}\n(?: [^\n]*\n)*)",
+        re.MULTILINE,
     )
+    match = pattern.search(content)
+    if not match:
+        return content
+    block = match.group(1)
+    if "\n no shutdown\n" in block:
+        new_block = block.replace("\n no shutdown\n", "\n shutdown\n")
+    elif "\n shutdown\n" not in block:
+        new_block = block.rstrip("\n") + "\n shutdown\n"
+    else:
+        new_block = block
+    return content[: match.start()] + new_block + content[match.end() :]
+
+
+def _scenario_acl_drift(
+    container: Any,
+    lab_dir: Path,
+    *,
+    target_hostname: str | None = None,
+    acl_name: str | None = None,
+) -> dict[str, str]:
+    target_host = _pick_target(
+        container,
+        lab_dir,
+        explicit_target=target_hostname,
+        preferred_platform="cisco_iosxe",
+        index=0,
+        fallback="leaf-1.croc.lab",
+    )
+    resolved_acl = _resolve_acl_name(container, target_host, acl_name)
     target_cfg = lab_dir / f"{target_host}.cfg"
     if target_cfg.exists():
         content = target_cfg.read_text(encoding="utf-8")
         if "20 deny ip any any" in content and "15 permit ip any any" not in content:
             content = content.replace(
                 "20 deny ip any any", "15 permit ip any any\n 20 deny ip any any"
+            )
+            target_cfg.write_text(content, encoding="utf-8")
+        elif (
+            "20 permit tcp any any eq bgp" in content
+            and "17 permit ip 10.99.0.0 0.0.255.255 any" not in content
+        ):
+            content = content.replace(
+                "20 permit tcp any any eq bgp",
+                "17 permit ip 10.99.0.0 0.0.255.255 any\n 20 permit tcp any any eq bgp",
             )
             target_cfg.write_text(content, encoding="utf-8")
         elif (
@@ -103,11 +190,17 @@ def _scenario_acl_drift(container: Any, lab_dir: Path) -> dict[str, str]:
             target_cfg.write_text(content, encoding="utf-8")
     plat = _device_platform(container, target_host, lab_dir)
     if plat == "huawei_vrp":
-        cli_lines = ["acl number 3001", "rule 15 permit ip source any destination any"]
+        cli_lines = [
+            f"acl name {resolved_acl} advance",
+            "rule 17 permit ip source 10.99.0.0 0.0.255.255",
+        ]
     else:
-        cli_lines = ["ip access-list extended FABRIC_IN", "15 permit ip any any"]
+        cli_lines = [
+            f"ip access-list extended {resolved_acl}",
+            "17 permit ip 10.99.0.0 0.0.255.255 any",
+        ]
     ssh_note = _push_live_configs(container, target_host, cli_lines)
-    msg = f"Внедрен несанкционированный ACL в {target_host}{ssh_note}"
+    msg = f"Внедрен несанкционированный ACL ({resolved_acl}) в {target_host}{ssh_note}"
     record_chaos_event(
         scenario="acl_drift",
         target_hostnames=[target_host, target_host.split(".")[0]],
@@ -119,92 +212,115 @@ def _scenario_acl_drift(container: Any, lab_dir: Path) -> dict[str, str]:
     return {"status": "ok", "message": msg}
 
 
-def _scenario_port_down(container: Any, lab_dir: Path) -> dict[str, str]:
-    target_host = _pick_target(container, lab_dir, index=1, fallback="leaf-2.croc.lab")
+def _scenario_port_down(
+    container: Any,
+    lab_dir: Path,
+    *,
+    target_hostname: str | None = None,
+    interface_name: str | None = None,
+) -> dict[str, str]:
+    target_host = _pick_target(
+        container,
+        lab_dir,
+        explicit_target=target_hostname,
+        index=1,
+        fallback="leaf-2.croc.lab",
+    )
+    plat = _device_platform(container, target_host, lab_dir)
+    resolved_iface = _resolve_uplink_interface(container, target_host, plat, interface_name)
     target_cfg = lab_dir / f"{target_host}.cfg"
     if target_cfg.exists():
         content = target_cfg.read_text(encoding="utf-8")
-        old_cisco = (
-            "interface GigabitEthernet3\n description Uplink to spine-2\n"
-            " mtu 9000\n ip address 10.0.2.3 255.255.255.254\n no shutdown"
-        )
-        new_cisco = (
-            "interface GigabitEthernet3\n description Uplink to spine-2\n"
-            " mtu 9000\n ip address 10.0.2.3 255.255.255.254\n shutdown"
-        )
-        old_huawei = (
-            "interface GE1/0/1\n description Uplink to spine-2\n"
-            " undo portswitch\n mtu 9000\n ip address 10.0.2.3 255.255.255.254"
-        )
-        new_huawei = (
-            "interface GE1/0/1\n description Uplink to spine-2\n"
-            " undo portswitch\n mtu 9000\n ip address 10.0.2.3 255.255.255.254\n shutdown"
-        )
-        if old_cisco in content:
-            content = content.replace(old_cisco, new_cisco)
-        elif old_huawei in content and "shutdown\n#" not in content:
-            content = content.replace(old_huawei, new_huawei)
-        target_cfg.write_text(content, encoding="utf-8")
-    plat = _device_platform(container, target_host, lab_dir)
-    if plat == "huawei_vrp":
-        cli_lines = ["interface GE1/0/1", "shutdown"]
-    elif plat == "arista_eos":
-        cli_lines = ["interface Ethernet2", "shutdown"]
-    else:
-        cli_lines = ["interface GigabitEthernet3", "shutdown"]
+        updated = _shutdown_interface_in_cfg(content, resolved_iface)
+        if updated == content and resolved_iface != "GE1/0/1":
+            updated = _shutdown_interface_in_cfg(content, "GE1/0/1")
+        target_cfg.write_text(updated, encoding="utf-8")
+    cli_lines = [f"interface {resolved_iface}", "shutdown"]
     ssh_note = _push_live_configs(container, target_host, cli_lines)
     record_chaos_event(
         scenario="port_down",
         target_hostnames=[target_host, target_host.split(".")[0]],
         title=f"Chaos: Отключение Uplink-интерфейса на {target_host}",
-        description=f"Uplink-интерфейс на {target_host} переведен в shutdown{ssh_note}",
+        description=f"Uplink-интерфейс {resolved_iface} на {target_host} переведен в shutdown{ssh_note}",
         severity="critical",
         lab_dir=lab_dir,
     )
     return {
         "status": "ok",
-        "message": f"Интерфейс GigabitEthernet3 / GE1/0/1 на {target_host} переведен в shutdown{ssh_note}",
+        "message": f"Интерфейс {resolved_iface} на {target_host} переведен в shutdown{ssh_note}",
     }
 
 
-def _scenario_huawei_drift(container: Any, lab_dir: Path) -> dict[str, str]:
+def _scenario_huawei_drift(
+    container: Any,
+    lab_dir: Path,
+    *,
+    target_hostname: str | None = None,
+    acl_name: str | None = None,
+) -> dict[str, str]:
     target_host = _pick_target(
-        container, lab_dir, preferred_platform="huawei_vrp", index=1, fallback="leaf-1.croc.lab"
+        container,
+        lab_dir,
+        explicit_target=target_hostname,
+        preferred_platform="huawei_vrp",
+        index=1,
+        fallback="leaf-1.croc.lab",
     )
-    if (lab_dir / "leaf-3.croc.lab.cfg").exists():
+    if not target_hostname and (lab_dir / "leaf-3.croc.lab.cfg").exists():
         target_host = "leaf-3.croc.lab"
+    resolved_acl = _resolve_acl_name(container, target_host, acl_name)
     target_cfg = lab_dir / f"{target_host}.cfg"
     if target_cfg.exists():
         content = target_cfg.read_text(encoding="utf-8")
-        if "rule 15 permit ip source 10.99.0.0" not in content:
+        if (
+            "rule 20 deny ip source any destination any" in content
+            and "rule 15 permit ip source 10.99.0.0" not in content
+        ):
             content = content.replace(
                 "rule 20 deny ip source any destination any",
                 "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any\n rule 20 deny ip source any destination any",
             )
             target_cfg.write_text(content, encoding="utf-8")
+        elif (
+            "rule 20 permit tcp destination-port eq bgp" in content
+            and "rule 17 permit ip source 10.99.0.0" not in content
+        ):
+            content = content.replace(
+                "rule 20 permit tcp destination-port eq bgp",
+                "rule 17 permit ip source 10.99.0.0 0.0.255.255\n rule 20 permit tcp destination-port eq bgp",
+            )
+            target_cfg.write_text(content, encoding="utf-8")
     ssh_note = _push_live_configs(
         container,
         target_host,
-        ["acl number 3001", "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any"],
+        [f"acl name {resolved_acl} advance", "rule 17 permit ip source 10.99.0.0 0.0.255.255"],
     )
     record_chaos_event(
         scenario="huawei_drift",
         target_hostnames=[target_host, target_host.split(".")[0]],
         title="Chaos: Внедрение несанкционированного правила в Huawei VRP",
-        description=f"Внедрен дрейф ACL rule 15 в {target_host}{ssh_note}",
+        description=f"Внедрен дрейф ACL ({resolved_acl}) rule 17 в {target_host}{ssh_note}",
         severity="warning",
         lab_dir=lab_dir,
     )
     return {
         "status": "ok",
-        "message": f"Внедрен несанкционированный ACL в {target_host}{ssh_note}",
+        "message": f"Внедрен несанкционированный ACL ({resolved_acl}) в {target_host}{ssh_note}",
     }
 
 
-def _scenario_ai_blackhole(container: Any, lab_dir: Path) -> dict[str, str]:
-    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+def _scenario_ai_blackhole(
+    container: Any, lab_dir: Path, *, target_hostname: str | None = None
+) -> dict[str, str]:
+    from netops.services.ai_guard import AiTelemetryGuard
 
-    target_host = _pick_target(container, lab_dir, index=1, fallback="leaf-2.croc.lab")
+    target_host = _pick_target(
+        container,
+        lab_dir,
+        explicit_target=target_hostname,
+        index=1,
+        fallback="leaf-2.croc.lab",
+    )
     AiTelemetryGuard.inject_anomaly(target_host, "blackhole")
     record_chaos_event(
         scenario="ai_blackhole",
@@ -220,10 +336,18 @@ def _scenario_ai_blackhole(container: Any, lab_dir: Path) -> dict[str, str]:
     }
 
 
-def _scenario_ai_storm(container: Any, lab_dir: Path) -> dict[str, str]:
-    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+def _scenario_ai_storm(
+    container: Any, lab_dir: Path, *, target_hostname: str | None = None
+) -> dict[str, str]:
+    from netops.services.ai_guard import AiTelemetryGuard
 
-    target_host = _pick_target(container, lab_dir, index=0, fallback="leaf-1.croc.lab")
+    target_host = _pick_target(
+        container,
+        lab_dir,
+        explicit_target=target_hostname,
+        index=0,
+        fallback="leaf-1.croc.lab",
+    )
     AiTelemetryGuard.inject_anomaly(target_host, "storm")
     record_chaos_event(
         scenario="ai_storm",
@@ -240,7 +364,20 @@ def _scenario_ai_storm(container: Any, lab_dir: Path) -> dict[str, str]:
 
 
 def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
-    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+    from netops.services.ai_guard import AiTelemetryGuard
+    from netops.services.state import get_state_manager
+
+    state_mgr = get_state_manager()
+    with state_mgr._lock:
+        state_mgr._local_locks.clear()
+    client = state_mgr._get_redis()
+    if client:
+        try:
+            keys = list(client.scan_iter("netops:sync_lock:*"))
+            if keys:
+                client.delete(*keys)
+        except Exception:
+            pass
 
     renderer = JinjaConfigRenderer(container.settings.templates_path)
     snapshot = container.intents.load()
@@ -253,23 +390,37 @@ def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
         (lab_dir / f"{dev.hostname}.cfg").write_text(cfg, encoding="utf-8")
         if container.settings.network_driver == "scrapli":
             plat = dev.platform.value if hasattr(dev.platform, "value") else str(dev.platform)
+            acl_name = _resolve_acl_name(container, dev.hostname)
+            uplink = _resolve_uplink_interface(container, dev.hostname, plat)
             if plat == "huawei_vrp":
                 _push_live_configs(
                     container,
                     dev.hostname,
-                    ["acl number 3001", "undo rule 15", "quit", "interface GE1/0/1", "undo shutdown"],
+                    [
+                        f"acl name {acl_name} advance",
+                        "undo rule 17",
+                        "quit",
+                        f"interface {uplink}",
+                        "undo shutdown",
+                    ],
                 )
             elif plat == "cisco_iosxe":
                 _push_live_configs(
                     container,
                     dev.hostname,
-                    ["ip access-list extended FABRIC_IN", "no 15", "exit", "interface GigabitEthernet3", "no shutdown"],
+                    [
+                        f"ip access-list extended {acl_name}",
+                        "no 17",
+                        "exit",
+                        f"interface {uplink}",
+                        "no shutdown",
+                    ],
                 )
             elif plat == "arista_eos":
                 _push_live_configs(
                     container,
                     dev.hostname,
-                    ["interface Ethernet2", "no shutdown"],
+                    [f"interface {uplink}", "no shutdown"],
                 )
     record_chaos_event(
         scenario="reset_lab",
@@ -285,18 +436,31 @@ def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
     }
 
 
-def execute_chaos_scenario(scenario: str, container: Any) -> dict[str, str]:
+def execute_chaos_scenario(
+    scenario: str,
+    container: Any,
+    *,
+    target_hostname: str | None = None,
+    interface_name: str | None = None,
+    acl_name: str | None = None,
+) -> dict[str, str]:
     lab_dir = container.settings.offline_lab_path
     if scenario == "acl_drift":
-        return _scenario_acl_drift(container, lab_dir)
+        return _scenario_acl_drift(
+            container, lab_dir, target_hostname=target_hostname, acl_name=acl_name
+        )
     if scenario == "port_down":
-        return _scenario_port_down(container, lab_dir)
+        return _scenario_port_down(
+            container, lab_dir, target_hostname=target_hostname, interface_name=interface_name
+        )
     if scenario == "huawei_drift":
-        return _scenario_huawei_drift(container, lab_dir)
+        return _scenario_huawei_drift(
+            container, lab_dir, target_hostname=target_hostname, acl_name=acl_name
+        )
     if scenario == "ai_blackhole":
-        return _scenario_ai_blackhole(container, lab_dir)
+        return _scenario_ai_blackhole(container, lab_dir, target_hostname=target_hostname)
     if scenario == "ai_storm":
-        return _scenario_ai_storm(container, lab_dir)
+        return _scenario_ai_storm(container, lab_dir, target_hostname=target_hostname)
     if scenario == "reset_lab":
         return _scenario_reset_lab(container, lab_dir)
 
@@ -309,4 +473,3 @@ def execute_chaos_scenario(scenario: str, container: Any) -> dict[str, str]:
         lab_dir=lab_dir,
     )
     return {"status": "ok", "message": "Неизвестный сценарий"}
-

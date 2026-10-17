@@ -7,7 +7,6 @@ Includes a lightweight TTL cache for git subprocess metadata to avoid forking
 from __future__ import annotations
 
 import base64
-import json
 import os
 import re
 import subprocess
@@ -16,16 +15,13 @@ import urllib.parse
 from pathlib import Path
 from typing import Any
 
-_GIT_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-_CACHE_TTL_SEC = 10.0
+_CACHE_TTL_SEC = 10
 
 
 def invalidate_git_cache() -> None:
-    from netops.services.state import get_state_manager  # noqa: PLC0415
+    from netops.services.state import get_state_manager
 
     get_state_manager().clear_git_sot_meta()
-    _GIT_META_CACHE.clear()
-
 
 
 def _sanitize_git_url(url: str) -> str:
@@ -42,15 +38,15 @@ def _sanitize_git_url(url: str) -> str:
     return clean
 
 
-def _load_saved_pat(repo_path: Path) -> str:
-    project_root = repo_path.parent if repo_path.name == "intent" else repo_path
-    rt_file = project_root / "lab" / "running" / "runtime_settings.json"
-    if rt_file.is_file():
-        try:
-            data = json.loads(rt_file.read_text(encoding="utf-8"))
+def _load_saved_pat(_repo_path: Path) -> str:
+    try:
+        from netops.services.state import get_state_manager
+
+        data = get_state_manager().get_db_state("runtime_settings", {})
+        if isinstance(data, dict):
             return str(data.get("github_pat") or "").strip()
-        except Exception:
-            pass
+    except Exception:
+        pass
     return ""
 
 
@@ -74,7 +70,7 @@ def _git_auth_cmd_and_env(url: str, github_pat: str | None, repo_path: Path) -> 
     }
     git_prefix = ["git"]
     if pat and clean_url.startswith(("http://", "https://")):
-        b64 = base64.b64encode(f"x-access-token:{pat}".encode("utf-8")).decode("ascii")
+        b64 = base64.b64encode(f"x-access-token:{pat}".encode()).decode("ascii")
         git_prefix = ["git", "-c", f"http.https://github.com/.extraheader=Authorization: Basic {b64}"]
     return git_prefix, env, clean_url
 
@@ -89,18 +85,13 @@ def _scrub_secret(text: str, secret: str | None) -> str:
 
 
 def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
-    from netops.services.state import get_state_manager  # noqa: PLC0415
+    from netops.services.state import get_state_manager
 
     cache_key = f"{repo_path}:{fallback_url}"
     state_mgr = get_state_manager()
     cached_meta = state_mgr.get_git_sot_meta(cache_key)
     if cached_meta is not None:
         return dict(cached_meta)
-
-    now = time.monotonic()
-    cached = _GIT_META_CACHE.get(cache_key)
-    if cached and (now - cached[0]) < _CACHE_TTL_SEC:
-        return dict(cached[1])
 
     cwd = repo_path if hasattr(repo_path, "is_dir") and repo_path.is_dir() else None
     branch = "main"
@@ -157,8 +148,7 @@ def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
         "webhook_configured": True,
         "auto_sync_on_push": True,
     }
-    state_mgr.set_git_sot_meta(cache_key, result, ttl=int(_CACHE_TTL_SEC))
-    _GIT_META_CACHE[cache_key] = (now, result)
+    state_mgr.set_git_sot_meta(cache_key, result, ttl=_CACHE_TTL_SEC)
     return dict(result)
 
 
@@ -382,29 +372,28 @@ def git_commit_and_push_diff(
 
     invalidate_git_cache()
     cwd = repo_path if repo_path.is_dir() else repo_path.parent
-    diffs_dir = repo_path / "diffs"
-    diffs_dir.mkdir(parents=True, exist_ok=True)
 
     changed_hosts: list[str] = []
-    summary_lines = [
-        "# CROC DREAM NetOps — Auto Diff Snapshot",
-        f"job_id: {job_id}",
-        f"job_type: {job_type}",
-        f"timestamp_epoch: {int(time.time())}",
-        "devices:",
-    ]
     for item in device_diffs:
         hname = str(item.get("hostname") or "unknown")
         rem = str(item.get("remediation_patch") or "").strip()
-        in_sync = not bool(rem)
-        summary_lines.append(f"  - hostname: {hname}")
-        summary_lines.append(f"    in_sync: {str(in_sync).lower()}")
-        summary_lines.append(f"    remediation_lines: {len(rem.splitlines()) if rem else 0}")
         if rem:
             changed_hosts.append(hname)
 
-    latest_diff_file = diffs_dir / "latest_diff.yaml"
-    latest_diff_file.write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+    try:
+        from netops.services.state import get_state_manager
+
+        get_state_manager().set_db_state(
+            "latest_diff_snapshot",
+            {
+                "job_id": job_id,
+                "job_type": job_type,
+                "timestamp_epoch": int(time.time()),
+                "changed_hosts": changed_hosts,
+            },
+        )
+    except Exception:
+        pass
 
     git_cmd, ssh_env, clean_remote = _git_auth_cmd_and_env(remote_url or "", github_pat, repo_path)
     target_branch = (branch or "main").strip()
@@ -425,7 +414,6 @@ def git_commit_and_push_diff(
                 repo_path / "devices",
                 repo_path / "platforms",
                 repo_path / "inventory.yaml",
-                latest_diff_file,
             )
             if p.exists()
         ]

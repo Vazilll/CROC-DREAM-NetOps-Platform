@@ -11,33 +11,23 @@ Provides:
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
 import paramiko
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
 from netops.api.deps import Admin, ContainerDep, Operator, Viewer
-from netops.enums import Platform
-from netops.network.base import ChangePlan, DeviceTarget
+from netops.network.base import ChangePlan
 from netops.toolchain import build_toolchain
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/emergency", tags=["emergency"])
-
-AUDIT_LOG_FILE = Path(__file__).resolve().parents[4] / "lab" / "running" / "emergency_audit.jsonl"
-
-
-def _audit_file(settings: Any = None) -> Path:
-    from netops.settings import get_settings  # noqa: PLC0415
-
-    eff = settings or get_settings()
-    return eff.offline_lab_path / "emergency_audit.jsonl"
 
 
 def record_audit(
@@ -49,28 +39,29 @@ def record_audit(
     success: bool,
     output: str = "",
     settings: Any = None,
-) -> None:
+) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "user": user,
+        "action": action,
+        "device": device,
+        "payload": payload,
+        "reason": reason,
+        "success": success,
+        "output_preview": output[:200] if output else "",
+    }
     try:
-        from netops.services.discovery import _is_protected_repo_path  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
-        audit_file = _audit_file(settings)
-        if _is_protected_repo_path(audit_file):
-            return
-        audit_file.parent.mkdir(parents=True, exist_ok=True)
-        entry = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            "user": user,
-            "action": action,
-            "device": device,
-            "payload": payload,
-            "reason": reason,
-            "success": success,
-            "output_preview": output[:200] if output else "",
-        }
-        with open(audit_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        state = get_state_manager(settings)
+        db_url = getattr(settings, "database_url", None) if settings is not None else None
+        loaded = state.get_db_state("emergency_audit", [], database_url=db_url)
+        records = list(loaded) if isinstance(loaded, list) else []
+        records.append(entry)
+        state.set_db_state("emergency_audit", records[-200:], database_url=db_url)
     except Exception as exc:
         logger.warning("Failed to record emergency audit log: %s", exc)
+    return entry
 
 
 class EmergencyCommandRequest(BaseModel):
@@ -108,18 +99,30 @@ class ResetResponse(BaseModel):
 
 @router.get("/audit", response_model=list[dict[str, Any]], summary="Get emergency operations audit log")
 def get_emergency_audit(_: Viewer, container: ContainerDep) -> list[dict[str, Any]]:
-    audit_file = _audit_file(container.settings)
-    if not audit_file.exists():
-        return []
-    records = []
-    with open(audit_file, "r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip():
-                try:
-                    records.append(json.loads(line))
-                except Exception:
-                    pass
+    from netops.services.state import get_state_manager
+
+    db_url = container.settings.database_url
+    loaded = get_state_manager(container.settings).get_db_state(
+        "emergency_audit", [], database_url=db_url
+    )
+    records = list(loaded) if isinstance(loaded, list) else []
     return records[-50:]
+
+
+def _load_device_intent_safe(settings: Any, hostname: str) -> Any | None:
+    try:
+        import yaml
+
+        from netops.intent.models import DeviceIntent
+
+        intent_path = Path(settings.intent_repo_path) / "devices" / f"{hostname}.yaml"
+        if intent_path.is_file():
+            data = yaml.safe_load(intent_path.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return DeviceIntent.model_validate(data)
+    except Exception:
+        pass
+    return None
 
 
 def _emulate_offline_command(settings: Any, device_obj: Any, command: str) -> str:
@@ -132,22 +135,58 @@ def _emulate_offline_command(settings: Any, device_obj: Any, command: str) -> st
             return cfg_path.read_text(encoding="utf-8")
         return f"! No offline running configuration found for {device_obj.hostname}\n"
 
+    intent = _load_device_intent_safe(settings, device_obj.hostname)
+
     if "bgp" in cmd and ("summary" in cmd or "peer" in cmd):
-        return (
-            f"BGP router identifier {device_obj.management_ip}, local AS number 65001\n"
-            "BGP table version is 1, main routing table version 1\n"
-            "Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd\n"
-            "10.0.1.1        4        65000     142     143        1    0    0 01:23:45            2\n"
-            "10.0.2.1        4        65000     142     143        1    0    0 01:23:45            2\n"
-        )
+        bgp = getattr(intent, "bgp", None) if intent is not None else None
+        router_id = str(getattr(bgp, "router_id", None) or device_obj.management_ip)
+        local_as = int(getattr(bgp, "asn", 65001) or 65001)
+        neighbors = list(getattr(bgp, "neighbors", None) or [])
+        lines = [
+            f"BGP router identifier {router_id}, local AS number {local_as}",
+            "BGP table version is 1, main routing table version 1",
+            "Neighbor        V           AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd",
+        ]
+        if neighbors:
+            for nb in neighbors:
+                peer_ip = getattr(nb, "peer_ip", None) or getattr(nb, "ip", "10.0.1.1")
+                rem_as = getattr(nb, "remote_asn", None) or getattr(nb, "remote_as", 65000)
+                lines.append(
+                    f"{peer_ip!s:<15} 4 {int(rem_as):>12}     142     143        1    0    0 01:23:45            2"
+                )
+        else:
+            lines.extend(
+                [
+                    "10.0.1.1        4        65000     142     143        1    0    0 01:23:45            2",
+                    "10.0.2.1        4        65000     142     143        1    0    0 01:23:45            2",
+                ]
+            )
+        return "\n".join(lines) + "\n"
 
     if "interface" in cmd and "brief" in cmd:
-        return (
-            "Interface              IP-Address      OK? Method Status                Protocol\n"
-            f"Loopback0              {device_obj.management_ip}        YES manual up                    up\n"
-            "GigabitEthernet1       10.0.1.2        YES manual up                    up\n"
-            "GigabitEthernet2       10.0.2.2        YES manual up                    up\n"
-        )
+        ifaces = list(getattr(intent, "interfaces", None) or []) if intent is not None else []
+        lines = [
+            "Interface              IP-Address      OK? Method Status                Protocol",
+        ]
+        if ifaces:
+            for iface in ifaces:
+                raw_ip = getattr(iface, "ipv4_address", None) or getattr(iface, "ip", None)
+                ip_str = str(raw_ip).split("/")[0] if raw_ip else "unassigned"
+                is_down = getattr(iface, "shutdown", False) or not getattr(iface, "enabled", True)
+                st = "administratively down" if is_down else "up"
+                proto = "down" if is_down else "up"
+                lines.append(
+                    f"{iface.name:<22} {ip_str:<15} YES manual {st:<21} {proto}"
+                )
+        else:
+            lines.extend(
+                [
+                    f"Loopback0              {device_obj.management_ip:<15} YES manual up                    up",
+                    "GigabitEthernet1       10.0.1.2        YES manual up                    up",
+                    "GigabitEthernet2       10.0.2.2        YES manual up                    up",
+                ]
+            )
+        return "\n".join(lines) + "\n"
 
     if cmd.startswith("ping"):
         return (
@@ -167,6 +206,44 @@ def _emulate_offline_command(settings: Any, device_obj: Any, command: str) -> st
     return f"% Command executed on {device_obj.hostname} (offline simulation):\n{command}\n[OK]\n"
 
 
+_ALLOWED_CLI_PREFIXES = (
+    "show ",
+    "show",
+    "display ",
+    "display",
+    "ping ",
+    "traceroute ",
+    "trace ",
+    "terminal length ",
+)
+
+_FORBIDDEN_PIPE_KEYWORDS = (
+    "redirect",
+    "tee",
+    "append",
+    "delete",
+    "format",
+    "erase",
+)
+
+
+def _is_allowed_diagnostic_cli(command: str) -> bool:
+    """Strict allowlist for read-only diagnostic CLI commands (blocks abbreviations like 'rel', 'conf t', 'clear', 'debug', 'undo')."""
+    if not command or "\n" in command or "\r" in command or ";" in command:
+        return False
+    cmd_clean = command.strip().lower()
+    if not any(
+        cmd_clean == p if not p.endswith(" ") else cmd_clean.startswith(p)
+        for p in _ALLOWED_CLI_PREFIXES
+    ):
+        return False
+    if "|" in cmd_clean:
+        pipe_rhs = cmd_clean.split("|", 1)[1]
+        if any(kw in pipe_rhs for kw in _FORBIDDEN_PIPE_KEYWORDS):
+            return False
+    return True
+
+
 @router.post(
     "/command",
     response_model=EmergencyCommandResponse,
@@ -177,14 +254,33 @@ def execute_emergency_command(
     container: ContainerDep,
     principal: Operator,
 ) -> dict[str, Any]:
+    if not _is_allowed_diagnostic_cli(req.command):
+        record_audit(
+            user=principal.username,
+            action="cli_command_blocked",
+            device=req.device,
+            payload=req.command,
+            reason="Blocked non-diagnostic or destructive command by CLI allowlist",
+            success=False,
+            output="Command rejected by CLI security guardrail",
+            settings=container.settings,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Only read-only diagnostic commands (show, display, ping, traceroute) are allowed "
+                "in diagnostic CLI. Use the Dry-Run/Deploy pipeline or Admin Emergency Patch."
+            ),
+        )
     toolchain = build_toolchain(container.settings)
     snapshot = container.intents.load()
     device_obj = next((d for d in snapshot.inventory.devices if d.hostname == req.device or d.hostname.startswith(req.device)), None)
     if not device_obj:
         with container.session_factory() as session:
-            from sqlalchemy import select  # noqa: PLC0415
-            from netops.models import Device as DeviceModel  # noqa: PLC0415
-            from netops.intent.models import InventoryDevice  # noqa: PLC0415
+            from sqlalchemy import select
+
+            from netops.intent.models import InventoryDevice
+            from netops.models import Device as DeviceModel
             db_dev = session.scalars(select(DeviceModel).where(DeviceModel.hostname == req.device)).first()
             if db_dev:
                 device_obj = InventoryDevice(
@@ -223,10 +319,10 @@ def execute_emergency_command(
         }
 
     target = toolchain.target_for(device_obj)
-    
+
     # Execute command directly using SSH adapter
     try:
-        from netops.network.scrapli_driver import _ParamikoConnAdapter  # noqa: PLC0415
+        from netops.network.scrapli_driver import _ParamikoConnAdapter
         with _ParamikoConnAdapter(target, timeout=30) as conn:
             res = conn.send_command(req.command)
             record_audit(
@@ -287,10 +383,11 @@ def apply_emergency_patch(
         )
 
     with container.session_factory() as session:
-        from sqlalchemy import select  # noqa: PLC0415
-        from netops.enums import JobStatus, JobType  # noqa: PLC0415
-        from netops.models import Device, Job, JobTarget  # noqa: PLC0415
-        from netops.services.state import get_state_manager  # noqa: PLC0415
+        from sqlalchemy import select
+
+        from netops.enums import JobStatus, JobType
+        from netops.models import Device, Job, JobTarget
+        from netops.services.state import get_state_manager
 
         active_job = session.scalar(
             select(Job.id)
@@ -349,7 +446,7 @@ def apply_emergency_patch(
         }
 
     try:
-        from netops.network.scrapli_driver import _ParamikoConnAdapter  # noqa: PLC0415
+        from netops.network.scrapli_driver import _ParamikoConnAdapter
         with _ParamikoConnAdapter(target, timeout=35) as conn:
             res = conn.send_configs(lines)
             record_audit(
@@ -392,18 +489,30 @@ def soft_reset_fabric(
     container: ContainerDep,
     _: Admin,
 ) -> ResetResponse:
+    from sqlalchemy import select
+
+    from netops.enums import DeviceStatus
+    from netops.models import Device as DeviceModel
+    from netops.services.ai_guard import AiTelemetryGuard
+
     toolchain = build_toolchain(container.settings)
     snapshot = container.intents.load()
-    
-    deployed = []
-    errors = []
+
+    deployed: list[str] = []
+    aligned_hosts: list[str] = []
+    errors: list[str] = []
 
     for dev in snapshot.inventory.devices:
         try:
+            AiTelemetryGuard.inject_anomaly(dev.hostname, "clear")
+            intent = snapshot.intent_for(dev.hostname)
+            if intent is None:
+                errors.append(f"{dev.hostname}: missing device intent YAML")
+                continue
             target = toolchain.target_for(dev)
-            rendered = toolchain.renderer.render(dev, snapshot.intent_for(dev.hostname))
+            rendered = toolchain.renderer.render(dev, intent)
             intended = toolchain.normalizer.normalize(dev.platform, rendered)
-            
+
             # Fetch running
             fetch_res = toolchain.collector.fetch_running_configs([target]).get(dev.hostname)
             if not fetch_res or not fetch_res.config:
@@ -412,7 +521,7 @@ def soft_reset_fabric(
 
             running = toolchain.normalizer.normalize(dev.platform, fetch_res.config)
             diff = toolchain.diff_engine.compare(dev.platform, running, intended)
-            
+
             if diff.has_changes:
                 plan = ChangePlan(remediation=diff.remediation, rollback=diff.rollback, intended=intended)
                 toolchain.deployer.apply(target, plan, confirm_timeout=container.settings.commit_confirm_timeout_seconds)
@@ -420,9 +529,19 @@ def soft_reset_fabric(
                 deployed.append(f"{dev.hostname} (remediated)")
             else:
                 deployed.append(f"{dev.hostname} (already aligned)")
+            aligned_hosts.append(dev.hostname)
         except Exception as exc:
             logger.exception("Soft reset error on %s", dev.hostname)
             errors.append(f"{dev.hostname}: {exc}")
+
+    if aligned_hosts:
+        with container.session_factory() as session:
+            db_devs = session.scalars(
+                select(DeviceModel).where(DeviceModel.hostname.in_(aligned_hosts))
+            ).all()
+            for db_dev in db_devs:
+                db_dev.status = DeviceStatus.IN_SYNC
+            session.commit()
 
     msg = f"Soft reset completed on {len(deployed)} nodes."
     if errors:
@@ -470,13 +589,18 @@ def hard_reset_containerlab(
         if cfg.clab_key_path and os.path.exists(cfg.clab_key_path):
             connect_kwargs["key_filename"] = cfg.clab_key_path
 
-        import shlex  # noqa: PLC0415
+        import shlex
 
         client.connect(**connect_kwargs)
         q_user = shlex.quote(str(user))
         q_topo = shlex.quote(str(cfg.clab_topology_path))
+        topo_dir = shlex.quote(str(Path(cfg.clab_topology_path).parent))
         # Fast reset via dedicated bash orchestrator if available (<10s, non-root)
-        cmd = f"test -f /home/{q_user}/clab-quickstart/reset_lab.sh && bash /home/{q_user}/clab-quickstart/reset_lab.sh {q_topo} || containerlab deploy -t {q_topo} --reconfigure"
+        cmd = (
+            f"if [ -f {topo_dir}/reset_lab.sh ]; then bash {topo_dir}/reset_lab.sh {q_topo}; "
+            f"elif [ -f /home/{q_user}/clab-quickstart/reset_lab.sh ]; then bash /home/{q_user}/clab-quickstart/reset_lab.sh {q_topo}; "
+            f"else containerlab deploy -t {q_topo} --reconfigure; fi"
+        )
         _stdin, stdout, _stderr = client.exec_command(cmd, timeout=120)
         out = stdout.read().decode("utf-8", errors="replace")
 

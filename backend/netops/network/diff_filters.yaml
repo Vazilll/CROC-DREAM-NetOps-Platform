@@ -194,6 +194,7 @@ platforms:
     - ^interface (?!gigabitethernet 1/0/0$)
     - '^router bgp '
     - '^route-map '
+    - '^ip access-list '
     unmanaged_examples:
     - management-интерфейс
     - username

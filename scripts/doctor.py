@@ -86,7 +86,10 @@ def main() -> int:
         from sqlalchemy import text
 
         db_path = BACKEND_DIR / "netops_local.db"
-        db_url = os.environ.get("NETOPS_DATABASE_URL", f"sqlite:///{db_path}")
+        default_pg = "postgresql+psycopg://netops:netops@127.0.0.1:5433/netops"
+        db_url = os.environ.get("NETOPS_DATABASE_URL") or (
+            default_pg if check_tcp_port("127.0.0.1", 5433, timeout=0.5)[0] else f"sqlite:///{db_path}"
+        )
         engine = build_engine(db_url)
         factory = build_session_factory(engine)
 
@@ -105,10 +108,11 @@ def main() -> int:
     intent_dir = REPO_ROOT / "intent"
     try:
         from netops.intent.repository import IntentRepository
-        repo = IntentRepository(intent_dir, inventory_file="inventory.live.yaml")
+        inv_file = "inventory.yaml"
+        repo = IntentRepository(intent_dir, inventory_file=inv_file)
         snapshot = repo.load()
         inv_devices = snapshot.inventory.devices
-        print(f"   • Path:           {GREEN}✔ Valid{RESET} ({intent_dir})")
+        print(f"   • Path:           {GREEN}✔ Valid{RESET} ({intent_dir}/{inv_file})")
         print(f"   • Snapshot:       {len(inv_devices)} intended device(s) defined in YAML")
         for dev in inv_devices:
             print(f"     - {dev.hostname} [{dev.platform.value}] @ {dev.management_ip}:{dev.management_port}")

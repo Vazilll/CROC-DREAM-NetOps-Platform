@@ -1,13 +1,6 @@
+# Дашборды определяются в настраиваемом YAML-файле croc-dream-noc.yaml
+# и синхронизируются напрямую в базу данных PostgreSQL (system_state + таблицы Grafana).
 apiVersion: 1
 
-providers:
-  - name: "CROC DREAM NetOps Dashboards"
-    orgId: 1
-    folder: "CROC DREAM Enterprise NOC"
-    type: file
-    disableDeletion: false
-    updateIntervalSeconds: 30
-    allowUiUpdates: true
-    options:
-      path: /etc/grafana/provisioning/dashboards/json
-      foldersFromFilesStructure: false
+providers: []
+

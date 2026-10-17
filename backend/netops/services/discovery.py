@@ -8,12 +8,11 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import ipaddress
-import json
 import logging
 import os
 import re
 import socket
-from datetime import UTC, datetime
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +36,7 @@ from netops.toolchain import build_toolchain
 
 logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+_SOT_INV_LOCK = threading.RLock()
 
 
 def _is_protected_repo_path(path: Path) -> bool:
@@ -68,12 +68,22 @@ def load_platform_profiles(intent_repo_path: Path | None = None) -> dict[str, An
 
     Read from intent/platforms/*.yaml.
     """
-    from netops.intent.models import PlatformProfile  # noqa: PLC0415
+    from netops.intent.models import PlatformProfile
+
+    if intent_repo_path is None:
+        with contextlib.suppress(Exception):
+            from netops.settings import get_settings
+
+            intent_repo_path = get_settings().intent_repo_path
 
     profiles_dir = (
         intent_repo_path / "platforms"
         if intent_repo_path is not None and (intent_repo_path / "platforms").is_dir()
-        else _PLATFORMS_DIR
+        else (
+            Path("/data/intent/platforms")
+            if Path("/data/intent/platforms").is_dir()
+            else _PLATFORMS_DIR
+        )
     )
     profiles: dict[str, Any] = {}
     if profiles_dir.is_dir():
@@ -124,8 +134,53 @@ def detect_platform_from_version(
     return initial_platform
 
 
+def _resolve_domain(settings: Any = None) -> str:
+    if settings is None:
+        with contextlib.suppress(Exception):
+            from netops.settings import get_settings
+
+            settings = get_settings()
+    dom = str(getattr(settings, "default_domain", "") or "").strip().lstrip(".")
+    if dom:
+        return dom
+    repo = getattr(settings, "intent_repo_path", None)
+    if repo is not None:
+        inv_path = Path(repo) / "inventory.yaml"
+        if inv_path.is_file():
+            with contextlib.suppress(Exception):
+                raw = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                for dev in raw.get("devices") or []:
+                    h = str(dev.get("hostname") or "")
+                    if "." in h:
+                        return h.split(".", 1)[1]
+    return "croc.lab"
+
+
+def _resolve_fabric_id(settings: Any = None) -> str:
+    if settings is None:
+        with contextlib.suppress(Exception):
+            from netops.settings import get_settings
+
+            settings = get_settings()
+    fab = str(getattr(settings, "default_fabric_id", "") or "").strip()
+    if fab:
+        return fab
+    repo = getattr(settings, "intent_repo_path", None)
+    if repo is not None:
+        inv_path = Path(repo) / "inventory.yaml"
+        if inv_path.is_file():
+            with contextlib.suppress(Exception):
+                raw = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                for dev in raw.get("devices") or []:
+                    f_id = str(dev.get("fabric_id") or "").strip()
+                    if f_id:
+                        return f_id
+    return "croc-dc1-pod1"
+
+
 def _simulate_offline_probe(clean_ip: str, clean_port: int) -> DeviceProbeResult:
     profiles = load_platform_profiles()
+    domain = _resolve_domain()
     platform = Platform.CISCO_IOSXE
     for plat_name, cfg in profiles.items():
         if clean_port in (cfg.get("offline_ports") or []):
@@ -135,21 +190,28 @@ def _simulate_offline_probe(clean_ip: str, clean_port: int) -> DeviceProbeResult
             except ValueError:
                 continue
     plat_cfg = profiles.get(platform.value) or {}
-    is_spine = clean_port in (2211, 2212, 2001, 2002)
+    is_spine = platform in (Platform.CISCO_IOSXE, Platform.ARISTA_EOS) and (
+        clean_port % 10 in (1, 2)
+    )
     if platform == Platform.LINUX_SERVER:
         role = DeviceRole.SERVER
-        hname = f"server-{max(1, clean_port % 10)}.croc.lab"
+        hname = f"server-{max(1, clean_port % 10)}.{domain}"
     elif is_spine:
         role = DeviceRole.SPINE
-        hname = f"spine-{clean_port % 10}.croc.lab"
+        hname = f"spine-{clean_port % 10}.{domain}"
     else:
         role = DeviceRole.LEAF
-        hname = f"leaf-{max(1, clean_port % 10)}.croc.lab"
+        hname = f"leaf-{max(1, clean_port % 10)}.{domain}"
 
     default_ifaces = (
         ["eth0", "eth1"]
         if platform == Platform.LINUX_SERVER
         else ["GigabitEthernet1", "GigabitEthernet2"]
+    )
+    ifaces = list(plat_cfg.get("offline_interfaces") or default_ifaces)
+    local_p = ifaces[-1] if ifaces else "eth1"
+    peer_host = (
+        f"leaf-1.{hname.split('.', 1)[1]}" if is_spine else f"spine-1.{hname.split('.', 1)[1]}"
     )
     return DeviceProbeResult(
         reachable=True,
@@ -160,10 +222,8 @@ def _simulate_offline_probe(clean_ip: str, clean_port: int) -> DeviceProbeResult
         cpu_cores=2,
         ram_gb=4.0,
         disk_gb=8.0,
-        interfaces=list(plat_cfg.get("offline_interfaces") or default_ifaces),
-        lldp_neighbors=[
-            {"local_port": "eth1", "neighbor": "spine-1.croc.lab", "remote_port": "eth1"}
-        ],
+        interfaces=ifaces,
+        lldp_neighbors=[{"local_port": local_p, "neighbor": peer_host, "remote_port": local_p}],
         message=f"Офлайн-режим: эмуляция узла {clean_ip}:{clean_port}",
     )
 
@@ -185,7 +245,7 @@ def _probe_tcp_banner(clean_ip: str, clean_port: int) -> tuple[bool, str]:
         return False, ""
 
 
-def _parse_ssh_hardware_specs(  # noqa: PLR0912, PLR0915
+def _parse_ssh_hardware_specs(
     conn: _ParamikoConnAdapter, initial_platform: Platform, fallback_ver: str
 ) -> tuple[Platform, str, int, float | None, float | None]:
     profiles = load_platform_profiles()
@@ -316,7 +376,7 @@ def _parse_ssh_hardware_specs(  # noqa: PLR0912, PLR0915
     return detected_platform, os_ver, cpu_cores, ram_gb, disk_gb
 
 
-def _parse_linux_interfaces(output: str) -> list[dict[str, Any]]:  # noqa: PLR0912
+def _parse_linux_interfaces(output: str) -> list[dict[str, Any]]:
     """Parse 'ip addr show' or 'ip -o addr show' into standard L3 interface intent dicts."""
     interfaces: list[dict[str, Any]] = []
     if re.search(r"^\d+:\s+\S+\s+inet\s+", output, re.MULTILINE):
@@ -428,6 +488,7 @@ def _parse_ssh_topology(
     )
 
     hostname = default_hostname
+    domain = _resolve_domain()
     run_out = conn.send_command(
         str(cmds.get("hostname_filter") or "show running-config | include hostname")
     ).result
@@ -438,14 +499,14 @@ def _parse_ssh_topology(
             "sysname",
             "include",
         ):
-            hostname = first_line if "." in first_line else f"{first_line}.croc.lab"
+            hostname = first_line if "." in first_line else f"{first_line}.{domain}"
     else:
         for hm in re.finditer(
             r"^\s*(?:hostname|sysname)\s+([A-Za-z0-9._-]+)", run_out, re.MULTILINE
         ):
             raw_h = hm.group(1).strip()
             if raw_h.lower() not in ("hostname", "sysname", "include"):
-                hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
+                hostname = raw_h if "." in raw_h else f"{raw_h}.{domain}"
                 break
         else:
             pm = re.search(r"(?:^|\n)<?([A-Za-z0-9._-]+?)(?:\([^)]*\))?[>#\]]\s*$", run_out.strip())
@@ -457,7 +518,7 @@ def _parse_ssh_topology(
                 "huawei",
             ):
                 raw_h = pm.group(1).strip()
-                hostname = raw_h if "." in raw_h else f"{raw_h}.croc.lab"
+                hostname = raw_h if "." in raw_h else f"{raw_h}.{domain}"
 
     int_cmd = str(cmds.get("interfaces_brief") or "show ip interface brief")
     interfaces = [
@@ -519,7 +580,7 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
     hostname = f"node-{clean_port}"
     os_ver = banner or detected_platform.value
     try:
-        from netops.services.telemetry import collect_metrics_from_cli  # noqa: PLC0415
+        from netops.services.telemetry import collect_metrics_from_cli
 
         with _ParamikoConnAdapter(target, timeout=12, proxy_jump=req.proxy_jump) as conn:
             detected_platform, os_ver, cpu_cores, ram_gb, disk_gb = _parse_ssh_hardware_specs(
@@ -569,30 +630,71 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
     )
 
 
-def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:  # noqa: PLR0912
+def _flush_parsed_iface(cur_if: dict[str, Any] | None, out: list[dict[str, Any]]) -> None:
+    if cur_if and not cur_if.pop("_is_mgmt", False):
+        if cur_if.get("ipv4_address") or cur_if.get("mode") == "l2":
+            out.append(cur_if)
+
+
+def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
     parsed_ifaces: list[dict[str, Any]] = []
     cur_if: dict[str, Any] | None = None
+    has_global_ospf = bool(re.search(r"^(?:router\s+)?ospf\s+\d+", cfg, re.IGNORECASE | re.MULTILINE))
     for raw_line in cfg.splitlines():
         line = raw_line.strip()
         m_if = re.match(r"^interface\s+(\S+)", line, re.IGNORECASE)
         if m_if:
-            if cur_if and cur_if.get("ipv4_address"):
-                parsed_ifaces.append(cur_if)
+            _flush_parsed_iface(cur_if, parsed_ifaces)
             if_name = m_if.group(1)
-            if not if_name.lower().startswith(("mgmt", "management", "meth", "null", "vlan")):
+            if not if_name.lower().startswith(
+                ("mgmt", "management", "meth", "null", "vlan", "nve")
+            ):
                 cur_if = {"name": if_name, "enabled": True, "mode": "l3", "mtu": 1500}
             else:
                 cur_if = None
             continue
         if cur_if is not None:
             if line.startswith(("!", "#")):
-                if cur_if.get("ipv4_address"):
-                    parsed_ifaces.append(cur_if)
+                _flush_parsed_iface(cur_if, parsed_ifaces)
                 cur_if = None
                 continue
+            if re.match(r"^shutdown$", line, re.IGNORECASE):
+                cur_if["enabled"] = False
+            elif re.match(r"^(?:no|undo)\s+shutdown$", line, re.IGNORECASE):
+                cur_if["enabled"] = True
+            if re.match(
+                r"^(?:vrf\s+forwarding|ip\s+binding\s+vpn-instance)\s+", line, re.IGNORECASE
+            ):
+                cur_if["_is_mgmt"] = True
             m_desc = re.match(r"^description\s+(.+)$", line, re.IGNORECASE)
             if m_desc:
-                cur_if["description"] = m_desc.group(1).strip()
+                desc_val = m_desc.group(1).strip()
+                cur_if["description"] = desc_val
+                if "management" in desc_val.lower():
+                    cur_if["_is_mgmt"] = True
+            m_mtu = re.match(r"^mtu\s+(\d+)", line, re.IGNORECASE)
+            if m_mtu:
+                cur_if["mtu"] = max(68, min(9216, int(m_mtu.group(1))))
+            m_vlan = re.match(
+                r"^(?:switchport\s+access\s+vlan|port\s+default\s+vlan)\s+(\d+)",
+                line,
+                re.IGNORECASE,
+            )
+            if m_vlan:
+                cur_if["mode"] = "l2"
+                cur_if["access_vlan"] = int(m_vlan.group(1))
+            m_ospf = re.match(r"^ip\s+ospf\s+(?:\d+\s+)?area\s+(\S+)", line, re.IGNORECASE)
+            if m_ospf:
+                cur_if["ospf_area"] = m_ospf.group(1)
+            elif re.match(r"^ospf\s+(?:network-type|enable)", line, re.IGNORECASE):
+                cur_if["ospf_area"] = "0.0.0.0"
+            m_acl = re.match(
+                r"^(?:ip\s+access-group\s+(\S+)\s+in|traffic-filter\s+inbound\s+acl\s+name\s+(\S+))",
+                line,
+                re.IGNORECASE,
+            )
+            if m_acl:
+                cur_if["acl_in"] = m_acl.group(1) or m_acl.group(2)
             m_cidr = re.match(r"^ip\s+address\s+(\d+\.\d+\.\d+\.\d+/\d+)", line, re.IGNORECASE)
             if m_cidr:
                 cur_if["ipv4_address"] = m_cidr.group(1)
@@ -610,9 +712,178 @@ def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:  # noqa: PLR091
                         cur_if["ipv4_address"] = f"{m_mask.group(1)}/{net.prefixlen}"
                     except ValueError:
                         pass
-    if cur_if and cur_if.get("ipv4_address"):
-        parsed_ifaces.append(cur_if)
+    _flush_parsed_iface(cur_if, parsed_ifaces)
+    if has_global_ospf:
+        for iface in parsed_ifaces:
+            if (
+                iface["name"].lower().startswith("loopback")
+                and iface.get("ipv4_address")
+                and "ospf_area" not in iface
+            ):
+                lo_ip = str(iface["ipv4_address"]).split("/")[0]
+                if f"network {lo_ip} " in cfg:
+                    iface["ospf_area"] = "0.0.0.0"
     return parsed_ifaces
+
+
+_PORT_MAP = {"bgp": 179, "ssh": 22, "telnet": 23, "snmp": 161, "www": 80, "https": 443, "domain": 53}
+
+
+def _wildcard_to_cidr(ip_str: str, wc_str: str) -> str:
+    try:
+        mask_octets = [str(255 - int(o)) for o in wc_str.split(".")]
+        net = ipaddress.IPv4Network(f"{ip_str}/{'.'.join(mask_octets)}", strict=False)
+        return str(net)
+    except Exception:
+        return "any"
+
+
+def _parse_acl_endpoint(tokens: list[str], idx: int) -> tuple[str, int]:
+    if idx >= len(tokens):
+        return "any", idx
+    tok = tokens[idx].lower()
+    if tok == "any":
+        return "any", idx + 1
+    if tok == "host" and idx + 1 < len(tokens):
+        return f"{tokens[idx + 1]}/32", idx + 2
+    if "/" in tokens[idx]:
+        return tokens[idx], idx + 1
+    if idx + 1 < len(tokens) and re.match(r"^\d+\.\d+\.\d+\.\d+$", tokens[idx + 1]):
+        return _wildcard_to_cidr(tokens[idx], tokens[idx + 1]), idx + 2
+    return "any", idx + 1
+
+
+def _parse_running_acls(cfg: str) -> list[dict[str, Any]]:
+    acls: list[dict[str, Any]] = []
+    cur_acl: dict[str, Any] | None = None
+    for raw_line in cfg.splitlines():
+        line = raw_line.strip()
+        m_head = re.match(
+            r"^(?:ip\s+access-list\s+(?:extended\s+)?(\S+)|acl\s+name\s+(\S+)\s+advance)",
+            line,
+            re.IGNORECASE,
+        )
+        if m_head:
+            if cur_acl and cur_acl["rules"]:
+                acls.append(cur_acl)
+            cur_acl = {"name": m_head.group(1) or m_head.group(2), "rules": []}
+            continue
+        if cur_acl is None:
+            continue
+        if line.startswith(("!", "#")) or re.match(
+            r"^(?:interface|router|bgp|ospf|line|snmp-server)\b", line, re.IGNORECASE
+        ):
+            if cur_acl["rules"]:
+                acls.append(cur_acl)
+            cur_acl = None
+            continue
+        m_hw = re.match(
+            r"^rule\s+(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\b(.*)$",
+            line,
+            re.IGNORECASE,
+        )
+        if m_hw:
+            seq, act, proto, rest = (
+                int(m_hw.group(1)),
+                m_hw.group(2).lower(),
+                m_hw.group(3).lower(),
+                m_hw.group(4),
+            )
+            src = "any"
+            dst = "any"
+            m_src = re.search(r"source\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", rest)
+            if m_src:
+                src = _wildcard_to_cidr(m_src.group(1), m_src.group(2))
+            m_dst = re.search(r"destination\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", rest)
+            if m_dst:
+                dst = _wildcard_to_cidr(m_dst.group(1), m_dst.group(2))
+            rule: dict[str, Any] = {
+                "sequence": seq,
+                "action": act,
+                "protocol": proto,
+                "source": src,
+                "destination": dst,
+            }
+            m_sp = re.search(r"source-port\s+eq\s+(\S+)", rest)
+            if m_sp:
+                sp_raw = m_sp.group(1).lower()
+                rule["src_port"] = _PORT_MAP.get(sp_raw) or (int(sp_raw) if sp_raw.isdigit() else None)
+            m_dp = re.search(r"destination-port\s+eq\s+(\S+)", rest)
+            if m_dp:
+                dp_raw = m_dp.group(1).lower()
+                rule["dst_port"] = _PORT_MAP.get(dp_raw) or (int(dp_raw) if dp_raw.isdigit() else None)
+            cur_acl["rules"].append(rule)
+            continue
+
+        m_cisco = re.match(
+            r"^(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\s+(.+)$",
+            line,
+            re.IGNORECASE,
+        )
+        if m_cisco:
+            seq, act, proto = (
+                int(m_cisco.group(1)),
+                m_cisco.group(2).lower(),
+                m_cisco.group(3).lower(),
+            )
+            toks = m_cisco.group(4).split()
+            src, idx = _parse_acl_endpoint(toks, 0)
+            src_port = None
+            if idx + 1 < len(toks) and toks[idx].lower() == "eq":
+                sp_raw = toks[idx + 1].lower()
+                src_port = _PORT_MAP.get(sp_raw) or (int(sp_raw) if sp_raw.isdigit() else None)
+                idx += 2
+            dst, idx = _parse_acl_endpoint(toks, idx)
+            dst_port = None
+            if idx + 1 < len(toks) and toks[idx].lower() == "eq":
+                dp_raw = toks[idx + 1].lower()
+                dst_port = _PORT_MAP.get(dp_raw) or (int(dp_raw) if dp_raw.isdigit() else None)
+            rule = {
+                "sequence": seq,
+                "action": act,
+                "protocol": proto,
+                "source": src,
+                "destination": dst,
+            }
+            if src_port:
+                rule["src_port"] = src_port
+            if dst_port:
+                rule["dst_port"] = dst_port
+            cur_acl["rules"].append(rule)
+    if cur_acl and cur_acl["rules"]:
+        acls.append(cur_acl)
+    return acls
+
+
+def _parse_bgp_announced_prefixes(cfg: str, router_id: str) -> list[str]:
+    prefixes: list[str] = []
+    in_bgp = False
+    for raw_line in cfg.splitlines():
+        line = raw_line.strip()
+        if re.match(r"^(?:router\s+bgp|bgp)\s+\d+", line, re.IGNORECASE):
+            in_bgp = True
+            continue
+        if in_bgp and re.match(r"^(?:ip\s+access-list|acl\s+name|ospf|router\s+ospf|line)\b", line, re.IGNORECASE):
+            in_bgp = False
+        if not in_bgp:
+            continue
+        m_cidr = re.match(r"^network\s+(\d+\.\d+\.\d+\.\d+/\d+)", line, re.IGNORECASE)
+        if m_cidr:
+            if m_cidr.group(1) not in prefixes:
+                prefixes.append(m_cidr.group(1))
+            continue
+        m_mask = re.match(
+            r"^network\s+(\d+\.\d+\.\d+\.\d+)\s+(?:mask\s+)?(\d+\.\d+\.\d+\.\d+)",
+            line,
+            re.IGNORECASE,
+        )
+        if m_mask and m_mask.group(2) != "0.0.0.0":
+            with contextlib.suppress(ValueError):
+                net = ipaddress.IPv4Network(f"{m_mask.group(1)}/{m_mask.group(2)}", strict=False)
+                cidr = str(net)
+                if cidr not in prefixes:
+                    prefixes.append(cidr)
+    return prefixes or [f"{router_id}/32"]
 
 
 def _parse_brownfield_intent_from_config(
@@ -641,7 +912,17 @@ def _parse_brownfield_intent_from_config(
 
     asn = int(m_asn.group(1))
     m_rid = re.search(r"(?:bgp\s+router-id|router-id)\s+(\d+\.\d+\.\d+\.\d+)", cfg, re.IGNORECASE)
-    router_id = m_rid.group(1) if m_rid else parsed_ifaces[0]["ipv4_address"].split("/")[0]
+    l3_ips = [str(i["ipv4_address"]).split("/")[0] for i in parsed_ifaces if i.get("ipv4_address")]
+    router_id = m_rid.group(1) if m_rid else (l3_ips[0] if l3_ips else "10.255.0.1")
+
+    announced = _parse_bgp_announced_prefixes(cfg, router_id)
+    peer_descriptions: dict[str, str] = {}
+    for m_desc in re.finditer(
+        r"(?:neighbor|peer)\s+(\d+\.\d+\.\d+\.\d+)\s+description\s+([^\r\n]+)",
+        cfg,
+        re.IGNORECASE,
+    ):
+        peer_descriptions[m_desc.group(1)] = m_desc.group(2).strip().strip('"')
 
     neighbors: list[dict[str, Any]] = []
     seen_peers: set[str] = set()
@@ -657,22 +938,37 @@ def _parse_brownfield_intent_from_config(
                 {
                     "peer_ip": peer_ip,
                     "remote_asn": int(m_nb.group(2)),
-                    "description": "fabric-peer",
-                    "announced_prefixes": [f"{router_id}/32"],
+                    "description": peer_descriptions.get(peer_ip, "fabric-peer"),
+                    "announced_prefixes": list(announced),
                 }
             )
     if not neighbors:
         return None
 
+    parsed_acls = _parse_running_acls(cfg)
+    known_acl_names = {a["name"] for a in parsed_acls}
+    for iface in parsed_ifaces:
+        if iface.get("acl_in") and iface["acl_in"] not in known_acl_names:
+            iface.pop("acl_in", None)
+
+    bgp_dict: dict[str, Any] = {"asn": asn, "router_id": router_id, "neighbors": neighbors}
+    if re.search(r"(?:address-family\s+(?:l2vpn\s+)?evpn|l2vpn-family\s+evpn)", cfg, re.IGNORECASE):
+        bgp_dict["evpn"] = True
+    m_vni = re.search(
+        r"(?:\bvni\s+(\d+)(?:\s+head-end)?|\bvxlan\s+vni\s+(\d+))", cfg, re.IGNORECASE
+    )
+    if m_vni:
+        bgp_dict["vxlan_vni"] = int(m_vni.group(1) or m_vni.group(2))
+
     return {
         "hostname": hostname,
         "interfaces": parsed_ifaces,
-        "bgp": {"asn": asn, "router_id": router_id, "neighbors": neighbors},
-        "acls": [],
+        "bgp": bgp_dict,
+        "acls": parsed_acls,
     }
 
 
-def discover_live_switch_via_ssh(  # noqa: PLR0915
+def discover_live_switch_via_ssh(
     host: str,
     port: int,
     username: str,
@@ -682,28 +978,44 @@ def discover_live_switch_via_ssh(  # noqa: PLR0915
     default_role: str = "",
     candidate_passwords: list[str] | None = None,
     passwords_by_platform: dict[str, str] | None = None,
+    initial_platform: Platform | None = None,
 ) -> dict[str, Any] | None:
     """Probe TCP banner, connect via SSH, extract live identity.
 
     Extracts running-config and brownfield intent.
     """
-    reachable, banner = _probe_tcp_banner(host, port)
-    if not reachable or not banner:
-        return None
-
     profiles = load_platform_profiles(getattr(settings, "intent_repo_path", None))
-    detected_platform = detect_platform_from_banner(banner, profiles)
+    if initial_platform is not None:
+        reachable = True
+        banner = f"SSH-2.0-{initial_platform.value}"
+        detected_platform = initial_platform
+    else:
+        reachable, banner = _probe_tcp_banner(host, port)
+        if not reachable or not banner:
+            return None
+        detected_platform = detect_platform_from_banner(banner, profiles)
 
     plat_cfg = profiles.get(detected_platform.value) or {}
 
     default_pw = str(plat_cfg.get("default_password") or "admin")
     plat_pw = (passwords_by_platform or {}).get(detected_platform.value, "")
+    non_admin_cands = [p for p in (candidate_passwords or []) if p and p != "admin"]
     pw_candidates: list[str] = []
-    for pw in (plat_pw, password, *(candidate_passwords or []), default_pw, "admin"):
+    for pw in (
+        *([plat_pw] if plat_pw and plat_pw != "admin" else []),
+        *([password] if password and password != "admin" else []),
+        *non_admin_cands,
+        plat_pw,
+        password,
+        *(candidate_passwords or []),
+        default_pw,
+        "admin",
+    ):
         if pw and pw not in pw_candidates:
             pw_candidates.append(pw)
 
-    fallback_host = default_hostname or f"node-{port}.croc.lab"
+    domain = _resolve_domain(settings)
+    fallback_host = default_hostname or f"node-{port}.{domain}"
     os_ver = banner or detected_platform.value
     running_config = ""
     used_pw = pw_candidates[0] if pw_candidates else "admin"
@@ -715,7 +1027,7 @@ def discover_live_switch_via_ssh(  # noqa: PLR0915
     lldp_neighbors: list[dict[str, Any]] = []
     hostname = fallback_host
 
-    from netops.services.telemetry import collect_metrics_from_cli  # noqa: PLC0415
+    from netops.services.telemetry import collect_metrics_from_cli
 
     for pw in pw_candidates:
         target = DeviceTarget(
@@ -760,7 +1072,11 @@ def discover_live_switch_via_ssh(  # noqa: PLR0915
     auth_profile = f"{short_stem}_auth"
     _persist_custom_auth(settings, auth_profile, username or "admin", used_pw)
 
-    if not _is_protected_repo_path(settings.offline_lab_path) and running_config.strip():
+    if (
+        settings.network_driver == "offline"
+        and not _is_protected_repo_path(settings.offline_lab_path)
+        and running_config.strip()
+    ):
         cfg_file = settings.offline_lab_path / f"{hostname}.cfg"
         cfg_file.parent.mkdir(parents=True, exist_ok=True)
         cfg_file.write_text(running_config, encoding="utf-8")
@@ -769,34 +1085,35 @@ def discover_live_switch_via_ssh(  # noqa: PLR0915
         devices_dir = settings.intent_repo_path / "devices"
         devices_dir.mkdir(parents=True, exist_ok=True)
         intent_file = devices_dir / f"{hostname}.yaml"
-        intent_data = _parse_brownfield_intent_from_config(
-            hostname, running_config, detected_platform
-        )
-        if intent_data is not None:
-            try:
-                DeviceIntent.model_validate(intent_data)
-            except Exception:
-                intent_data = None
-        if intent_data is None and not intent_file.is_file():
-            dummy_dev = Device(
-                id=port % 100,
-                hostname=hostname,
-                management_ip=host,
-                management_port=port,
-                platform=detected_platform,
-                role=(
-                    DeviceRole.SERVER
-                    if role == "server"
-                    else (DeviceRole.SPINE if role == "spine" else DeviceRole.LEAF)
-                ),
-                auth_profile=auth_profile,
+        if not intent_file.is_file():
+            intent_data = _parse_brownfield_intent_from_config(
+                hostname, running_config, detected_platform
             )
-            intent_data = _build_default_device_intent(dummy_dev)
-        if intent_data is not None:
-            intent_file.write_text(
-                yaml.safe_dump(intent_data, sort_keys=False, allow_unicode=True),
-                encoding="utf-8",
-            )
+            if intent_data is not None:
+                try:
+                    DeviceIntent.model_validate(intent_data)
+                except Exception:
+                    intent_data = None
+            if intent_data is None:
+                dummy_dev = Device(
+                    id=port % 100,
+                    hostname=hostname,
+                    management_ip=host,
+                    management_port=port,
+                    platform=detected_platform,
+                    role=(
+                        DeviceRole.SERVER
+                        if role == "server"
+                        else (DeviceRole.SPINE if role == "spine" else DeviceRole.LEAF)
+                    ),
+                    auth_profile=auth_profile,
+                )
+                intent_data = _build_default_device_intent(dummy_dev)
+            if intent_data is not None:
+                intent_file.write_text(
+                    yaml.safe_dump(intent_data, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8",
+                )
 
     return {
         "hostname": hostname,
@@ -931,29 +1248,25 @@ def _persist_custom_auth(settings: Any, profile_name: str, username: str, passwo
     settings.auth_profiles[profile_name] = AuthProfile(
         username=username, password=SecretStr(password)
     )
-    if _is_protected_repo_path(settings.offline_lab_path):
-        return
     try:
-        custom_auth_file = settings.offline_lab_path / "custom_auth_profiles.json"
-        custom_auth_file.parent.mkdir(parents=True, exist_ok=True)
-        lock_file = custom_auth_file.with_suffix(".lock")
-        with open(lock_file, "w", encoding="utf-8") as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            try:
-                existing_profiles = {}
-                if custom_auth_file.is_file():
-                    existing_profiles = json.loads(custom_auth_file.read_text(encoding="utf-8"))
-                existing_profiles[profile_name] = {"username": username, "password": password}
-                custom_auth_file.write_text(
-                    json.dumps(existing_profiles, ensure_ascii=False, indent=2), encoding="utf-8"
-                )
-            finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+        from netops.services.state import get_state_manager
+
+        state = get_state_manager(settings)
+        loaded = state.get_db_state(
+            "custom_auth_profiles", {}, database_url=getattr(settings, "database_url", None)
+        )
+        existing_profiles = dict(loaded) if isinstance(loaded, dict) else {}
+        existing_profiles[profile_name] = {"username": username, "password": password}
+        state.set_db_state(
+            "custom_auth_profiles",
+            existing_profiles,
+            database_url=getattr(settings, "database_url", None),
+        )
     except Exception:
         pass
 
 
-def bind_device_to_sot(  # noqa: PLR0912, PLR0915
+def bind_device_to_sot(
     data: DeviceCreate, device: Device, container: Any
 ) -> None:
     """Persist custom SSH credentials and generate baseline Git SoT intent if missing."""
@@ -996,57 +1309,55 @@ def bind_device_to_sot(  # noqa: PLR0912, PLR0915
             encoding="utf-8",
         )
 
-    for inv_name in ("inventory.yaml", "inventory.live.yaml"):
-        inv_path = settings.intent_repo_path / inv_name
-        if not inv_path.is_file():
-            continue
-        lock_path = inv_path.with_suffix(".lock")
-        try:
-            with open(lock_path, "w", encoding="utf-8") as lf:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-                try:
-                    raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-                    dev_list = raw_inv.get("devices") or []
-                    if not any(d.get("hostname") == device.hostname for d in dev_list):
-                        dev_fabric = (
-                            getattr(device, "fabric_id", "croc-dc1-pod1") or "croc-dc1-pod1"
-                        )
-                        dev_site = getattr(device, "site", None) or dev_fabric
-                        dev_list.append(
-                            {
-                                "hostname": device.hostname,
-                                "management_ip": str(device.management_ip),
-                                "management_port": int(device.management_port),
-                                "platform": device.platform.value,
-                                "role": device.role.value,
-                                "auth_profile": device.auth_profile,
-                                "fabric_id": dev_fabric,
-                                "site": dev_site,
-                            }
-                        )
-                        raw_inv["devices"] = dev_list
-                        inv_path.write_text(
-                            yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
-                            encoding="utf-8",
-                        )
-                finally:
-                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
+    with _SOT_INV_LOCK:
+        inv_path = settings.intent_repo_path / "inventory.yaml"
+        if inv_path.is_file():
+            lock_path = inv_path.with_suffix(".lock")
+            try:
+                with open(lock_path, "a+", encoding="utf-8") as lf:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                    try:
+                        raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                        dev_list = raw_inv.get("devices") or []
+                        if not any(d.get("hostname") == device.hostname for d in dev_list):
+                            default_fab = _resolve_fabric_id(settings)
+                            dev_fabric = (
+                                getattr(device, "fabric_id", default_fab) or default_fab
+                            )
+                            dev_site = getattr(device, "site", None) or dev_fabric
+                            dev_list.append(
+                                {
+                                    "hostname": device.hostname,
+                                    "management_ip": str(device.management_ip),
+                                    "management_port": int(device.management_port),
+                                    "platform": device.platform.value,
+                                    "role": device.role.value,
+                                    "auth_profile": device.auth_profile,
+                                    "fabric_id": dev_fabric,
+                                    "site": dev_site,
+                                }
+                            )
+                            raw_inv["devices"] = dev_list
+                            inv_path.write_text(
+                                yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
+                                encoding="utf-8",
+                            )
+                    finally:
+                        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
 
 
 def remove_device_from_sot(
     hostname: str, intent_repo_path: Path, offline_lab_path: Path | None = None
 ) -> None:
-    from netops.services.telemetry import clear_live_metrics  # noqa: PLC0415
+    from netops.services.telemetry import clear_live_metrics
 
     clear_live_metrics(hostname)
     if _is_protected_repo_path(intent_repo_path):
         return
     for extra_file in (
         intent_repo_path / "devices" / f"{hostname}.yaml",
-        intent_repo_path / "diffs" / f"{hostname}.intended.cfg",
-        intent_repo_path / "diffs" / f"{hostname}.remediation.patch",
         *(
             [offline_lab_path / f"{hostname}.cfg"]
             if offline_lab_path is not None and not _is_protected_repo_path(offline_lab_path)
@@ -1058,28 +1369,27 @@ def remove_device_from_sot(
                 extra_file.unlink()
         except Exception:
             pass
-    for inv_name in ("inventory.yaml", "inventory.live.yaml"):
-        inv_path = intent_repo_path / inv_name
-        if not inv_path.is_file():
-            continue
-        lock_path = inv_path.with_suffix(".lock")
-        try:
-            with open(lock_path, "w", encoding="utf-8") as lf:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-                try:
-                    raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-                    dev_list = raw_inv.get("devices") or []
-                    filtered = [d for d in dev_list if d.get("hostname") != hostname]
-                    if len(filtered) != len(dev_list):
-                        raw_inv["devices"] = filtered
-                        inv_path.write_text(
-                            yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
-                            encoding="utf-8",
-                        )
-                finally:
-                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
-        except Exception:
-            pass
+    with _SOT_INV_LOCK:
+        inv_path = intent_repo_path / "inventory.yaml"
+        if inv_path.is_file():
+            lock_path = inv_path.with_suffix(".lock")
+            try:
+                with open(lock_path, "a+", encoding="utf-8") as lf:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+                    try:
+                        raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                        dev_list = raw_inv.get("devices") or []
+                        filtered = [d for d in dev_list if d.get("hostname") != hostname]
+                        if len(filtered) != len(dev_list):
+                            raw_inv["devices"] = filtered
+                            inv_path.write_text(
+                                yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
+                                encoding="utf-8",
+                            )
+                    finally:
+                        fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
 
 
 def _emergency_cli_command(platform: Platform, action: str) -> str:
@@ -1094,7 +1404,7 @@ def execute_device_emergency_action(
     container: Any,
     actor_username: str,
 ) -> dict[str, Any]:
-    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+    from netops.services.ai_guard import AiTelemetryGuard
 
     AiTelemetryGuard.inject_anomaly(device.hostname, "clear")
     output = ""
@@ -1105,15 +1415,20 @@ def execute_device_emergency_action(
             container.settings.offline_lab_path
         ):
             try:
-                intent = toolchain.intent_repo.load_device(device.hostname)
-                rendered = toolchain.renderer.render(device.platform, intent)
-                cfg_file = container.settings.offline_lab_path / f"{device.hostname}.cfg"
-                cfg_file.parent.mkdir(parents=True, exist_ok=True)
-                cfg_file.write_text(rendered, encoding="utf-8")
-                output = (
-                    f"Restored {device.hostname}.cfg to Git SoT baseline "
-                    f"({len(rendered.splitlines())} lines)"
-                )
+                intent = toolchain.intents.load().intent_for(device.hostname)
+                if intent is not None:
+                    rendered = toolchain.renderer.render(
+                        InventoryDevice.model_validate(device), intent
+                    )
+                    cfg_file = container.settings.offline_lab_path / f"{device.hostname}.cfg"
+                    cfg_file.parent.mkdir(parents=True, exist_ok=True)
+                    cfg_file.write_text(rendered, encoding="utf-8")
+                    output = (
+                        f"Restored {device.hostname}.cfg to Git SoT baseline "
+                        f"({len(rendered.splitlines())} lines)"
+                    )
+                else:
+                    output = f"Offline rollback skipped: no Git intent found for {device.hostname}"
             except Exception as exc:
                 output = f"Offline rollback completed ({exc})"
         else:
@@ -1130,25 +1445,18 @@ def execute_device_emergency_action(
                 detail=f"SSH ошибка при выполнении '{data.action}' на {device.hostname}: {exc}",
             ) from exc
 
-    audit_path = container.settings.offline_lab_path / "emergency_audit.jsonl"
-    entry = {
-        "timestamp": datetime.now(UTC).isoformat(),
-        "actor": actor_username,
-        "user": actor_username,
-        "device": device.hostname,
-        "device_id": device.id,
-        "action": data.action,
-        "payload": cmd,
-        "reason": data.reason,
-        "status": "EXECUTED",
-        "success": True,
-        "output": output[:200],
-        "output_preview": output[:200],
-    }
-    if not _is_protected_repo_path(audit_path):
-        audit_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(audit_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    from netops.api.routes.emergency import record_audit
+
+    entry = record_audit(
+        user=actor_username,
+        action=data.action,
+        device=device.hostname,
+        payload=cmd,
+        reason=data.reason,
+        success=True,
+        output=output,
+        settings=container.settings,
+    )
 
     return {
         "status": "SUCCESS",

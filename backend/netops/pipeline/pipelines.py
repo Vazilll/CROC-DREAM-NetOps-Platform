@@ -67,7 +67,7 @@ class _BasePipeline:
 
     def _auto_commit_diff_to_git(self, job: Job) -> None:
         try:
-            from netops.services.git_sot import git_commit_and_push_diff  # noqa: PLC0415
+            from netops.services.git_sot import git_commit_and_push_diff
 
             repo_root = getattr(self._toolchain.intents, "root", None)
             if repo_root is None:
@@ -105,7 +105,7 @@ class DryRunPipeline(_BasePipeline):
             else:
                 row.mark(TargetStatus.SUCCESS)
         self._session.commit()
-        self._auto_commit_diff_to_git(job)
+
 
 
 def order_targets_into_waves(targets: list[JobTarget]) -> list[tuple[str, list[JobTarget]]]:
@@ -190,20 +190,21 @@ class DeployPipeline(_BasePipeline):
 
 class DriftScanPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
-        from netops.services.state import get_state_manager  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
         state_mgr = get_state_manager()
         pairs = []
         for row, device in self._live_targets(job):
             locked = False
-            if device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"):
-                locked = True
-            elif state_mgr.is_sync_locked(f"device:{device.hostname}"):
-                locked = True
-            elif getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"):
+            if (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}")) or state_mgr.is_sync_locked(f"device:{device.hostname}") or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}")):
                 locked = True
 
             if locked:
+                self._recorder.warning(
+                    "lock",
+                    "Skipped: target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
+                    hostname=device.hostname,
+                )
                 row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
                 continue
 
@@ -264,18 +265,19 @@ class DriftRemediationPipeline(_BasePipeline):
         if not pairs:
             raise PipelineError("The device to remediate no longer exists")
 
-        from netops.services.state import get_state_manager  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
         state_mgr = get_state_manager()
         for row, device in pairs:
             locked = False
-            if device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"):
-                locked = True
-            elif state_mgr.is_sync_locked(f"device:{device.hostname}"):
-                locked = True
-            elif getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"):
+            if (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}")) or state_mgr.is_sync_locked(f"device:{device.hostname}") or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}")):
                 locked = True
             if locked:
+                self._recorder.warning(
+                    "lock",
+                    "Skipped: target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
+                    hostname=device.hostname,
+                )
                 row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
                 return
 

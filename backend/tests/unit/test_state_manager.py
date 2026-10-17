@@ -121,17 +121,6 @@ def test_sync_lock_expiration():
     assert mgr.is_sync_locked(target) is True
 
 
-def test_sync_lock_multiple_targets_and_listing():
-    mgr = StateManager(enable_redis=False)
-    mgr.acquire_sync_lock("device:1", holder="worker-1", ttl=60)
-    mgr.acquire_sync_lock("device:2", holder="worker-2", ttl=60)
-    mgr.acquire_sync_lock("fabric:stand-a", holder="worker-3", ttl=60)
-
-    locks = mgr.list_active_sync_locks()
-    targets = {lock["target"] for lock in locks}
-    assert targets == {"device:1", "device:2", "fabric:stand-a"}
-
-
 def test_telemetry_cache():
     mgr = StateManager(enable_redis=False)
 
@@ -149,18 +138,8 @@ def test_telemetry_cache():
     assert len(all_series) == 5
     assert all_series == [20.0, 25.5, 30.0, 35.0, 40.0]
 
-    # Explicit set & get all
-    mgr.set_telemetry_series("leaf-2", "uplink_util_pct", [50.0, 60.0])
-    all_telemetry = mgr.get_all_telemetry()
-    assert "leaf-1" in all_telemetry
-    assert "leaf-2" in all_telemetry
-    assert all_telemetry["leaf-2"]["uplink_util_pct"] == [50.0, 60.0]
-
-    # Clear specific host and clear all
-    mgr.clear_telemetry("leaf-2")
-    assert "leaf-2" not in mgr.get_all_telemetry()
     mgr.clear_telemetry()
-    assert mgr.get_all_telemetry() == {}
+    assert mgr.get_telemetry_series("leaf-1", "cpu_pct", points=10) == []
 
 
 def test_git_sot_meta_cache():
@@ -182,9 +161,6 @@ def test_rendered_template_cache():
     assert mgr.get_rendered_template("key1") is None
     mgr.set_rendered_template("key1", "hostname leaf-1\n", ttl=300)
     assert mgr.get_rendered_template("key1") == "hostname leaf-1\n"
-
-    mgr.clear_rendered_templates()
-    assert mgr.get_rendered_template("key1") is None
 
 
 def test_factory_freeze_state():

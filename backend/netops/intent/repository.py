@@ -222,8 +222,6 @@ class IntentRepository:
                     )
                     for hostname in sorted(intents.keys() - known)
                 )
-            else:
-                intents = {k: v for k, v in intents.items() if k in known}
 
         if fabric_id is not None:
             scoped_hostnames = (

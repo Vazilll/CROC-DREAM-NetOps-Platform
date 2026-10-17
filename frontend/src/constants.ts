@@ -5,13 +5,21 @@ import {
   FlaskConical,
   Layers,
   ShieldCheck,
+  ShieldAlert,
   Terminal,
 } from 'lucide-react';
 
 export interface TabItem {
   groupKey: 'overview' | 'inventory' | 'automation' | 'testing';
   id: string;
-  labelKey: 'tabDashboard' | 'tabDevices' | 'tabJobs' | 'tabDiff' | 'tabDrift' | 'tabLab';
+  labelKey:
+    | 'tabDashboard'
+    | 'tabDevices'
+    | 'tabJobs'
+    | 'tabDiff'
+    | 'tabDrift'
+    | 'tabLab'
+    | 'tabEmergency';
   Icon: React.ComponentType<{ className?: string }>;
 }
 
@@ -22,6 +30,7 @@ export const TAB_DEFINITIONS: TabItem[] = [
   { groupKey: 'automation', id: 'diff', labelKey: 'tabDiff', Icon: Terminal },
   { groupKey: 'automation', id: 'drift', labelKey: 'tabDrift', Icon: ShieldCheck },
   { groupKey: 'testing', id: 'lab', labelKey: 'tabLab', Icon: FlaskConical },
+  { groupKey: 'testing', id: 'emergency', labelKey: 'tabEmergency', Icon: ShieldAlert },
 ];
 
 export const PLATFORM_NAMES: Record<string, string> = {

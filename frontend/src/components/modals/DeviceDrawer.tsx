@@ -381,7 +381,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-semibold text-white flex items-center gap-1.5">
                           <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Нагрузка на узел (24 точки замера)</span>
+                          <span>Нагрузка на аплинк ({device.sparkline?.length || 24} точек замера)</span>
                         </span>
                         <span className="font-mono text-[11px] text-zinc-400">
                           {device.sparkline && device.sparkline.length > 0

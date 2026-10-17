@@ -267,7 +267,7 @@ def _report(title: str, ok: bool, detail: str) -> None:
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Smoke-тест стека NetOps в docker compose")
-    parser.add_argument("--api", default=f"http://localhost:{os.environ.get('API_PORT', '8000')}")
+    parser.add_argument("--api", default=f"http://localhost:{os.environ.get('API_PORT', '8001')}")
     parser.add_argument(
         "--token",
         default=os.environ.get("NETOPS_SMOKE_TOKEN", "dev-admin-token"),

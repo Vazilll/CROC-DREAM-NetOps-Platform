@@ -196,7 +196,7 @@ class DeploymentExecutor:
 
         # Two-Phase Rollback Protection: engage sync_lock on rolled-back device & fabric
         try:
-            from netops.services.state import get_state_manager  # noqa: PLC0415
+            from netops.services.state import get_state_manager
 
             state_mgr = get_state_manager()
             job_id_str = getattr(plan, "job_id", None) or "rollback"

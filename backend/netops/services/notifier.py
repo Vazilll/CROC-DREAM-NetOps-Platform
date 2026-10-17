@@ -11,126 +11,59 @@ import json
 import logging
 import urllib.error
 import urllib.request
+from datetime import UTC
 from typing import Any
-
-from pathlib import Path
 
 from netops.settings import Settings
 
 logger = logging.getLogger("netops.notifier")
 
-KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {
-    7325469808: {
-        "username": "owner",
-        "tg_username": "Vazusss",
-        "first_name": "Максим",
-        "role": "owner",
-    },
-    339250369: {
-        "username": "timofey",
-        "tg_username": "lelaksi",
-        "first_name": "Tim Ruk",
-        "role": "admin",
-    },
-}
-
-
-def load_telegram_profiles(settings: Settings | None = None) -> dict[int, dict[str, str]]:
-    """Dynamically load telegram notification recipient profiles from runtime storage or fallback."""
-    rt_file = _runtime_dir(settings) / "telegram_profiles.json"
-    if rt_file.is_file():
-        try:
-            raw = json.loads(rt_file.read_text(encoding="utf-8"))
-            if isinstance(raw, dict):
-                return {int(k): v for k, v in raw.items() if isinstance(v, dict)}
-        except Exception:
-            pass
-    return dict(KNOWN_TELEGRAM_PROFILES)
-
-
-
-def _runtime_dir(settings: Settings | None = None) -> Path:
-    import os  # noqa: PLC0415
-    import tempfile  # noqa: PLC0415
-
-    default_lab = (Path(__file__).resolve().parents[3] / "lab" / "running").resolve()
-    if settings is not None:
-        resolved = settings.offline_lab_path.resolve()
-        if "PYTEST_CURRENT_TEST" in os.environ and resolved == default_lab:
-            return Path(tempfile.gettempdir()) / "netops_pytest_runtime"
-        return settings.offline_lab_path
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return Path(tempfile.gettempdir()) / "netops_pytest_runtime"
-    return default_lab
-
-
-def _subscribers_files(settings: Settings) -> list[Path]:
-    return [_runtime_dir(settings) / "telegram_subscribers.json"]
-
-
-def _atomic_write_json(path: Path, data: Any) -> None:
-    import os  # noqa: PLC0415
-    import tempfile  # noqa: PLC0415
-
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        payload = json.dumps(data, indent=2, ensure_ascii=False)
-        fd, tmp_path = tempfile.mkstemp(
-            dir=str(path.parent), prefix=f".{path.name}.", suffix=".tmp"
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(payload)
-            os.replace(tmp_path, path)
-        except Exception:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
-            path.write_text(payload, encoding="utf-8")
-    except Exception:
-        pass
-
-
-def _tokens_file(settings: Settings | None = None) -> Path:
-    return _runtime_dir(settings) / "user_tokens.json"
+KNOWN_TELEGRAM_PROFILES: dict[int, dict[str, str]] = {}
 
 
 def load_user_tokens(settings: Settings | None = None) -> dict[str, str]:
-    path = _tokens_file(settings)
-    if not path.is_file():
-        return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str) and v}
-    except Exception:
-        pass
-    return {}
+    from netops.services.state import get_state_manager
+
+    sm = get_state_manager(settings)
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    merged: dict[str, str] = {}
+    db_data = sm.get_db_state("user_tokens", {}, database_url=db_url)
+    if isinstance(db_data, dict):
+        for k, v in db_data.items():
+            if isinstance(k, str) and isinstance(v, str) and v:
+                merged[k] = v
+    data = sm.get_json("auth:user_tokens")
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(k, str) and isinstance(v, str) and v:
+                merged[k] = v
+    return merged
 
 
 def save_user_token(username: str, token: str, settings: Settings | None = None) -> None:
+    from netops.services.state import get_state_manager
+
+    sm = get_state_manager(settings)
     current = load_user_tokens(settings)
     current[username] = token
-    _atomic_write_json(_tokens_file(settings), current)
-
-
-def _tg_bindings_file(settings: Settings | None = None) -> Path:
-    return _runtime_dir(settings) / "telegram_bindings.json"
+    sm.set_json("auth:user_tokens", current, ex=86400)
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    sm.set_db_state("user_tokens", current, database_url=db_url)
 
 
 def load_telegram_bindings(settings: Settings | None = None) -> dict[str, dict[str, Any]]:
+    from netops.services.state import get_state_manager
+
     merged: dict[str, dict[str, Any]] = {}
-    path = _tg_bindings_file(settings)
-    if path.is_file():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                for k, v in data.items():
-                    if isinstance(v, dict):
-                        merged[str(k)] = {**merged.get(str(k), {}), **v}
-        except Exception:
-            pass
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    data = get_state_manager(settings).get_db_state(
+        "telegram_bindings", {}, database_url=db_url
+    )
+    if isinstance(data, dict):
+        for k, v in data.items():
+            if isinstance(v, dict):
+                clean = {kk: vv for kk, vv in v.items() if kk != "token"}
+                merged[str(k)] = {**merged.get(str(k), {}), **clean}
     return merged
 
 
@@ -139,53 +72,34 @@ def save_telegram_binding(
     info: dict[str, Any],
     settings: Settings | None = None,
 ) -> None:
+    from netops.services.state import get_state_manager
+
     current = load_telegram_bindings(settings)
     key = str(chat_id)
-    current[key] = {**current.get(key, {}), "chat_id": chat_id, **info}
-    _atomic_write_json(_tg_bindings_file(settings), current)
-
-
-def _registry_files(settings: Settings | None = None) -> list[Path]:
-    return [_runtime_dir(settings) / "access_registry.json"]
+    clean_info = {k: v for k, v in info.items() if k != "token"}
+    current[key] = {**current.get(key, {}), "chat_id": chat_id, **clean_info}
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    get_state_manager(settings).set_db_state(
+        "telegram_bindings", current, database_url=db_url
+    )
 
 
 def load_access_registry(settings: Settings | None = None) -> dict[str, Any]:
-    import os  # noqa: PLC0415
+    from netops.services.state import get_state_manager
 
-    clab_host = (
-        (settings.clab_host if settings and settings.clab_host else None)
-        or os.getenv("NETOPS_CLAB_HOST")
-        or "localhost"
-    )
-    default_reg: dict[str, Any] = {
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    sm = get_state_manager(settings)
+    events = sm.get_db_state("auth:security_events", None, database_url=db_url)
+    if not isinstance(events, list):
+        events = sm.get_json("auth:security_events")
+    return {
         "updated_at": None,
         "system_info": {},
         "participants": [],
-        "telegram_bindings": {},
-        "systems": [
-            {"id": "*", "label": "Вся фабрика CLOS (все узлы)"},
-            {"id": "online-ssh", "label": f"Контур ONLINE SSH (Containerlab {clab_host})"},
-            {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
-        ],
-        "security_events": [],
+        "telegram_bindings": load_telegram_bindings(settings),
+        "systems": [{"id": "*", "label": "Вся фабрика CLOS (все узлы)"}],
+        "security_events": events if isinstance(events, list) else [],
     }
-    for path in _registry_files(settings):
-        if path.is_file():
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-                if isinstance(data, dict):
-                    return {**default_reg, **data}
-            except Exception:
-                pass
-    return default_reg
-
-
-def save_access_registry(registry: dict[str, Any], settings: Settings | None = None) -> None:
-    from datetime import datetime, timezone  # noqa: PLC0415
-
-    registry["updated_at"] = datetime.now(timezone.utc).isoformat()
-    for path in _registry_files(settings):
-        _atomic_write_json(path, registry)
 
 
 def record_security_event(
@@ -199,12 +113,18 @@ def record_security_event(
     severity: str = "warning",
     settings: Settings | None = None,
 ) -> dict[str, Any]:
-    from datetime import datetime, timezone  # noqa: PLC0415
+    from datetime import datetime
 
-    reg = load_access_registry(settings)
-    events = list(reg.get("security_events") or [])
+    from netops.services.state import get_state_manager
+
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    state = get_state_manager(settings)
+    events = state.get_db_state("auth:security_events", None, database_url=db_url)
+    if not isinstance(events, list):
+        events = state.get_json("auth:security_events")
+    ev_list = list(events) if isinstance(events, list) else []
     entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "type": event_type,
         "severity": severity,
         "message": message,
@@ -213,128 +133,44 @@ def record_security_event(
         "client_ip": client_ip,
         "telegram_chat_id": str(telegram_chat_id) if telegram_chat_id is not None else None,
     }
-    events.insert(0, entry)
-    reg["security_events"] = events[:100]
-    save_access_registry(reg, settings)
+    ev_list.insert(0, entry)
+    trimmed = ev_list[:50]
+    state.set_json("auth:security_events", trimmed, ex=86400)
+    state.set_db_state("auth:security_events", trimmed, database_url=db_url)
     return entry
 
 
 def sync_access_registry(session: Any, settings: Settings | None = None) -> dict[str, Any]:
-    import os  # noqa: PLC0415
-    from datetime import datetime, timezone  # noqa: PLC0415
-    from sqlalchemy import select  # noqa: PLC0415
-    from netops.models import Device, User  # noqa: PLC0415
-
-    clab_host = (
-        (settings.clab_host if settings and settings.clab_host else None)
-        or os.getenv("NETOPS_CLAB_HOST")
-        or "localhost"
-    )
-    reg = load_access_registry(settings)
-    tokens = load_user_tokens(settings)
-    tg_bindings = load_telegram_bindings(settings)
-    tg_by_user = {
-        str(v.get("username")): v for v in tg_bindings.values() if isinstance(v, dict) and v.get("username")
-    }
-    now = datetime.now(timezone.utc)
-    users = list(session.scalars(select(User).order_by(User.id)).all())
-    participants: list[dict[str, Any]] = []
-    for u in users:
-        exp = getattr(u, "expires_at", None)
-        exp_aware = exp.replace(tzinfo=timezone.utc) if (exp and exp.tzinfo is None) else exp
-        is_expired = bool(exp_aware and now >= exp_aware)
-        tg_info = tg_by_user.get(u.username, {})
-        tg_cid = getattr(u, "telegram_chat_id", None) or (
-            str(tg_info["chat_id"]) if tg_info.get("chat_id") else None
-        )
-        tg_uname = getattr(u, "telegram_username", None) or tg_info.get("tg_username")
-        tg_ver_at = getattr(u, "telegram_verified_at", None)
-        v_code = getattr(u, "verification_code", None)
-        v_exp = getattr(u, "verification_expires_at", None)
-        participants.append(
-            {
-                "id": u.id,
-                "username": u.username,
-                "role": u.role.value,
-                "is_active": bool(u.is_active),
-                "token": tokens.get(u.username),
-                "token_sha256": u.token_sha256,
-                "expires_at": exp_aware.isoformat() if exp_aware else None,
-                "ttl_policy": "temporary" if exp_aware else "forever",
-                "is_expired": is_expired,
-                "allowed_system": u.allowed_system or "*",
-                "telegram": {
-                    "chat_id": tg_cid,
-                    "username": tg_uname,
-                    "verified": bool(tg_cid and (tg_ver_at or u.username in ("tarhes-browser", "timofey"))),
-                    "verified_at": tg_ver_at.isoformat() if tg_ver_at else None,
-                    "verification_code": v_code,
-                    "verification_expires_at": v_exp.isoformat() if v_exp else None,
-                },
-                "device_binding": {
-                    "bound_client_id": u.bound_client_id,
-                    "bound_ip": u.bound_ip,
-                    "bound_user_agent": u.bound_user_agent,
-                    "bound_at": u.bound_at.isoformat() if u.bound_at else None,
-                    "last_seen_at": u.last_seen_at.isoformat() if u.last_seen_at else None,
-                },
-                "created_at": u.created_at.isoformat() if u.created_at else None,
-            }
-        )
-    devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
-    reg["systems"] = [
-        {"id": "*", "label": "Вся фабрика CLOS (все узлы)"},
-        *[
-            {
-                "id": d.hostname,
-                "label": f"{d.hostname} ({d.platform.value if hasattr(d.platform, 'value') else d.platform})",
-            }
-            for d in devices
-        ],
-        {"id": "online-ssh", "label": f"Контур ONLINE SSH (Containerlab {clab_host})"},
-        {"id": "offline-lab", "label": "Контур OFFLINE Эмуляция (lab/running)"},
-    ]
-    reg["participants"] = participants
-    reg["telegram_bindings"] = tg_bindings
-    if settings is not None:
-        reg["system_info"] = {
-            "driver": settings.network_driver,
-            "mode": "online" if settings.network_driver == "scrapli" else "offline",
-            "inventory_file": settings.inventory_file,
-            "bot_username": "@Croc_Dream_bot",
-        }
-    save_access_registry(reg, settings)
-    return reg
+    return load_access_registry(settings)
 
 
 def load_saved_subscribers(settings: Settings) -> list[int]:
+    from netops.services.state import get_state_manager
+
     result: list[int] = []
-    for path in _subscribers_files(settings):
-        if not path.is_file():
-            continue
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(data, list):
-                for x in data:
-                    if isinstance(x, (int, str)) and str(x).lstrip("-").isdigit():
-                        cid = int(x)
-                        if cid not in result:
-                            result.append(cid)
-        except Exception:
-            pass
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    data = get_state_manager(settings).get_db_state(
+        "telegram_subscribers", [], database_url=db_url
+    )
+    if isinstance(data, list):
+        for x in data:
+            if isinstance(x, (int, str)) and str(x).lstrip("-").isdigit():
+                cid = int(x)
+                if cid not in result:
+                    result.append(cid)
     return result
 
 
 def save_subscriber(settings: Settings, chat_id: int) -> None:
+    from netops.services.state import get_state_manager
+
     current = load_saved_subscribers(settings)
     if chat_id not in current:
         current.append(chat_id)
-    for path in _subscribers_files(settings):
-        try:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(current), encoding="utf-8")
-        except Exception:
-            pass
+    db_url = getattr(settings, "database_url", None) if settings is not None else None
+    get_state_manager(settings).set_db_state(
+        "telegram_subscribers", current, database_url=db_url
+    )
 
 
 def resolve_telegram_targets(settings: Settings, *, discover: bool = True) -> list[int | str]:
@@ -458,55 +294,4 @@ def format_executive_summary(
         lines.append(f"<b>Недоступны ({len(unreachable)}):</b> <code>{', '.join(unreachable)}</code>")
     lines.append(f"<b>Привязанных сессий по ссылкам:</b> {active_sessions}")
     lines.append("\n<i>Команды бота: /status, /drift, /jobs, /metrics, /users</i>")
-    return "\n".join(lines)
-
-
-def format_drift_alert(
-    hostname: str,
-    platform: str,
-    unauthorized_lines: list[str],
-    missing_lines: list[str],
-    ai_risk: str | None = None,
-) -> str:
-    """Format drift incident alert for Telegram."""
-    lines = [
-        "<b>[NetOps Alert] Обнаружен дрейф конфигурации</b>",
-        f"<b>Устройство:</b> <code>{hostname}</code> ({platform})",
-    ]
-    if unauthorized_lines:
-        lines.append("<b>Несанкционированные строки:</b>")
-        for line in unauthorized_lines[:5]:
-            lines.append(f"  + <code>{line}</code>")
-        if len(unauthorized_lines) > 5:
-            lines.append(f"  <i>...еще {len(unauthorized_lines) - 5} строк</i>")
-
-    if missing_lines:
-        lines.append("<b>Отсутствующие строки из Git:</b>")
-        for line in missing_lines[:3]:
-            lines.append(f"  - <code>{line}</code>")
-
-    if ai_risk:
-        lines.append(f"\n<b>AI Оценка риска:</b> {ai_risk}")
-
-    return "\n".join(lines)
-
-
-def format_deploy_alert(
-    job_id: str,
-    status: str,
-    devices: list[str],
-    details: str = "",
-) -> str:
-    """Format deployment result alert for Telegram."""
-    lines = [
-        f"<b>[NetOps Deploy] Задача {status}</b>",
-        f"<b>ID:</b> <code>{job_id[:8]}</code>",
-        f"<b>Устройства:</b> {', '.join(devices)}",
-    ]
-    if status == "ROLLED_BACK":
-        lines.append(
-            "<b>Автоматический откат:</b> Post-check тесты не пройдены, фабрика возвращена в baseline."
-        )
-    if details:
-        lines.append(f"<b>Детали:</b> {details}")
     return "\n".join(lines)

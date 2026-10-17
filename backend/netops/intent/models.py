@@ -54,6 +54,8 @@ class InterfaceIntent(IntentModel):
     mtu: int = Field(default=1500, ge=68, le=9216)
     # Входящий ACL на интерфейсе: имя из блока acls этого же устройства.
     acl_in: Identifier | None = None
+    access_vlan: int | None = Field(default=None, ge=1, le=4094)
+    ospf_area: str | int | None = None
 
     @field_validator("ipv4_address", mode="before")
     @classmethod
@@ -105,6 +107,8 @@ class BgpIntent(IntentModel):
     asn: Asn
     router_id: IPv4Address
     neighbors: list[BgpNeighborIntent] = Field(default_factory=list)
+    evpn: bool = False
+    vxlan_vni: int | None = Field(default=None, ge=1, le=16777215)
 
     @field_validator("router_id")
     @classmethod
@@ -130,6 +134,7 @@ class AclProtocol(StrEnum):
     TCP = "tcp"
     UDP = "udp"
     ICMP = "icmp"
+    OSPF = "ospf"
 
 
 def _parse_acl_endpoint(value: object) -> Literal["any"] | IPv4Network:
@@ -348,7 +353,6 @@ class PlatformProfile(IntentModel):
         raise KeyError(key) from None
 
 
-
 class DropLinePatternSpec(IntentModel):
     re: str
     why: str | None = None
@@ -392,4 +396,3 @@ class DiffFilters(IntentModel):
     common: CommonDiffFilterSpec = Field(default_factory=CommonDiffFilterSpec)
     platforms: dict[Platform | str, PlatformDiffFilterSpec]
     dynamic_show_output_fields: dict[str, list[str]] = Field(default_factory=dict)
-

@@ -54,47 +54,47 @@ def get_principal(
     request: Request,
     container: ContainerDep,
     users: UserServiceDep,
+    session: SessionDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Security(_bearer)],
 ) -> ApiPrincipal:
-    from netops.services.users import DeviceBoundConflictError  # noqa: PLC0415
+    from netops.services.sessions import csrf_ok, principal_from_session
+    from netops.services.users import DeviceBoundConflictError
 
+    # 1) Browser: opaque HttpOnly session cookie (+ CSRF header on mutating requests).
+    #    An explicit Authorization header wins: it is CSRF-immune (never auto-attached).
+    if credentials is None:
+        principal, record = principal_from_session(request, session, container.settings)
+        if principal is not None and record is not None:
+            if not csrf_ok(request, record):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN, detail="Missing or invalid CSRF token"
+                )
+            return principal
+
+    # 2) Machine clients (MCP, bot, CI, smoke): Authorization: Bearer <api key>.
     principal = None
     if credentials is not None:
         token = credentials.credentials
-        forwarded = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        client_ip = forwarded or (request.client.host if request.client else None)
-        client_id = request.headers.get("X-Client-ID") or request.headers.get(
-            "X-Client-Device-Id"
-        )
-        user_agent = request.headers.get("User-Agent")
-
         principal = container.settings.authenticate(token)
-        try:
-            if principal is not None:
-                principal = users.track_browser_session(
-                    principal,
-                    client_id=client_id,
-                    user_agent=user_agent,
-                    client_ip=client_ip,
-                    settings=container.settings,
-                )
-            else:
+        if principal is None:
+            try:
                 principal = users.authenticate(
                     token,
-                    client_id=client_id,
-                    user_agent=user_agent,
-                    client_ip=client_ip,
+                    client_id=request.headers.get("X-Client-ID"),
+                    user_agent=request.headers.get("User-Agent"),
+                    # uvicorn already resolves X-Forwarded-For for trusted proxies only.
+                    client_ip=request.client.host if request.client else None,
                     settings=container.settings,
                 )
-        except DeviceBoundConflictError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=str(exc),
-            ) from exc
+            except DeviceBoundConflictError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=str(exc),
+                ) from exc
     if principal is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing API token",
+            detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return principal

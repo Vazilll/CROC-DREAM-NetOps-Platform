@@ -35,7 +35,7 @@ class Device(Base):
         nullable=False,
         index=True,
     )
-    site: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None)
+    site: Mapped[str | None] = mapped_column(String(64), nullable=True, default=None, index=True)
     proxy_jump: Mapped[str | None] = mapped_column(String(255), nullable=True)
     hardware_specs: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     last_checked_at: Mapped[datetime | None]

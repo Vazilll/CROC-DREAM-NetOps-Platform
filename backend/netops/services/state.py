@@ -35,13 +35,18 @@ class StateManager:
         self,
         settings: Settings | None = None,
         redis_url: str | None = None,
-        enable_redis: bool = True,
+        enable_redis: bool | None = None,
         probe_cooldown_seconds: float = 30.0,
         socket_timeout: float = 0.2,
     ) -> None:
+        import os
+
         self._settings = settings or get_settings()
         self._redis_url = redis_url if redis_url is not None else self._settings.redis_url
-        self._enable_redis = enable_redis
+        if enable_redis is None:
+            self._enable_redis = not ("PYTEST_CURRENT_TEST" in os.environ and redis_url is None)
+        else:
+            self._enable_redis = enable_redis
         self._probe_cooldown_seconds = probe_cooldown_seconds
         self._socket_timeout = socket_timeout
 
@@ -80,7 +85,7 @@ class StateManager:
             return self._client
 
         try:
-            import redis  # noqa: PLC0415
+            import redis
 
             client = redis.Redis.from_url(
                 self._redis_url,
@@ -172,6 +177,95 @@ class StateManager:
 
     def set_json(self, key: str, value: Any, ex: int | None = None) -> bool:
         return self.set(key, json.dumps(value, ensure_ascii=False), ex=ex)
+
+    # Hot ephemeral keys stored exclusively in Redis (never written to heavy PostgreSQL)
+    _HOT_REDIS_KEYS: frozenset[str] = frozenset(
+        {
+            "prometheus_snmp_targets",
+            "prometheus_exporter_targets",
+            "netops:telemetry:protocols",
+            "chaos_events",
+            "grafana_noc_dashboard",
+        }
+    )
+    _NULL_SENTINEL = "__netops_db_null__"
+
+    def _get_db_engine(self, database_url: str | None = None) -> Any | None:
+        import os
+
+        db_url = database_url or getattr(self._settings, "database_url", "") or ""
+        if not db_url:
+            return None
+        if (
+            "PYTEST_CURRENT_TEST" in os.environ
+            and db_url.startswith("postgresql")
+            and "localhost" in db_url
+        ):
+            return None
+        eng_cache: dict[str, Any] = getattr(self, "_db_engines", {})
+        if db_url not in eng_cache:
+            try:
+                import contextlib
+
+                from netops.db import build_engine
+                from netops.models.system_state import SystemState
+
+                eng = build_engine(db_url)
+                with contextlib.suppress(Exception):
+                    SystemState.__table__.create(bind=eng, checkfirst=True)
+                eng_cache[db_url] = eng
+                self._db_engines = eng_cache
+            except Exception:
+                return None
+        return eng_cache.get(db_url)
+
+    def get_db_state(
+        self, key: str, default: Any = None, *, database_url: str | None = None
+    ) -> Any:
+        cache_key = f"netops:db_state:{key}"
+        cached = self.get_json(cache_key)
+        if cached is not None:
+            if isinstance(cached, dict) and cached.get(self._NULL_SENTINEL) is True:
+                return default
+            return cached
+        engine = self._get_db_engine(database_url)
+        if engine is not None:
+            try:
+                from sqlalchemy.orm import Session
+
+                from netops.models.system_state import SystemState
+
+                with Session(engine) as sess:
+                    row = sess.get(SystemState, key)
+                    if row is not None and row.value is not None:
+                        self.set_json(cache_key, row.value, ex=600)
+                        return row.value
+                    if key != "runtime_settings":
+                        self.set_json(cache_key, {self._NULL_SENTINEL: True}, ex=60)
+            except Exception:
+                pass
+        return default
+
+    def set_db_state(
+        self, key: str, value: Any, *, database_url: str | None = None
+    ) -> bool:
+        cache_key = f"netops:db_state:{key}"
+        ttl = 86400 if key in self._HOT_REDIS_KEYS else 3600
+        self.set_json(cache_key, value, ex=ttl)
+        engine = self._get_db_engine(database_url)
+        if engine is not None:
+            try:
+                from sqlalchemy.orm import Session
+
+                from netops.db import utcnow
+                from netops.models.system_state import SystemState
+
+                with Session(engine) as sess:
+                    sess.merge(SystemState(key=key, value=value, updated_at=utcnow()))
+                    sess.commit()
+            except Exception as exc:
+                logger.debug("Failed to persist SystemState[%s] to DB: %s", key, exc)
+        return True
 
     # -------------------------------------------------------------------------
     # Distributed Sync Locks (Two-Phase Rollback Protection & Emergency Patches)
@@ -292,30 +386,6 @@ class StateManager:
         """Check whether target is currently locked."""
         return self.get_sync_lock_info(target) is not None
 
-    def list_active_sync_locks(self) -> list[dict[str, Any]]:
-        """List all currently active sync locks."""
-        client = self._get_redis()
-        if client:
-            try:
-                locks = []
-                for k in client.scan_iter("netops:sync_lock:*"):
-                    val = client.get(k)
-                    if val:
-                        locks.append(json.loads(val))
-                return locks
-            except Exception as exc:
-                self._handle_redis_error(exc)
-
-        now = time.time()
-        with self._lock:
-            active = []
-            for k, (exp, payload) in list(self._local_locks.items()):
-                if exp > now:
-                    active.append(dict(payload))
-                else:
-                    self._local_locks.pop(k, None)
-            return active
-
     # -------------------------------------------------------------------------
     # Telemetry Cache
     # -------------------------------------------------------------------------
@@ -394,29 +464,6 @@ class StateManager:
 
         with self._lock:
             self._local_telemetry.setdefault(hostname, {})[metric] = list(clamped_series)
-
-    def get_all_telemetry(self) -> dict[str, dict[str, list[float]]]:
-        """Return all cached telemetry series grouped by hostname and metric."""
-        client = self._get_redis()
-        if client:
-            try:
-                result: dict[str, dict[str, list[float]]] = {}
-                for key in client.scan_iter("netops:telemetry:*"):
-                    parts = key.split(":")
-                    if len(parts) >= 4:
-                        host, metric = parts[2], parts[3]
-                        raw_items = client.lrange(key, 0, -1)
-                        result.setdefault(host, {})[metric] = [float(x) for x in raw_items]
-                if result:
-                    return result
-            except Exception as exc:
-                self._handle_redis_error(exc)
-
-        with self._lock:
-            return {
-                h: {m: list(s) for m, s in metrics.items()}
-                for h, metrics in self._local_telemetry.items()
-            }
 
     def clear_telemetry(self, hostname: str | None = None) -> None:
         """Clear telemetry cache for a single host or all hosts."""
@@ -526,20 +573,6 @@ class StateManager:
 
         with self._lock:
             self._local_templates[key] = (time.time() + ttl, content)
-
-    def clear_rendered_templates(self) -> None:
-        """Clear all rendered template cache entries."""
-        client = self._get_redis()
-        if client:
-            try:
-                keys = list(client.scan_iter("netops:template:*"))
-                if keys:
-                    client.delete(*keys)
-            except Exception as exc:
-                self._handle_redis_error(exc)
-
-        with self._lock:
-            self._local_templates.clear()
 
     # -------------------------------------------------------------------------
     # Factory Freeze State (Global and Per-Stand Fabric Isolation)
@@ -725,6 +758,12 @@ class StateManager:
                 "updated_by": None,
             })
             self._local_fabric_freeze.clear()
+            for eng in getattr(self, "_db_engines", {}).values():
+                try:
+                    eng.dispose()
+                except Exception:
+                    pass
+            self._db_engines = {}
 
 
 def get_state_manager(

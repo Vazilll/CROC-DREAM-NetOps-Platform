@@ -22,11 +22,6 @@ class DeviceRole(StrEnum):
     SERVER = "server"
 
 
-class ManagementMode(StrEnum):
-    MONITORING_ONLY = "MONITORING_ONLY"
-    MANAGED = "MANAGED"
-
-
 class DeviceStatus(StrEnum):
     # UNKNOWN нет в ТЗ: устройство ещё не проверялось или состояние неизвестно после
     # неудачного отката.

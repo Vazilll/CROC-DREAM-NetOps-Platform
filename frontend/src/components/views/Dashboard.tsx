@@ -69,11 +69,11 @@ const DashboardComponent: React.FC<DashboardProps> = ({
     let drift = 0;
     let unreachable = 0;
     for (const d of devices) {
-      if (d.status === 'IN_SYNC') inSync++;
+      if (d.status === 'IN_SYNC' || d.status === 'UNKNOWN') inSync++;
       else if (d.status === 'DRIFT_DETECTED') drift++;
       else if (d.status === 'UNREACHABLE') unreachable++;
     }
-    const hp = devices.length > 0 ? Math.round((inSync / devices.length) * 100) : 100;
+    const hp = devices.length > 0 ? Math.round(((devices.length - drift - unreachable) / devices.length) * 100) : 100;
     return { inSyncCount: inSync, driftCount: drift, unreachableCount: unreachable, healthPercent: hp };
   }, [devices]);
 
@@ -269,11 +269,11 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                     <div className="flex items-center gap-2 min-w-0">
                       <span
                         className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                          device.status === 'IN_SYNC'
-                            ? 'bg-emerald-400'
+                          device.status === 'UNREACHABLE'
+                            ? 'bg-rose-400'
                             : device.status === 'DRIFT_DETECTED'
                             ? 'bg-amber-400'
-                            : 'bg-rose-400'
+                            : 'bg-emerald-400'
                         }`}
                       />
                       <span className="font-semibold text-xs text-[var(--text-primary)] truncate tracking-tight">
@@ -295,7 +295,9 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
                 <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
                   <div className="flex items-center justify-between text-[10px] font-mono tabular-nums mb-1.5">
-                    <span className="text-[var(--text-muted)]">CPU / Трафик:</span>
+                    <span className="text-[var(--text-muted)]">
+                      {locale === 'en' ? 'Uplink traffic:' : 'Трафик аплинка:'}
+                    </span>
                     <span
                       className={`font-medium ${
                         !device.sparkline || device.sparkline.length === 0
@@ -307,7 +309,11 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                           : 'text-[var(--text-primary)]'
                       }`}
                     >
-                      {device.sparkline && device.sparkline.length > 0 ? `${Math.round(currentLoad)}%` : 'Нет данных'}
+                      {device.sparkline && device.sparkline.length > 0
+                        ? `${Math.round(currentLoad)}%`
+                        : locale === 'en'
+                        ? 'No data'
+                        : 'Нет данных'}
                     </span>
                   </div>
 
@@ -323,7 +329,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                     </div>
                   ) : (
                     <div className="h-7 w-full flex items-center justify-center rounded border border-dashed border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-muted)]">
-                      Ожидание опроса метрик
+                      {locale === 'en' ? 'Waiting for metrics poll' : 'Ожидание опроса метрик'}
                     </div>
                   )}
                 </div>
@@ -336,7 +342,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                     </strong>
                   </span>
                   <span className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] flex items-center gap-0.5">
-                    Инспектор →
+                    {locale === 'en' ? 'Inspector →' : 'Инспектор →'}
                   </span>
                 </div>
               </div>
@@ -431,7 +437,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                       </div>
                     </div>
                     <span className="font-mono tabular-nums text-[11px] text-amber-600 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 shrink-0">
-                      &gt;{a.threshold}% через ~{a.breach_in_minutes}м
+                      &gt;{a.threshold}{a.metric === 'load_1m' ? '' : '%'} {locale === 'en' ? 'in' : 'через'} ~{a.breach_in_minutes}{locale === 'en' ? 'm' : 'м'}
                     </span>
                   </div>
 

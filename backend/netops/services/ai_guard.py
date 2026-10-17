@@ -14,13 +14,14 @@ from typing import Any, Literal
 
 from netops.models import Device
 from netops.services.forecast import build_forecast
-from netops.services.telemetry import METRICS, metric_series
+from netops.services.telemetry import METRICS
 from netops.settings import Settings
 
 logger = logging.getLogger(__name__)
 
-# Active simulated anomalies for test injection & live demonstrations
+# Active simulated anomalies for test injection & live demonstrations (mirrored to Redis via state_manager)
 _active_injections: dict[str, Literal["blackhole", "storm"]] = {}
+_REDIS_INJECTION_PREFIX = "netops:ai_guard:injection:"
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,16 +47,34 @@ class AiTelemetryGuard:
     @staticmethod
     def inject_anomaly(hostname: str, anomaly_type: Literal["blackhole", "storm", "clear"]) -> None:
         """Inject or clear a simulated execution anomaly for live demo / chaos testing."""
+        from netops.services.state import get_state_manager
+
+        state = get_state_manager()
         if anomaly_type == "clear":
             _active_injections.pop(hostname, None)
+            state.delete(f"{_REDIS_INJECTION_PREFIX}{hostname}")
             logger.info("Cleared simulated anomaly on %s", hostname)
         else:
             _active_injections[hostname] = anomaly_type
+            state.set_json(
+                f"{_REDIS_INJECTION_PREFIX}{hostname}",
+                {"anomaly": anomaly_type},
+                ex=3600,
+            )
             logger.warning("Injected %s anomaly on %s for AI Guard detection", anomaly_type, hostname)
 
     @staticmethod
     def get_injected_anomaly(hostname: str) -> str | None:
-        return _active_injections.get(hostname)
+        if hostname in _active_injections:
+            return _active_injections[hostname]
+        from netops.services.state import get_state_manager
+
+        data = get_state_manager().get_json(f"{_REDIS_INJECTION_PREFIX}{hostname}")
+        if isinstance(data, dict) and data.get("anomaly") in ("blackhole", "storm"):
+            anom: Literal["blackhole", "storm"] = data["anomaly"]
+            _active_injections[hostname] = anom
+            return anom
+        return None
 
     def verify_execution(
         self,
@@ -76,11 +95,12 @@ class AiTelemetryGuard:
             role=role,
             metric=metric,
             horizon=horizon,
+            include_events=False,
         )
 
         # Immediate trial window expected bounds (first 3-6 steps, i.e. 15-30 min)
         is_offline = self._settings.network_driver == "offline"
-        injected = _active_injections.get(hostname)
+        injected = self.get_injected_anomaly(hostname)
         if not forecast.history and not is_offline and not injected:
             return AiGuardVerdict(
                 healthy=True,
@@ -108,8 +128,7 @@ class AiTelemetryGuard:
         # 2. Determine observed telemetry value during the trial window
         if injected == "blackhole":
             observed = 0.0 if window_lower <= 0.0 else max(1.5, round(window_lower * 0.1, 2))
-            if window_lower < 10.0:
-                window_lower = 10.0
+            window_lower = max(window_lower, 10.0)
         elif injected == "storm":
             observed = max(92.0, min(99.5, round(max(window_upper, 30.0) * 1.8, 2)))
         else:
@@ -169,7 +188,14 @@ class AiTelemetryGuard:
         )
 
     def check_preflight(self, device: Device | Any) -> tuple[bool, str]:
-        """Pre-flight check: ensures maintenance window doesn't collide with predicted congestion."""
+        """Pre-flight check: ensures maintenance window doesn't collide with active or predicted anomalies."""
+        verdict = self.verify_execution(device)
+        if not verdict.healthy and verdict.problem:
+            return (
+                False,
+                f"AI Telemetry Guard: {verdict.problem} Проведение деплоя заблокировано.",
+            )
+
         hostname = device.hostname
         role = str(getattr(device, "role", "leaf"))
         device_id = getattr(device, "id", 1)
@@ -182,6 +208,7 @@ class AiTelemetryGuard:
                 role=role,
                 metric=metric_name,
                 horizon=24,
+                include_events=False,
             )
             if fc.breach_in_minutes is not None and fc.breach_in_minutes <= 30:
                 return (

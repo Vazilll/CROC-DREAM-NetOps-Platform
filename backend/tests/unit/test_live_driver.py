@@ -127,17 +127,6 @@ def test_huawei_confirm_only_forgets_the_commit_point() -> None:
     assert "node.croc.lab" not in driver._commit_ids
 
 
-def test_run_read_only_returns_output() -> None:
-    conn = FakeConnection(default_output="Huawei Versatile Routing Platform Software\n")
-    driver = _driver_with(conn)
-    target = _target(Platform.HUAWEI_VRP)
-
-    out = driver.run_read_only(target, "display version")
-
-    assert "Huawei Versatile Routing Platform Software" in out
-    assert conn.commands == ["display version"]
-
-
 def test_latest_commit_id_parsing() -> None:
     assert _latest_commit_id("") is None
     assert _latest_commit_id("No commits recorded") is None

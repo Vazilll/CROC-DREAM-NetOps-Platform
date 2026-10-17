@@ -10,8 +10,7 @@ loader:
   path: /data/lab/gnmic_targets.yaml
   interval: 30s
 
-# Подписываемся только на нужные листья: поток всего дерева на 1 000 устройств
-# раздувает кардинальность в Prometheus/VictoriaMetrics.
+# Подписываемся только на нужные листья, чтобы не раздувать кардинальность в Prometheus/VictoriaMetrics.
 subscriptions:
   interfaces:
     paths:

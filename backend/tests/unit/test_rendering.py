@@ -83,7 +83,7 @@ def test_ssti_sandbox_and_domestic_acls(tmp_path: Path) -> None:
             ],
         }
     )
-    from netops.enums import Platform  # noqa: PLC0415
+    from netops.enums import Platform
 
     repo_templates = Path(__file__).resolve().parents[3] / "templates"
     for plat in (Platform.ELTEX_MES, Platform.YADRO_KORNFE):

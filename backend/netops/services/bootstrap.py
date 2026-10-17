@@ -12,7 +12,6 @@ import os
 import re
 import secrets
 import socket
-import subprocess
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
@@ -37,173 +36,44 @@ from netops.services.notifier import (
 )
 from netops.services.telemetry import check_prometheus_status
 from netops.services.users import _is_expired
-from netops.settings import ApiPrincipal
 
 logger = logging.getLogger(__name__)
 
-_tunnel_proc: Any = None
-
-
-def sync_public_tunnel(enable: bool, host: str, port: int, user: str) -> dict[str, Any]:
-    global _tunnel_proc
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return {
-            "active": enable,
-            "mode": "public_tunnel" if enable else "local_only",
-            "public_url": f"http://{host}:5173" if enable else None,
-            "local_url": "http://127.0.0.1:5173",
-        }
-    if not enable:
-        if _tunnel_proc is not None and _tunnel_proc.poll() is None:
-            try:
-                _tunnel_proc.terminate()
-            except Exception:
-                pass
-        _tunnel_proc = None
-        subprocess.run(["pkill", "-f", "[5]173:127.0.0.1:5173"], capture_output=True, check=False)
-        return {
-            "active": False,
-            "mode": "local_only",
-            "public_url": None,
-            "local_url": "http://127.0.0.1:5173",
-        }
-
-    already_running = (
-        subprocess.run(
-            ["pgrep", "-f", "[0]\\.0\\.0\\.0:5173:127\\.0\\.0\\.1:5173"],
-            capture_output=True,
-            check=False,
-        ).returncode
-        == 0
-    )
-    if not already_running and (_tunnel_proc is None or _tunnel_proc.poll() is not None):
-        subprocess.run(["pkill", "-f", "[1]5173:127.0.0.1:5173"], capture_output=True, check=False)
-        try:
-            _tunnel_proc = subprocess.Popen(
-                [
-                    "ssh",
-                    "-N",
-                    "-o",
-                    "ServerAliveInterval=30",
-                    "-o",
-                    "ServerAliveCountMax=3",
-                    "-o",
-                    "ExitOnForwardFailure=yes",
-                    "-R",
-                    "0.0.0.0:5173:127.0.0.1:5173",
-                    "-p",
-                    str(port),
-                    f"{user}@{host}",
-                ],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            _tunnel_proc = None
-    is_alive = already_running or (_tunnel_proc is not None and _tunnel_proc.poll() is None)
-    return {
-        "active": is_alive,
-        "mode": "public_tunnel" if is_alive else "local_only",
-        "public_url": f"http://{host}:5173" if is_alive else None,
-        "local_url": "http://127.0.0.1:5173",
-    }
-
-
-def _try_auto_bind_owner_from_telegram(session: Session, settings: Any) -> User | None:
-    owner = session.scalar(select(User).where(User.username == "owner"))
-    if owner is not None and owner.telegram_chat_id:
-        return owner
-    if not settings.telegram_bot_token:
-        return owner
-    token = settings.telegram_bot_token.get_secret_value().strip()
-    if not token or token.startswith(("test", "fake", "123456")):
-        return owner
-    from netops.telemetry import bot as bot_mod  # noqa: PLC0415
-
-    if getattr(bot_mod, "_BOT_POLLING_ACTIVE", False):
-        return owner
-    try:
-        req = urllib.request.Request(
-            f"https://api.telegram.org/bot{token}/getUpdates?timeout=0",
-            headers={"User-Agent": "CROC-NetOps/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=2.5) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
-        results = body.get("result") or []
-        for upd in reversed(results):
-            msg = upd.get("message") or upd.get("my_chat_member") or {}
-            chat = msg.get("chat") or {}
-            from_u = msg.get("from") or chat
-            cid = chat.get("id")
-            if isinstance(cid, int):
-                user, _, _ = bot_mod.bind_telegram_chat_user(
-                    session,
-                    cid,
-                    tg_username=from_u.get("username"),
-                    first_name=from_u.get("first_name"),
-                    settings=settings,
-                )
-                return user
-    except Exception:
-        pass
-    return owner
-
 
 def build_bootstrap_status(request: Request, session: Session, container: Any) -> dict[str, Any]:
+    from netops.services.sessions import session_is_owner
+
     settings = container.settings
     rt = settings.apply_runtime_overlay()
-    client_id = (request.headers.get("X-Client-Id") or "").strip()
 
     owner = session.scalar(select(User).where(User.username == "owner"))
-    if owner is None or not owner.telegram_chat_id:
-        owner = _try_auto_bind_owner_from_telegram(session, settings)
-        rt = settings.apply_runtime_overlay()
     owner_bound_cid = owner.bound_client_id if owner else None
     bootstrap_done = bool(rt.get("bootstrap_completed"))
     owner_claimed = bool(owner and owner_bound_cid and bootstrap_done)
-    caller_is_bound_owner = bool(owner_bound_cid and client_id and owner_bound_cid == client_id)
+    caller_is_bound_owner = session_is_owner(request, session, settings)
 
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     devices_dir = settings.intent_repo_path / "devices"
     yaml_count = len(list(devices_dir.glob("*.yaml"))) if devices_dir.is_dir() else 0
 
     tg_targets = resolve_telegram_targets(settings, discover=False)
-    bot_username = str(rt.get("telegram_bot_username") or "Croc_Dream_bot").lstrip("@")
+    bot_username = str(
+        rt.get("telegram_bot_username")
+        or getattr(settings, "telegram_bot_username", "")
+        or ""
+    ).lstrip("@")
     user_tokens = load_user_tokens(settings)
-    owner_tok = user_tokens.get("owner")
-    if not owner_tok and not owner_claimed:
-        owner_tok = f"crk_owner_{generate_token()[:24]}"
-        save_user_token("owner", owner_tok, settings)
-    if owner is None and owner_tok:
-        owner = User(
-            username="owner",
-            role=UserRole.OWNER,
-            token_sha256=hash_token(owner_tok),
-            is_active=True,
-            allowed_system="*",
-        )
-        try:
-            session.add(owner)
-            session.commit()
-        except Exception:
-            session.rollback()
-            owner = session.scalar(select(User).where(User.username == "owner"))
-    owner_tok_for_link = owner_tok or "dev-owner-token"
+    owner_tok = user_tokens.get("owner") if caller_is_bound_owner else None
+    owner_tok_for_link = owner_tok or "claim_owner"
 
     devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
     in_sync = sum(1 for d in devices if d.status is DeviceStatus.IN_SYNC)
     has_populated_db = len(devices) > 0
 
     exp_mode = str(rt.get("exposure_mode") or "local_only")
-    ws_enabled = True
     c_host = settings.clab_host or ""
-    if exp_mode == "public_tunnel" and c_host:
-        sync_public_tunnel(
-            enable=True,
-            host=c_host,
-            port=int(settings.clab_port or 221),
-            user=settings.clab_user or "crocdream",
-        )
+    web_port = int(getattr(settings, "frontend_port", 5173) or 5173)
+    pub_web_override = str(getattr(settings, "public_web_url", "") or "").rstrip("/")
     owner_tg_linked = bool(owner and owner.telegram_chat_id)
 
     return {
@@ -212,25 +82,28 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
         "caller_is_bound_owner": caller_is_bound_owner,
         "has_populated_db": has_populated_db,
         "can_transfer_owner": bool(owner_claimed and has_populated_db),
-        "cluster_name": str(rt.get("cluster_name") or "CROC-FABRIC-PROD-01"),
+        "cluster_name": str(rt.get("cluster_name") or ""),
         "exposure": {
             "mode": exp_mode,
             "public_tunnel_enabled": exp_mode == "public_tunnel",
-            "local_url": "http://127.0.0.1:5173",
-            "public_url": f"http://{c_host}:5173" if (exp_mode == "public_tunnel" and c_host) else None,
-            "websocket_enabled": ws_enabled,
-            "websocket_auth_scheme": "Ephemeral One-Time Ticket (POST /api/v1/ws/ticket -> wst_*, TTL 30s)",
+            "local_url": f"http://127.0.0.1:{web_port}",
+            "public_url": (pub_web_override or f"http://{c_host}:{web_port}")
+            if (exp_mode == "public_tunnel" and (c_host or pub_web_override))
+            else None,
+            "websocket_enabled": False,
         },
         "owner": {
             "exists": owner is not None,
             "username": owner.username if owner else "owner",
             "bound_client_id": "bound" if owner_bound_cid else None,
-            "bound_ip": owner.bound_ip if owner else None,
-            "recovery_key": owner_tok if (not owner_claimed or caller_is_bound_owner) else None,
+            "bound_ip": owner.bound_ip if (owner and caller_is_bound_owner) else None,
+            "recovery_key": owner_tok,
             "telegram_linked": owner_tg_linked,
             "telegram_username": (owner.telegram_username if owner else None)
             or (rt.get("telegram_verified_username") if owner_tg_linked else None),
-            "telegram_chat_id": owner.telegram_chat_id if owner_tg_linked else None,
+            "telegram_chat_id": (
+                owner.telegram_chat_id if (owner_tg_linked and caller_is_bound_owner) else None
+            ),
         },
         "github": {
             **git_meta,
@@ -244,16 +117,21 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
         "telegram": {
             "bot_token_set": bool(settings.telegram_bot_token),
             "configured": bool(settings.telegram_bot_token and owner_tg_linked),
-            "bot_username": f"@{bot_username}",
+            "bot_username": f"@{bot_username}" if bot_username else "",
             "chat_ids": [int(c) for c in tg_targets if str(c).lstrip("-").isdigit()],
-            "deep_link_claim": f"https://t.me/{bot_username}?start={owner_tok_for_link}",
-            "deep_link_recover": f"https://t.me/{bot_username}?start=recover_owner",
+            "deep_link_claim": f"https://t.me/{bot_username}?start={owner_tok_for_link}"
+            if bot_username
+            else "",
+            "deep_link_recover": f"https://t.me/{bot_username}?start=recover_owner"
+            if bot_username
+            else "",
         },
         "server": {
             "network_driver": settings.network_driver,
             "clab_host": c_host,
             "clab_port": settings.clab_port or 221,
-            "clab_user": settings.clab_user or "crocdream",
+            "clab_user": settings.clab_user or "",
+            "clab_topology_path": settings.clab_topology_path,
             "devices_count": len(devices),
             "in_sync_count": in_sync,
             "devices": [
@@ -299,8 +177,15 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
 
 
 def claim_owner(req: Any, request: Request, session: Session, container: Any) -> dict[str, Any]:
+    from netops.services.sessions import session_is_owner
+
     settings = container.settings
     rt = settings.apply_runtime_overlay()
+    bot_uname = str(
+        rt.get("telegram_bot_username")
+        or getattr(settings, "telegram_bot_username", "")
+        or ""
+    ).lstrip("@")
     client_id = (request.headers.get("X-Client-Id") or "").strip() or "owner-primary-pc"
     client_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = (request.headers.get("User-Agent") or "Browser")[:250]
@@ -312,8 +197,8 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
     if (
         owner is not None
         and owner.bound_client_id
-        and owner.bound_client_id != client_id
         and rt.get("bootstrap_completed")
+        and not session_is_owner(request, session, settings)
     ):
         provided_key = (req.recovery_key or "").strip()
         key_valid = bool(
@@ -329,9 +214,15 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
                 detail=(
                     "Права Владельца уже привязаны к другому ПК. "
                     "Чтобы перенести права на этот компьютер, введите ваш Резервный Ключ (Recovery Key) "
-                    "или отправьте /recover в Telegram-боте @Croc_Dream_bot."
+                    f"или отправьте /recover в Telegram-боте @{bot_uname}."
                 ),
             )
+
+    for stale in session.scalars(
+        select(User).where(User.bound_client_id == client_id, User.username != "owner")
+    ).all():
+        stale.bound_client_id = None
+    session.flush()
 
     token = saved_tok or f"crk_owner_{generate_token()[:24]}"
     if owner is None:
@@ -359,11 +250,10 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
     session.commit()
 
     save_user_token("owner", token, settings)
-    from netops.services.notifier import sync_access_registry  # noqa: PLC0415
+    from netops.services.notifier import sync_access_registry
 
     sync_access_registry(session, settings)
-    settings.api_tokens[token] = ApiPrincipal(username="owner", role=UserRole.OWNER)
-    settings.save_runtime_overlay({"cluster_name": req.cluster_name.strip() or "CROC-FABRIC-PROD-01"})
+    settings.save_runtime_overlay({"cluster_name": req.cluster_name.strip() or ""})
 
     return {
         "status": "claimed",
@@ -373,19 +263,23 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
         "recovery_key": token,
         "bound_client_id": client_id,
         "bound_ip": client_ip,
-        "cluster_name": req.cluster_name.strip() or "CROC-FABRIC-PROD-01",
+        "cluster_name": req.cluster_name.strip() or "",
     }
 
 
 def recover_owner(req: Any, request: Request, session: Session, container: Any) -> dict[str, Any]:
     settings = container.settings
+    rt = settings.apply_runtime_overlay()
+    bot_uname = str(
+        rt.get("telegram_bot_username")
+        or getattr(settings, "telegram_bot_username", "")
+        or ""
+    ).lstrip("@")
     owner = session.scalar(select(User).where(User.username == "owner"))
     if owner is None:
         raise HTTPException(status_code=404, detail="Профиль owner ещё не инициализирован")
 
     if req.action == "request_telegram_code":
-        if not owner.telegram_chat_id:
-            owner = _try_auto_bind_owner_from_telegram(session, settings) or owner
         if not owner.telegram_chat_id:
             discovered = resolve_telegram_targets(settings, discover=True)
             if discovered:
@@ -408,7 +302,7 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
             "status": "code_sent" if sent else "telegram_not_configured",
             "sent": sent,
             "message": (
-                "6-значный код отправлен владельцу в Telegram (@Croc_Dream_bot)!"
+                f"6-значный код отправлен владельцу в Telegram (@{bot_uname})!"
                 if sent
                 else "Telegram ещё не привязан. Используйте ваш Резервный Ключ (Recovery Key)."
             ),
@@ -453,7 +347,6 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
     session.commit()
 
     save_user_token("owner", token, settings)
-    settings.api_tokens[token] = ApiPrincipal(username="owner", role=UserRole.OWNER)
 
     return {
         "status": "recovered",
@@ -468,16 +361,23 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
 def configure_layers(req: Any, container: Any, session: Session | None = None) -> dict[str, Any]:
     settings = container.settings
     rt = settings.apply_runtime_overlay()
-    updates: dict[str, object] = {
-        "auto_commit_on_diff": True,
-        "websocket_enabled": True,
-    }
+    updates: dict[str, object] = {"auto_commit_on_diff": True}
     if req.cluster_name:
         updates["cluster_name"] = req.cluster_name.strip()
     if req.exposure_mode in ("local_only", "public_tunnel"):
         updates["exposure_mode"] = req.exposure_mode
-    if req.websocket_enabled is not None:
-        updates["websocket_enabled"] = bool(req.websocket_enabled)
+    for opt_str in (
+        "telegram_bot_username",
+        "public_web_url",
+        "default_fabric_id",
+        "default_domain",
+        "clab_topology_path",
+    ):
+        val = getattr(req, opt_str, None)
+        if val is not None and str(val).strip():
+            updates[opt_str] = str(val).strip()
+    if getattr(req, "frontend_port", None) is not None:
+        updates["frontend_port"] = int(req.frontend_port)
     effective_pat = (
         req.github_pat.strip()
         if getattr(req, "github_pat", None) and req.github_pat.strip()
@@ -504,51 +404,18 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         updates["github_webhook_secret"] = req.github_webhook_secret.strip()
     if req.telegram_bot_token:
         clean_tok = req.telegram_bot_token.strip()
-        prev_tok = str(rt.get("telegram_bot_token") or "").strip()
         updates["telegram_bot_token"] = clean_tok
-        if clean_tok != prev_tok and not req.telegram_chat_id:
-            updates["telegram_owner_linked"] = False
-            updates["telegram_chat_id"] = ""
-            updates["telegram_verified_username"] = ""
-            if session is not None:
-                owner = session.scalar(select(User).where(User.username == "owner"))
-                if owner is not None:
-                    owner.telegram_chat_id = None
-                    owner.telegram_username = None
-                    session.commit()
-            if (
-                not clean_tok.startswith(("test", "fake", "123456"))
-                and not os.environ.get("PYTEST_CURRENT_TEST")
-            ):
-                try:
-                    me_req = urllib.request.Request(
-                        f"https://api.telegram.org/bot{clean_tok}/getMe",
-                        headers={"User-Agent": "CROC-NetOps/1.0"},
-                    )
-                    with urllib.request.urlopen(me_req, timeout=2.5) as resp:
-                        me_body = json.loads(resp.read().decode("utf-8"))
-                    bot_uname = ((me_body.get("result") or {}).get("username") or "").strip()
-                    if bot_uname:
-                        updates["telegram_bot_username"] = bot_uname
-                except Exception:
-                    pass
-                try:
-                    upd_req = urllib.request.Request(
-                        f"https://api.telegram.org/bot{clean_tok}/getUpdates?offset=-1&timeout=0",
-                        headers={"User-Agent": "CROC-NetOps/1.0"},
-                    )
-                    with urllib.request.urlopen(upd_req, timeout=2.5) as resp:
-                        upd_body = json.loads(resp.read().decode("utf-8"))
-                    upd_list = upd_body.get("result") or []
-                    if upd_list:
-                        last_uid = int(upd_list[-1]["update_id"])
-                        ack_req = urllib.request.Request(
-                            f"https://api.telegram.org/bot{clean_tok}/getUpdates?offset={last_uid + 1}&timeout=0",
-                            headers={"User-Agent": "CROC-NetOps/1.0"},
-                        )
-                        urllib.request.urlopen(ack_req, timeout=2.5).close()
-                except Exception:
-                    pass
+        if ":" in clean_tok and not os.environ.get("PYTEST_CURRENT_TEST"):
+            try:
+                with urllib.request.urlopen(
+                    f"https://api.telegram.org/bot{clean_tok}/getMe", timeout=3.0
+                ) as resp:
+                    body = json.loads(resp.read())
+                    uname = str((body.get("result") or {}).get("username") or "").strip().lstrip("@")
+                    if body.get("ok") and uname:
+                        updates["telegram_bot_username"] = uname
+            except Exception:
+                pass
     if req.telegram_chat_id:
         updates["telegram_chat_id"] = req.telegram_chat_id.strip()
     if req.groq_api_key:
@@ -585,76 +452,24 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
     if req.bootstrap_completed is not None:
         updates["bootstrap_completed"] = req.bootstrap_completed
 
+    web_port = int(updates.get("frontend_port") or getattr(settings, "frontend_port", 5173) or 5173)
     webhook_status = "ssh_connected" if (git_connect_info and git_connect_info.get("connected")) else "ready"
-    if req.github_pat and (req.github_repo_url or settings.github_repo_url):
-        repo_url = (req.github_repo_url or settings.github_repo_url).strip()
-        m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", repo_url)
-        if m:
-            owner_org, repo_name = m.group(1), m.group(2)
-            c_host_hook = settings.clab_host or "127.0.0.1"
-            hook_target = (
-                req.webhook_public_url or f"http://{c_host_hook}:5173/api/v1/git/webhook"
-            ).strip()
-            api_url = f"https://api.github.com/repos/{owner_org}/{repo_name}/hooks"
-            cfg_obj: dict[str, str] = {
-                "url": hook_target,
-                "content_type": "json",
-                "insecure_ssl": "0",
-            }
-            if req.github_webhook_secret:
-                cfg_obj["secret"] = req.github_webhook_secret.strip()
-            body = json.dumps(
-                {
-                    "name": "web",
-                    "active": True,
-                    "events": ["push"],
-                    "config": cfg_obj,
-                }
-            ).encode("utf-8")
-            http_req = urllib.request.Request(
-                api_url,
-                data=body,
-                headers={
-                    "Authorization": f"Bearer {req.github_pat.strip()}",
-                    "Accept": "application/vnd.github+json",
-                    "Content-Type": "application/json",
-                    "User-Agent": "CROC-DREAM-NetOps",
-                },
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(http_req, timeout=5) as resp:
-                    if resp.status in (200, 201):
-                        webhook_status = "created_on_github"
-                        updates["github_webhook_registered"] = True
-            except Exception as exc:
-                webhook_status = f"manual_url_ready ({exc})"
-
-    bot_username = str(rt.get("telegram_bot_username") or "Croc_Dream_bot")
-    bot_verified = bool(settings.telegram_bot_token or req.telegram_bot_token)
-    tok_val = (
-        req.telegram_bot_token.strip()
-        if req.telegram_bot_token
-        else (
-            settings.telegram_bot_token.get_secret_value() if settings.telegram_bot_token else ""
-        )
+    bot_username = str(
+        updates.get("telegram_bot_username")
+        or rt.get("telegram_bot_username")
+        or getattr(settings, "telegram_bot_username", "")
+        or ""
     )
-    if tok_val and ":" in tok_val:
-        try:
-            me_req = urllib.request.Request(
-                f"https://api.telegram.org/bot{tok_val}/getMe", method="GET"
-            )
-            with urllib.request.urlopen(me_req, timeout=4) as resp:
-                me_data = json.loads(resp.read().decode("utf-8"))
-                if me_data.get("ok") and me_data.get("result", {}).get("username"):
-                    bot_username = me_data["result"]["username"]
-                    bot_verified = True
-                    updates["telegram_bot_username"] = bot_username
-        except Exception:
-            pass
+    bot_verified = bool(settings.telegram_bot_token or req.telegram_bot_token)
 
     saved = settings.save_runtime_overlay(updates)
-    if git_connect_info and git_connect_info.get("connected") and session is not None:
+    if (
+        git_connect_info
+        and git_connect_info.get("connected")
+        and session is not None
+        and bool(saved.get("bootstrap_completed"))
+        and session.scalar(select(Device.id).limit(1)) is not None
+    ):
         try:
             if hasattr(container.intents, "_inventory_file"):
                 container.intents._inventory_file = settings.inventory_file
@@ -662,27 +477,7 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
             DeviceService(session).sync_inventory(inventory)
         except Exception:
             pass
-    if session is not None and req.telegram_bot_token:
-        _try_auto_bind_owner_from_telegram(session, settings)
-        saved = settings.apply_runtime_overlay()
 
-    exp_mode = str(saved.get("exposure_mode") or "local_only")
-    c_host = settings.clab_host or ""
-    tunnel_state = (
-        sync_public_tunnel(
-            enable=(exp_mode == "public_tunnel"),
-            host=c_host,
-            port=int(settings.clab_port or 221),
-            user=settings.clab_user or "crocdream",
-        )
-        if c_host
-        else {
-            "active": False,
-            "mode": "local_only",
-            "public_url": None,
-            "local_url": "http://127.0.0.1:5173",
-        }
-    )
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     if git_connect_info:
         git_meta.update(git_connect_info)
@@ -691,12 +486,17 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
 
     return {
         "status": "ok",
-        "exposure": tunnel_state,
-        "websocket_enabled": bool(saved.get("websocket_enabled", True)),
+        "exposure": {
+            "active": False,
+            "mode": str(saved.get("exposure_mode") or "local_only"),
+            "public_url": None,
+            "local_url": f"http://127.0.0.1:{web_port}",
+        },
+        "websocket_enabled": False,
         "webhook_status": webhook_status,
         "bot_verified": bot_verified,
-        "bot_username": f"@{bot_username.lstrip('@')}",
-        "deep_link_claim": f"https://t.me/{bot_username.lstrip('@')}?start=claim_owner",
+        "bot_username": f"@{bot_username.lstrip('@')}" if bot_username else "",
+        "deep_link_claim": f"https://t.me/{bot_username.lstrip('@')}?start=claim_owner" if bot_username else "",
         "git": git_meta,
         "runtime_keys": list(saved.keys()),
     }
@@ -720,7 +520,7 @@ def _probe_tcp_node(node: tuple[str, str, int, str, str]) -> dict[str, Any]:
         if banner and (banner.startswith("SSH-") or is_pytest):
             port_open = True
             if banner != "SSH-2.0-Open":
-                from netops.services.discovery import detect_platform_from_banner  # noqa: PLC0415
+                from netops.services.discovery import detect_platform_from_banner
 
                 detected_plat = detect_platform_from_banner(banner).value
     except Exception:
@@ -777,9 +577,14 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
 
     discovered_containers: list[dict[str, str]] = []
     candidate_ports_set: set[int] = set()
+    clab_port_map: dict[str, str] = {}
+    port_platform_hints: dict[int, Any] = {}
+    port_profile_hints: dict[int, str] = {}
     server_ssh_ok = False
     try:
-        import paramiko  # noqa: PLC0415
+        import paramiko
+
+        from netops.enums import Platform
 
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -787,7 +592,7 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             "hostname": clean_host,
             "port": clean_port,
             "username": req.username.strip(),
-            "timeout": 4.0,
+            "timeout": 8.0,
             "allow_agent": not has_explicit_pwd,
             "look_for_keys": not has_explicit_pwd,
         }
@@ -798,32 +603,74 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         _, stdout, _ = ssh.exec_command(
             "docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'", timeout=4.0
         )
+        container_port_by_name: dict[str, int] = {}
         for line in stdout.read().decode("utf-8", errors="ignore").splitlines():
             parts = line.strip().split("|")
             if len(parts) >= 3:
+                cname = parts[0].strip()
+                cimage = parts[1].strip()
                 ports_str = parts[3] if len(parts) > 3 else ""
                 discovered_containers.append(
                     {
-                        "name": parts[0],
-                        "image": parts[1],
+                        "name": cname,
+                        "image": cimage,
                         "status": parts[2],
                         "ports": ports_str,
                     }
                 )
+                if "host-" in cname.lower() or "alpine" in cimage.lower():
+                    continue
+                sig_low = cimage.lower()
+                hint_plat = None
+                if "huawei" in sig_low or "vrp" in sig_low or "ce12800" in sig_low:
+                    hint_plat = Platform.HUAWEI_VRP
+                elif "arista" in sig_low or "ceos" in sig_low or "eos" in sig_low:
+                    hint_plat = Platform.ARISTA_EOS
+                elif "cisco" in sig_low or "c8000" in sig_low or "ios" in sig_low:
+                    hint_plat = Platform.CISCO_IOSXE
+                elif "juniper" in sig_low or "junos" in sig_low:
+                    hint_plat = Platform.JUNIPER_JUNOS
+                elif "eltex" in sig_low:
+                    hint_plat = Platform.ELTEX_MES
+                node_suffix = cname.rsplit("-", 1)[-1].lower().replace("_", "")
                 for m_p in re.finditer(r":(\d+)->22/tcp", ports_str):
                     p_val = int(m_p.group(1))
                     if p_val != clean_port:
                         candidate_ports_set.add(p_val)
-        try:
-            _, ss_out, _ = ssh.exec_command("ss -tlnH | awk '{print $4}'", timeout=3.0)
-            for sline in ss_out.read().decode("utf-8", errors="ignore").splitlines():
-                m_ss = re.search(r":(\d+)\s*$", sline.strip())
-                if m_ss:
-                    p_val = int(m_ss.group(1))
-                    if 2000 <= p_val <= 2999 and p_val != clean_port:
-                        candidate_ports_set.add(p_val)
-        except Exception:
-            pass
+                        container_port_by_name[cname] = p_val
+                        if hint_plat is not None:
+                            port_platform_hints[p_val] = hint_plat
+                        if node_suffix:
+                            port_profile_hints[p_val] = f"{node_suffix}_auth"
+        if container_port_by_name:
+            try:
+                _, insp_out, _ = ssh.exec_command(
+                    "docker inspect -f '{{.Name}}|{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}' $(docker ps -q) 2>/dev/null",
+                    timeout=3.0,
+                )
+                for iline in insp_out.read().decode("utf-8", errors="ignore").splitlines():
+                    if "|" not in iline:
+                        continue
+                    raw_n, raw_ips = iline.split("|", 1)
+                    clean_n = raw_n.strip().lstrip("/")
+                    if clean_n in container_port_by_name:
+                        ips = [ip.strip() for ip in raw_ips.split() if ip.strip()]
+                        if ips:
+                            clab_port_map[str(container_port_by_name[clean_n])] = ips[-1]
+            except Exception:
+                pass
+        if not candidate_ports_set:
+            try:
+                _, ss_out, _ = ssh.exec_command("ss -tlnH | awk '{print $4}'", timeout=3.0)
+                for sline in ss_out.read().decode("utf-8", errors="ignore").splitlines():
+                    m_ss = re.search(r":(\d+)\s*$", sline.strip())
+                    if m_ss:
+                        p_val = int(m_ss.group(1))
+                        if 2000 <= p_val <= 2999 and p_val != clean_port:
+                            candidate_ports_set.add(p_val)
+            except Exception:
+                pass
+        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
         ssh.close()
     except Exception as exc:
         if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
@@ -831,8 +678,10 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный пароль SSH: сервер отклонил аутентификацию",
             ) from exc
+        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
 
-    custom_profiles = {
+    existing_pws: list[str] = []
+    custom_profiles: dict[str, dict[str, str]] = {
         "spine1_auth": {"username": "admin", "password": req.switch_password_cisco},
         "spine2_auth": {"username": "admin", "password": req.switch_password_arista},
         "leaf1_auth": {"username": "admin", "password": req.switch_password_huawei},
@@ -840,10 +689,25 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         "lab": {"username": "admin", "password": "admin"},
     }
     try:
-        custom_auth_file = settings.offline_lab_path / "custom_auth_profiles.json"
-        custom_auth_file.parent.mkdir(parents=True, exist_ok=True)
-        custom_auth_file.write_text(
-            json.dumps(custom_profiles, ensure_ascii=False, indent=2), encoding="utf-8"
+        from netops.services.state import get_state_manager
+
+        state = get_state_manager(settings)
+        loaded_auth = state.get_db_state(
+            "custom_auth_profiles", {}, database_url=settings.database_url
+        )
+        if isinstance(loaded_auth, dict):
+            for k, v in loaded_auth.items():
+                if isinstance(v, dict) and v.get("password"):
+                    pw_val = str(v["password"])
+                    if pw_val not in existing_pws:
+                        existing_pws.append(pw_val)
+                    if custom_profiles.get(k, {}).get("password") in (None, "", "admin"):
+                        custom_profiles[k] = {
+                            "username": str(v.get("username") or "admin"),
+                            "password": pw_val,
+                        }
+        state.set_db_state(
+            "custom_auth_profiles", custom_profiles, database_url=settings.database_url
         )
     except Exception:
         pass
@@ -855,6 +719,8 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             "clab_port": clean_port,
             "clab_user": req.username.strip(),
             "clab_password": req.password if req.password else None,
+            "clab_topology_path": discovered_topo_path,
+            "clab_port_map": clab_port_map or None,
             "bootstrap_completed": True,
         }
     )
@@ -862,11 +728,11 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
     candidate_ports = sorted(candidate_ports_set)
     live_switches: list[dict[str, Any]] = []
     if candidate_ports and not os.environ.get("PYTEST_CURRENT_TEST"):
-        import yaml  # noqa: PLC0415
+        import yaml
 
-        from netops.enums import SnapshotKind  # noqa: PLC0415
-        from netops.models import ConfigSnapshot  # noqa: PLC0415
-        from netops.services.discovery import (  # noqa: PLC0415
+        from netops.enums import SnapshotKind
+        from netops.models import ConfigSnapshot
+        from netops.services.discovery import (
             discover_live_switch_via_ssh,
             load_platform_profiles,
         )
@@ -882,6 +748,7 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                 pw_by_plat[plat_name] = str(prof.get("default_password", "admin"))
 
         cand_pws = [
+            *existing_pws,
             req.switch_password_cisco,
             req.switch_password_arista,
             req.switch_password_huawei,
@@ -891,47 +758,44 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         cand_pws = list(dict.fromkeys(p for p in cand_pws if p))
 
         def _probe_live_port(p: int) -> dict[str, Any] | None:
+            prof_hint = port_profile_hints.get(p, "")
+            exact_pw = (
+                (custom_profiles.get(prof_hint) or {}).get("password")
+                or req.switch_password_cisco
+                or "admin"
+            )
             return discover_live_switch_via_ssh(
                 host=clean_host,
                 port=p,
                 username="admin",
-                password=req.switch_password_cisco or "admin",
+                password=exact_pw,
                 settings=settings,
                 candidate_passwords=cand_pws,
                 passwords_by_platform=pw_by_plat,
+                initial_platform=port_platform_hints.get(p),
             )
 
         with ThreadPoolExecutor(max_workers=max(1, min(8, len(candidate_ports)))) as pool:
             live_switches = [sw for sw in pool.map(_probe_live_port, candidate_ports) if sw]
 
         if live_switches:
-            inv_live_path = settings.intent_repo_path / "inventory.live.yaml"
-            inv_live_data = {
-                "devices": [
-                    {
-                        "hostname": sw["hostname"],
-                        "management_ip": sw["management_ip"],
-                        "management_port": sw["management_port"],
-                        "platform": sw["platform"],
-                        "role": sw["role"],
-                        "auth_profile": sw["auth_profile"],
-                    }
-                    for sw in live_switches
-                ]
-            }
-            try:
-                inv_live_path.parent.mkdir(parents=True, exist_ok=True)
-                inv_live_path.write_text(
-                    yaml.safe_dump(inv_live_data, sort_keys=False, allow_unicode=True),
-                    encoding="utf-8",
-                )
-                settings.inventory_file = "inventory.live.yaml"
-            except Exception:
-                pass
+            from netops.intent.models import Inventory
 
-            if hasattr(container.intents, "_inventory_file"):
-                container.intents._inventory_file = settings.inventory_file
-            inventory = container.intents.load_inventory()
+            default_fab = getattr(settings, "default_fabric_id", "croc-dc1-pod1") or "croc-dc1-pod1"
+            inv_items = [
+                {
+                    "hostname": sw["hostname"],
+                    "management_ip": sw["management_ip"],
+                    "management_port": sw["management_port"],
+                    "platform": sw["platform"],
+                    "role": sw["role"],
+                    "auth_profile": sw["auth_profile"],
+                    "fabric_id": default_fab,
+                    "site": default_fab,
+                }
+                for sw in live_switches
+            ]
+            inventory = Inventory.model_validate({"devices": inv_items})
             sync_res = DeviceService(session).sync_inventory(inventory)
             db_devices = list(DeviceService(session).list_devices(limit=100))
             dev_by_host = {d.hostname: d for d in db_devices}
@@ -952,8 +816,8 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             # Цели сборщиков (gnmic / snmp-exporter / node_exporter) — только для доказанных
             # протоколов; остальные устройства остаются на SSH-опросе.
             try:
-                from netops.telemetry.targets import refresh_collector_targets  # noqa: PLC0415
-                from netops.toolchain import build_toolchain  # noqa: PLC0415
+                from netops.telemetry.targets import refresh_collector_targets
+                from netops.toolchain import build_toolchain
 
                 refresh_collector_targets(session, build_toolchain(settings), settings)
             except Exception as exc:

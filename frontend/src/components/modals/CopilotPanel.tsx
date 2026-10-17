@@ -157,7 +157,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
   if (!open) return null;
 
   return (
-    <aside className="fixed right-0 top-14 bottom-0 w-[400px] max-w-full z-40 bg-white dark:bg-[#0a0b0f] border-l border-slate-200 dark:border-white/[0.08] flex flex-col shadow-2xl backdrop-blur-md">
+    <aside className="fixed right-0 top-13 bottom-0 w-full sm:w-[400px] max-w-full z-50 bg-white dark:bg-[#0a0b0f] border-l border-slate-200 dark:border-white/[0.08] flex flex-col shadow-2xl backdrop-blur-md pb-[env(safe-area-inset-bottom,0px)]">
       {/* Header */}
       <div className="flex items-center justify-between px-4 h-12 border-b border-slate-200 dark:border-white/[0.06] bg-slate-50 dark:bg-[#10121a]/80">
         <div className="flex items-center gap-2">

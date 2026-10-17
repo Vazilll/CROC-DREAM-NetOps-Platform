@@ -48,8 +48,10 @@ backend/lab/
 *runtime_settings.json
 lab/running/emergency_audit.jsonl
 lab/running/freeze_state.json
+lab/running/gnmic_targets.yaml
 lab/running/*.json
 lab/running/*.jsonl
+intent/*.lock
 intent/inventory.live.yaml
 intent/diffs/*.cfg
 backend/.env*

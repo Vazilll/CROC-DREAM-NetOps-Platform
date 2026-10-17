@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import socket
 import uuid
 from datetime import timedelta
@@ -189,9 +188,7 @@ def test_grafana_provisioning_and_docker_compose_validity() -> None:
     ds_uids = {d["uid"] for d in ds_data["datasources"]}
     assert {"prometheus", "postgres-netops"} <= ds_uids
 
-    dash_json_path = (
-        repo_root / "monitoring/grafana/provisioning/dashboards/json/croc-dream-1000-stand-noc.json"
-    )
-    dash_data = json.loads(dash_json_path.read_text(encoding="utf-8"))
+    dash_yaml_path = repo_root / "monitoring/grafana/dashboards/croc-dream-noc.yaml"
+    dash_data = yaml.safe_load(dash_yaml_path.read_text(encoding="utf-8"))
     assert dash_data["uid"] == "croc-dream-noc"
     assert len(dash_data["panels"]) >= 6

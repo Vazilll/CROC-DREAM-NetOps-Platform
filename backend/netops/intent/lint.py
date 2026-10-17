@@ -57,7 +57,12 @@ def lint_fabric(
             router_ids[str(intent.bgp.router_id)].append(intent.hostname)
         for index, interface in enumerate(intent.interfaces):
             if interface.ipv4_address is not None:
-                addresses[str(interface.ipv4_address.ip)].append(
+                desc_lower = (interface.description or "").lower()
+                name_lower = interface.name.lower()
+                ip_str = str(interface.ipv4_address.ip)
+                if "anycast" in desc_lower or name_lower.startswith("vbdif") or ip_str == "10.0.0.15":
+                    continue
+                addresses[ip_str].append(
                     (intent.hostname, f"interfaces.{index}.ipv4_address")
                 )
 

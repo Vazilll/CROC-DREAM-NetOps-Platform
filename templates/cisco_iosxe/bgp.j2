@@ -20,4 +20,14 @@ router bgp {{ intent.bgp.asn }}
   neighbor {{ neighbor.peer_ip }} activate
 {% endfor %}
  exit-address-family
+{% if intent.bgp.evpn %}
+ !
+ address-family l2vpn evpn
+{% for neighbor in intent.bgp.neighbors %}
+  neighbor {{ neighbor.peer_ip }} activate
+  neighbor {{ neighbor.peer_ip }} send-community both
+  neighbor {{ neighbor.peer_ip }} next-hop-unchanged
+{% endfor %}
+ exit-address-family
+{% endif %}
 {% endif %}

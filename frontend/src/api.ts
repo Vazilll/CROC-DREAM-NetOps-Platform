@@ -116,6 +116,10 @@ export interface Device {
   auth_profile: string;
   /** Declarative Git SoT compliance status */
   status: DeviceStatus;
+  /** Fabric / pod identifier */
+  fabric_id?: string | null;
+  /** Site / location identifier */
+  site?: string | null;
   /** Management mode: `MONITORING_ONLY` blocks mutating CLI commands; `MANAGED` permits GitOps */
   management_mode?: 'MONITORING_ONLY' | 'MANAGED';
   /** Optional bastion / jump host connection string */
@@ -224,6 +228,10 @@ export interface InterfaceIntent {
   mode: 'l2' | 'l3';
   /** Configured IPv4 CIDR address for L3 mode (e.g. `10.0.0.1/30`) */
   ipv4_address?: string;
+  /** Access VLAN ID (1..4094) when mode is `l2` */
+  access_vlan?: number | null;
+  /** OSPF Area ID when OSPF is enabled on L3 interface */
+  ospf_area?: number | null;
   /** Maximum Transmission Unit size in bytes (e.g. 1500 or 9216) */
   mtu: number;
 }
@@ -254,6 +262,10 @@ export interface BgpIntent {
   router_id: string;
   /** Configured BGP neighbors list */
   neighbors: BgpNeighborIntent[];
+  /** Enable L2VPN EVPN address-family */
+  evpn?: boolean;
+  /** Optional VXLAN VNI mapped to EVPN */
+  vxlan_vni?: number | null;
 }
 
 /**
@@ -711,13 +723,19 @@ export interface IntegrationsStatus {
   };
   prometheus: {
     configured: boolean;
+    reachable?: boolean;
     url: string | null;
     scrape_endpoint: string;
     collector_interval_sec: number;
+    active_targets?: number;
+    up_targets?: number;
+    stored_samples?: number;
+    jobs?: string[];
   };
   telegram: {
     configured: boolean;
     bot_token_set: boolean;
+    bot_username?: string;
     chat_ids: number[];
     bindings?: TelegramBindingInfo[];
     commands: string[];
@@ -958,38 +976,33 @@ const API_BASE = '/api/v1';
  * and high-reliability network operations.
  */
 export class NetOpsApiClient {
-  /** Active Bearer authentication token passed in `Authorization: Bearer <token>` header */
-  private token: string;
+  /** Resolves once the initial invite/legacy-token exchange (if any) has finished. */
+  private ready: Promise<void> = Promise.resolve();
 
-  /**
-   * Initializes a new instance of the NetOps API client.
-   *
-   * @param token - Initial Bearer authorization token (defaults to `'dev-admin-token'`)
-   */
-  constructor(token: string = 'dev-admin-token') {
-    this.token = token;
+  /** Delays API calls until the initial cookie-session exchange completes. */
+  setReady(ready: Promise<void>): void {
+    this.ready = ready;
   }
 
   /**
-   * Sets or rotates the active authorization token.
-   * Called dynamically when switching RBAC roles in the Header or Welcome modal.
-   *
-   * @param token - New Bearer token string
+   * Exchanges an access token / invite for an HttpOnly session cookie.
+   * The token is sent once and never persisted on the client.
    */
-  setToken(token: string): void {
-    this.token = token;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('netops_token', token);
-    }
+  async login(token: string): Promise<{ username: string; role: UserRole; csrf_token: string }> {
+    return this.request('/auth/login', { method: 'POST', body: JSON.stringify({ token }) }, false);
   }
 
-  /**
-   * Retrieves the currently active authorization token.
-   *
-   * @returns Current Bearer token string
-   */
-  getToken(): string {
-    return this.token;
+  /** Destroys the server-side session and clears the cookies. */
+  async logout(): Promise<void> {
+    await this.request<void>('/auth/logout', { method: 'POST' });
+    localStorage.removeItem('netops_user_role');
+  }
+
+  /** Reads the (non-HttpOnly) CSRF cookie set alongside the session cookie. */
+  private getCsrfToken(): string {
+    if (typeof document === 'undefined') return '';
+    const match = document.cookie.match(/(?:^|;\s*)netops_csrf=([^;]+)/);
+    return match ? decodeURIComponent(match[1]) : '';
   }
 
   /**
@@ -1012,25 +1025,28 @@ export class NetOpsApiClient {
 
   /**
    * Internal generic HTTP request dispatcher.
-   * Injects JSON headers, Bearer authorization, X-Client-ID device fingerprint, and standardizes error responses.
+   * Sends the session cookie (same-origin), CSRF header, X-Client-ID fingerprint, and standardizes error responses.
    *
    * @template T - Expected JSON response shape
    * @param endpoint - Relative endpoint path under `/api/v1`
    * @param options - Standard Fetch RequestInit options
+   * @param waitReady - Wait for the initial session exchange (disabled for the exchange itself)
    * @returns Promise resolving to deserialized response of type `T`
    * @throws {Error} When response status is non-2xx with parsed server detail message
    */
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+  private async request<T>(endpoint: string, options: RequestInit = {}, waitReady = true): Promise<T> {
+    if (waitReady) await this.ready;
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${this.token}`,
       'X-Client-ID': this.getClientId(),
+      'X-CSRF-Token': this.getCsrfToken(),
       ...((options.headers as Record<string, string>) || {}),
     };
 
     const res = await fetch(`${API_BASE}${endpoint}`, {
       ...options,
       headers,
+      credentials: 'same-origin',
     });
 
     if (!res.ok) {
@@ -1741,17 +1757,6 @@ export class NetOpsApiClient {
   }
 
   /**
-   * Generates a sharable URL pre-authenticated with the specified role token.
-   * Enables one-click evaluation links for jury (`viewer`) or operations engineers (`admin`).
-   *
-   * @param role - Target authorization role (`viewer` or `admin`, defaults to `'viewer'`)
-   * @returns Formatted URL string with embedded `?token=` parameter
-   */
-  getShareUrl(role: 'admin' | 'viewer' = 'viewer'): string {
-    return this.buildInviteUrl(role === 'admin' ? 'dev-admin-token' : 'dev-jury-token');
-  }
-
-  /**
    * Retrieves the customized human-readable canvas/fabric name from local storage.
    *
    * @returns Fabric name string
@@ -1770,22 +1775,24 @@ export class NetOpsApiClient {
   }
 
   /**
-   * Reads current user RBAC role from persistent storage.
+   * Reads the cached UI role (display hint only; the server session is the source of truth).
    *
    * @returns UserRole currently configured
    */
   getRole(): UserRole {
-    return (localStorage.getItem('netops_user_role') as UserRole) || 'owner';
+    return (localStorage.getItem('netops_user_role') as UserRole) || 'viewer';
   }
 
   /**
-   * Updates user RBAC role in persistent storage and synchronizes the active Bearer token.
+   * Caches the UI role for rendering. Does NOT change server-side permissions.
    *
-   * @param role - New UserRole to assume
+   * @param role - Role reported by `/users/me`
    */
   setRole(role: UserRole): void {
     localStorage.setItem('netops_user_role', role);
-    this.setToken(ROLE_TOKENS[role]);
+    if (typeof window !== 'undefined' && window.location.port === '5173') {
+      void this.login(`dev-${role}-token`).catch(() => undefined);
+    }
   }
 
   async getBootstrapStatus(): Promise<BootstrapStatusResponse> {
@@ -1849,17 +1856,6 @@ export class NetOpsApiClient {
     });
   }
 
-  async requestWsTicket(): Promise<{
-    ticket: string;
-    ttl_seconds: number;
-    websocket_enabled: boolean;
-    ws_path: string;
-  }> {
-    return this.request('/ws/ticket', {
-      method: 'POST',
-    });
-  }
-
   async discoverAndAttachServer(data: {
     mode: 'ssh' | 'offline';
     host?: string;
@@ -1875,6 +1871,27 @@ export class NetOpsApiClient {
       body: JSON.stringify(data),
     });
   }
+
+  async getFreezeStatus(): Promise<{
+    frozen: boolean;
+    reason?: string;
+    frozen_by?: string;
+    frozen_at?: string;
+  }> {
+    return this.request('/emergency/freeze', { method: 'GET' });
+  }
+
+  async setFreezeStatus(frozen: boolean, reason = 'Аварийная заморозка фабрики (Change Freeze)'): Promise<{
+    frozen: boolean;
+    reason?: string;
+    frozen_by?: string;
+    frozen_at?: string;
+  }> {
+    return this.request('/emergency/freeze', {
+      method: 'POST',
+      body: JSON.stringify({ frozen, reason }),
+    });
+  }
 }
 
 // ============================================================================
@@ -1882,54 +1899,50 @@ export class NetOpsApiClient {
 // ============================================================================
 
 /**
- * Predefined development and evaluation Bearer tokens mapped by RBAC role.
+ * Global singleton instance of {@link NetOpsApiClient}.
+ * Authentication is an HttpOnly session cookie; JS never stores the token.
  */
-export const ROLE_TOKENS: Record<UserRole, string> = {
-  owner: 'dev-owner-token',
-  admin: 'dev-admin-token',
-  operator: 'dev-operator-token',
-  viewer: 'dev-viewer-token',
+export const api = new NetOpsApiClient();
+
+const PORT_ROLE_MAP: Record<string, UserRole> = {
+  '5174': 'admin',
+  '5175': 'operator',
+  '5176': 'viewer',
 };
 
 /**
- * Resolves initial Bearer authentication token and RBAC role from URL parameters or persistent storage.
- * URL parameter `?token=...` takes precedence and automatically completes onboarding.
- *
- * @returns Object containing active Bearer token and resolved UserRole
+ * One-time auth bootstrap: an invite link `?token=...` (or a token left in localStorage by
+ * older builds) is exchanged for a cookie session and immediately removed from URL/storage.
+ * Dedicated role ports (5174 Admin, 5175 Operator, 5176 Viewer) use Nginx-injected Bearer headers.
  */
-function resolveInitialAuth(): { token: string; role: UserRole } {
-  if (typeof window === 'undefined') {
-    return { token: 'dev-owner-token', role: 'owner' };
-  }
-
-  const params = new URLSearchParams(window.location.search);
-  const urlToken = params.get('token');
-
-  if (urlToken) {
-    let role: UserRole = 'viewer';
-    if (urlToken.includes('owner')) role = 'owner';
-    else if (urlToken.includes('admin')) role = 'admin';
-    else if (urlToken.includes('operator')) role = 'operator';
-    else if (urlToken.includes('jury') || urlToken.includes('viewer')) role = 'viewer';
-
-    localStorage.setItem('netops_token', urlToken);
-    localStorage.setItem('netops_user_role', role);
+function bootstrapAuth(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  const portRole = PORT_ROLE_MAP[window.location.port];
+  if (portRole) {
+    localStorage.setItem('netops_user_role', portRole);
     localStorage.setItem('netops_onboarding_done', 'true');
-    return { token: urlToken, role };
+    return Promise.resolve();
   }
-
-  const savedRole = (localStorage.getItem('netops_user_role') as UserRole) || 'owner';
-  const savedToken = localStorage.getItem('netops_token');
-
-  return {
-    token: savedToken || ROLE_TOKENS[savedRole] || 'dev-owner-token',
-    role: savedRole,
-  };
+  const url = new URL(window.location.href);
+  const urlToken = url.searchParams.get('token');
+  const legacyToken = localStorage.getItem('netops_token');
+  localStorage.removeItem('netops_token');
+  if (urlToken) {
+    url.searchParams.delete('token');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+    localStorage.setItem('netops_onboarding_done', 'true');
+  }
+  const hasCsrfCookie = typeof document !== 'undefined' && document.cookie.includes('netops_csrf=');
+  const fallbackToken = window.location.port === '5173' && !hasCsrfCookie ? 'dev-owner-token' : null;
+  const token = urlToken || legacyToken || fallbackToken;
+  if (!token) return Promise.resolve();
+  return api
+    .login(token)
+    .then((res) => {
+      localStorage.setItem('netops_user_role', res.role);
+      localStorage.setItem('netops_onboarding_done', 'true');
+    })
+    .catch(() => undefined);
 }
 
-const initialAuth = resolveInitialAuth();
-
-/**
- * Global singleton instance of {@link NetOpsApiClient} pre-configured with active session credentials.
- */
-export const api = new NetOpsApiClient(initialAuth.token);
+api.setReady(bootstrapAuth());

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from netops.models import Device
-from netops.services.ai_guard import AiGuardVerdict, AiTelemetryGuard
+from netops.services.ai_guard import AiTelemetryGuard
 from netops.settings import Settings
 
 
@@ -68,7 +68,20 @@ def test_ai_guard_detects_load_surge_storm(mock_settings: Settings, dummy_device
 
 
 def test_ai_guard_preflight(mock_settings: Settings, dummy_device: Device) -> None:
+    from netops.services.ai_guard import _active_injections
+
     guard = AiTelemetryGuard(mock_settings)
+    guard.inject_anomaly(dummy_device.hostname, "clear")
     ok, reason = guard.check_preflight(dummy_device)
     assert isinstance(ok, bool)
     assert isinstance(reason, str)
+
+    # Inject anomaly, clear in-process dict to simulate separate worker/bot process, and verify state_manager reload + preflight block
+    guard.inject_anomaly(dummy_device.hostname, "blackhole")
+    _active_injections.clear()
+    assert guard.get_injected_anomaly(dummy_device.hostname) == "blackhole"
+    ok_blk, reason_blk = guard.check_preflight(dummy_device)
+    assert ok_blk is False
+    assert "Blackhole" in reason_blk
+    guard.inject_anomaly(dummy_device.hostname, "clear")
+

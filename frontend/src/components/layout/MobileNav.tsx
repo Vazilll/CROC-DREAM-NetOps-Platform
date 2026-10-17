@@ -8,7 +8,6 @@ import {
   ShieldCheck,
   FlaskConical,
   AlertTriangle,
-  Presentation,
   Sparkles,
   Search,
   Sun,
@@ -97,7 +96,7 @@ export const MobileNav: React.FC<MobileNavProps> = ({
           <button
             onClick={() => setMoreMenuOpen(true)}
             className={`flex flex-col items-center justify-center flex-1 py-1.5 px-1 min-h-[48px] rounded-xl transition-all cursor-pointer ${
-              ['drift', 'lab', 'emergency', 'slides'].includes(activeTab) || moreMenuOpen
+              ['drift', 'lab', 'emergency'].includes(activeTab) || moreMenuOpen
                 ? 'text-cyan-600 dark:text-cyan-400 font-semibold'
                 : 'text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200'
             }`}
@@ -204,18 +203,6 @@ export const MobileNav: React.FC<MobileNavProps> = ({
               >
                 <AlertTriangle className="w-4 h-4 text-rose-500" />
                 <span>{locale === 'en' ? 'Emergency Hub' : 'Аварийный хаб'}</span>
-              </button>
-
-              <button
-                onClick={() => handleSelectTab('slides')}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs cursor-pointer transition-colors ${
-                  activeTab === 'slides'
-                    ? 'bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 font-semibold'
-                    : 'text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/[0.04]'
-                }`}
-              >
-                <Presentation className="w-4 h-4 text-indigo-500" />
-                <span>{locale === 'en' ? 'Architecture Slides' : 'Презентация и защита'}</span>
               </button>
             </div>
 

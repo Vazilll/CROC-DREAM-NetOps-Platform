@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import type { Device } from '../../api';
-import { TAB_DEFINITIONS } from '../../constants';
+import { PLATFORM_NAMES, ROLE_NAMES, TAB_DEFINITIONS } from '../../constants';
 import { translations, type Locale } from '../../i18n';
 
 interface Props {
@@ -13,7 +13,14 @@ interface Props {
   locale?: Locale;
 }
 
-export const CommandPalette: React.FC<Props> = ({ open, onClose, devices, onOpenDevice, onOpenTab, locale = 'ru' }) => {
+export const CommandPalette: React.FC<Props> = ({
+  open,
+  onClose,
+  devices,
+  onOpenDevice,
+  onOpenTab,
+  locale = 'ru',
+}) => {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const [prevOpen, setPrevOpen] = useState(open);
@@ -29,23 +36,32 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, devices, onOpen
   }
 
   const items = useMemo(() => {
-    const q = query.trim().toLowerCase();
     const all = [
-      ...devices.map((d) => ({ key: `d${d.id}`, label: d.hostname, hint: d.management_ip, run: () => onOpenDevice(d.id) })),
+      ...devices.map((d) => ({
+        key: `d${d.id}`,
+        label: d.hostname,
+        hint: `${PLATFORM_NAMES[d.platform] ?? d.platform} · ${d.management_ip}`,
+        searchText: `${d.hostname} ${d.management_ip} ${d.platform} ${PLATFORM_NAMES[d.platform] ?? ''} ${d.role} ${ROLE_NAMES[d.role] ?? ''} ${d.status} ${d.site ?? ''}`.toLowerCase(),
+        run: () => onOpenDevice(d.id),
+      })),
       ...TAB_DEFINITIONS.map((tab) => ({
         key: tab.id,
         label: t[tab.labelKey],
         hint: locale === 'en' ? 'Section' : 'Раздел',
+        searchText: `${t[tab.labelKey]} ${tab.id} ${tab.groupKey}`.toLowerCase(),
         run: () => onOpenTab(tab.id),
       })),
     ];
-    return all.filter((i) => !q || `${i.label} ${i.hint}`.toLowerCase().includes(q)).slice(0, 8);
+    const q = query.trim().toLowerCase();
+    if (!q) return all.slice(0, 8);
+    const tokens = q.split(/\s+/).filter(Boolean);
+    return all
+      .filter((item) => tokens.every((tok) => item.searchText.includes(tok)))
+      .slice(0, 8);
   }, [query, devices, onOpenDevice, onOpenTab, t, locale]);
 
   useEffect(() => {
-    if (open) {
-      input.current?.focus();
-    }
+    if (open) input.current?.focus();
   }, [open]);
 
   if (!open) return null;
@@ -57,7 +73,10 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, devices, onOpen
 
   return (
     <div className="fixed inset-0 z-[60] bg-black/60 flex items-start justify-center pt-24" onClick={onClose}>
-      <div className="w-[520px] max-w-[92vw] rounded-xl bg-[#0c0e14] border border-white/[0.1] shadow-2xl overflow-hidden" onClick={(e) => e.stopPropagation()}>
+      <div
+        className="w-[520px] max-w-[92vw] rounded-xl bg-[#0c0e14] border border-white/[0.1] shadow-2xl overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center gap-2 px-4 border-b border-white/[0.06]">
           <Search className="w-4 h-4 text-zinc-500" />
           <input
@@ -83,14 +102,18 @@ export const CommandPalette: React.FC<Props> = ({ open, onClose, devices, onOpen
               <button
                 onMouseEnter={() => setIndex(i)}
                 onClick={() => pick(i)}
-                className={`w-full flex justify-between px-4 py-2 text-[13px] cursor-pointer ${i === index ? 'bg-white/[0.06] text-white' : 'text-zinc-300'}`}
+                className={`w-full flex justify-between px-4 py-2 text-[13px] cursor-pointer ${
+                  i === index ? 'bg-white/[0.06] text-white' : 'text-zinc-300'
+                }`}
               >
                 <span>{it.label}</span>
                 <span className="text-xs text-zinc-500 font-mono">{it.hint}</span>
               </button>
             </li>
           ))}
-          {items.length === 0 && <li className="px-4 py-6 text-center text-sm text-zinc-500">Ничего не найдено</li>}
+          {items.length === 0 && (
+            <li className="px-4 py-6 text-center text-sm text-zinc-500">Ничего не найдено</li>
+          )}
         </ul>
       </div>
     </div>

@@ -17,6 +17,10 @@ def build_engine(database_url: str, **kwargs: Any) -> Engine:
         engine = create_engine(database_url, **kwargs)
         event.listen(engine, "connect", _enable_sqlite_foreign_keys)
         return engine
+    kwargs.setdefault("pool_size", 20)
+    kwargs.setdefault("max_overflow", 40)
+    kwargs.setdefault("pool_recycle", 1800)
+    kwargs.setdefault("pool_timeout", 30)
     return create_engine(database_url, pool_pre_ping=True, **kwargs)
 
 

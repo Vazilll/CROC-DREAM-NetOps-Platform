@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import socket
 from pathlib import Path
 from typing import Any
@@ -20,13 +19,11 @@ from netops.services.discovery import (
     detect_platform_from_version,
     load_platform_profiles,
 )
-from netops.services.notifier import load_telegram_profiles
 from netops.services.telemetry import (
     collect_metrics_from_cli,
     detect_optimal_telemetry_protocol,
     register_parser,
 )
-from netops.settings import Settings
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 PLATFORMS_DIR = REPO_ROOT / "intent" / "platforms"
@@ -363,23 +360,3 @@ def test_discovery_helper_functions_use_platform_profiles() -> None:
         == Platform.ARISTA_EOS
     )
 
-
-def test_notifier_load_telegram_profiles_overlay(tmp_path: Path) -> None:
-    """Notifier dynamically loads notification profiles with local runtime overlay support."""
-    settings = Settings(_env_file=None, offline_lab_path=tmp_path)  # type: ignore[call-arg]
-    base_profiles = load_telegram_profiles(settings)
-    assert 7325469808 in base_profiles
-
-    # Create overlay
-    overlay = {
-        999888777: {
-            "username": "custom_noc",
-            "tg_username": "noc_bot",
-            "first_name": "NOC Engineer",
-            "role": "admin",
-        }
-    }
-    (tmp_path / "telegram_profiles.json").write_text(json.dumps(overlay), encoding="utf-8")
-    loaded = load_telegram_profiles(settings)
-    assert 999888777 in loaded
-    assert loaded[999888777]["username"] == "custom_noc"

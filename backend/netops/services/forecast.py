@@ -7,7 +7,7 @@ import logging
 import statistics
 import time
 import urllib.request
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -124,18 +124,26 @@ def record_chaos_event(
 
     if lab_dir is not None:
         try:
-            log_file = lab_dir / "chaos_events.json"
-            events_to_save = _chaos_events[-50:]
-            payload = json.dumps(events_to_save, indent=2, ensure_ascii=False)
-            log_file.write_text(payload, encoding="utf-8")
+            from netops.services.state import get_state_manager
+
+            get_state_manager().set_db_state("chaos_events", _chaos_events[-50:])
         except Exception as exc:
-            logger.debug("Failed writing chaos events to %s: %s", lab_dir, exc)
+            logger.debug("Failed persisting chaos events to DB: %s", exc)
 
     return record
 
 
 def get_chaos_events(hostname: str | None = None) -> list[dict[str, Any]]:
     """Return chaos events for a specific hostname or all events if hostname is None."""
+    if not _chaos_events:
+        try:
+            from netops.services.state import get_state_manager
+
+            stored = get_state_manager().get_db_state("chaos_events", [])
+            if isinstance(stored, list) and stored:
+                _chaos_events.extend(stored[-_MAX_CHAOS_EVENTS:])
+        except Exception:
+            pass
     if not hostname:
         return list(_chaos_events)
     short = hostname.split(".", maxsplit=1)[0]
@@ -151,6 +159,12 @@ def clear_chaos_events() -> None:
     """Reset chaos events (for test isolation)."""
     _chaos_events.clear()
     _cache.clear()
+    try:
+        from netops.services.state import get_state_manager
+
+        get_state_manager().set_db_state("chaos_events", [])
+    except Exception:
+        pass
 
 
 def clear_forecast_cache() -> None:
@@ -405,6 +419,7 @@ def build_forecast(
     *,
     session: Session | None = None,
     session_factory: sessionmaker[Session] | None = None,
+    include_events: bool = True,
 ) -> ForecastRead:
     key = (hostname, metric, horizon)
     cached = _cache.get(key)
@@ -414,13 +429,7 @@ def build_forecast(
 
     spec = METRICS[metric]
     is_offline = settings.network_driver == "offline"
-    series = metric_series(
-        hostname,
-        role,
-        metric,
-        POINTS_PER_DAY,
-        allow_synthetic_offline=is_offline,
-    )
+    series = metric_series(hostname, role, metric, POINTS_PER_DAY)
     if result is None:
         if settings.forecast_url and len(series) >= 3:
             cooldown_until = _service_failure_cooldown.get(settings.forecast_url, 0.0)
@@ -453,15 +462,19 @@ def build_forecast(
     end_dt = datetime.now(UTC)
     end_ts = end_dt.isoformat()
 
-    events = collect_forecast_events(
-        device_id=device_id,
-        hostname=hostname,
-        end_time=end_dt,
-        step_seconds=STEP_SECONDS,
-        history_points=HISTORY_SHOWN,
-        horizon=horizon,
-        session=session,
-        session_factory=session_factory,
+    events = (
+        collect_forecast_events(
+            device_id=device_id,
+            hostname=hostname,
+            end_time=end_dt,
+            step_seconds=STEP_SECONDS,
+            history_points=HISTORY_SHOWN,
+            horizon=horizon,
+            session=session,
+            session_factory=session_factory,
+        )
+        if include_events
+        else []
     )
 
     return ForecastRead(

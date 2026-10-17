@@ -55,6 +55,8 @@ type Tab = (typeof TABS)[number];
 const METRICS = [
   { id: 'uplink_util_pct', label: 'Загрузка аплинка' },
   { id: 'cpu_pct', label: 'Загрузка CPU' },
+  { id: 'memory_pct', label: 'Память (RAM)' },
+  { id: 'load_1m', label: 'Load Average (1m)' },
 ];
 
 const Th: React.FC<{ children: React.ReactNode }> = ({ children }) => (
@@ -150,13 +152,7 @@ export const DevicePage: React.FC<Props> = ({
   }
 
   // Terminal State
-  const [terminalOutput, setTerminalOutput] = useState<Array<{ command: string; output: string; time: string }>>([
-    {
-      command: 'sys.connect',
-      output: 'Connected to device console. Active session established.',
-      time: '00:00:01',
-    },
-  ]);
+  const [terminalOutput, setTerminalOutput] = useState<Array<{ command: string; output: string; time: string }>>([]);
   const [commandInput, setCommandInput] = useState('');
   const [terminalRunning, setTerminalRunning] = useState(false);
 
@@ -522,13 +518,16 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
                 <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Вычислительные ядра</span>
+                <span>{isServer ? 'Вычислительные ядра' : 'Control Plane / ASIC'}</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.cpu_cores ? `${specs.cpu_cores} vCPU` : '—'}
               </div>
               <div className="text-[11px] text-zinc-500 mt-0.5">
-                {specs?.os_version || (locale === 'en' ? 'No telemetry yet' : 'Телеметрия не получена')}
+                {specs?.os_version ||
+                  (device.status === 'UNREACHABLE'
+                    ? 'Нет данных (стенд выключен)'
+                    : `${PLATFORM_NAMES[device.platform] || device.platform} (не опрошено)`)}
               </div>
             </div>
 
@@ -540,29 +539,47 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.ram_gb ? `${specs.ram_gb} GB RAM` : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">{specs?.ram_gb ? 'RAM' : (locale === 'en' ? 'No data' : 'Нет данных')}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                {specs?.ram_gb
+                  ? 'RAM (по SSH опросу)'
+                  : locale === 'en'
+                  ? 'No telemetry data'
+                  : 'Нет данных (телеметрия не снята)'}
+              </div>
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
                 <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Накопитель</span>
+                <span>{isServer ? 'Накопитель' : 'BGP Автономная система (Git SoT)'}</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.disk_gb ? `${specs.disk_gb} GB` : '—'}
+                {specs?.disk_gb
+                  ? `${specs.disk_gb} GB`
+                  : device.intent?.bgp?.asn
+                  ? `AS ${device.intent.bgp.asn}`
+                  : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">{specs?.disk_gb ? 'Disk' : (locale === 'en' ? 'No data' : 'Нет данных')}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                {specs?.disk_gb
+                  ? 'Disk'
+                  : device.intent?.bgp?.neighbors
+                  ? `${device.intent.bgp.neighbors.length} eBGP пиров (из YAML Intent)`
+                  : locale === 'en'
+                  ? 'No data'
+                  : 'Нет данных'}
+              </div>
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
               <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
                 <Radio className="w-3.5 h-3.5 text-amber-400" />
-                <span>Сетевые порты</span>
+                <span>Сетевые порты (Git SoT)</span>
               </div>
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.interfaces ? `${specs.interfaces.length}` : `${device.intent?.interfaces.length ?? 0}`}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">{locale === 'en' ? 'Per Git intent' : 'По Git-intent'}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">{locale === 'en' ? 'Per Git intent' : 'По декларативному Git-intent'}</div>
             </div>
           </div>
 
@@ -577,6 +594,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               <Field label="Bastion / ProxyJump">
                 {device.proxy_jump ? (
                   <span className="text-indigo-300">{device.proxy_jump}</span>
+                ) : device.platform === 'huawei_vrp' ? (
+                  <span className="text-indigo-300">SSH Jump (Containerlab Host)</span>
                 ) : (
                   <span className="text-zinc-500">Прямой доступ (Direct L3)</span>
                 )}
@@ -606,7 +625,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
           {/* Interfaces Table */}
           <div className="rounded-xl border border-white/[0.08] bg-[#0c0e14] overflow-hidden">
             <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-              <span className="text-xs font-semibold text-white tracking-tight">Сетевые интерфейсы</span>
+              <span className="text-xs font-semibold text-white tracking-tight">Сетевые интерфейсы (декларативный профиль Git SoT)</span>
               <span className="text-[11px] text-zinc-500 font-mono">
                 {device.intent?.interfaces.length || 0} настроено в SoT
               </span>
@@ -631,7 +650,11 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     <td className="px-3 py-2 font-mono text-zinc-400">{i.mtu}</td>
                     <td className="px-3 py-2 text-zinc-400 font-mono uppercase text-xs">{i.mode}</td>
                     <td className="px-3 py-2">
-                      {i.enabled ? (
+                      {device.status === 'UNREACHABLE' || device.oper_status === 'DOWN' ? (
+                        <span className="inline-flex items-center gap-1 text-rose-400 text-xs" title="Устройство недоступно по SSH; в Git SoT интерфейс объявлен как enabled">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> unreachable ({i.enabled ? 'SoT: up' : 'SoT: down'})
+                        </span>
+                      ) : i.enabled ? (
                         <span className="inline-flex items-center gap-1 text-emerald-400 text-xs">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> up
                         </span>
@@ -726,7 +749,9 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   <ChevronRight className="w-3.5 h-3.5 opacity-50" />
                 </div>
                 <div className="text-xs font-semibold text-slate-800 dark:text-zinc-200 group-hover:text-amber-600 dark:group-hover:text-white">Сброс BGP</div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-0.5">clear ip bgp * soft</div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-0.5 font-mono">
+                  {device.platform === 'huawei_vrp' ? 'reset bgp all' : 'clear ip bgp * soft'}
+                </div>
               </button>
 
               <button
@@ -745,7 +770,9 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   <ChevronRight className="w-3.5 h-3.5 opacity-50" />
                 </div>
                 <div className="text-xs font-semibold text-slate-800 dark:text-zinc-200 group-hover:text-amber-600 dark:group-hover:text-white">Рестарт демона</div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-0.5">systemctl restart frr</div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-500 mt-0.5 font-mono">
+                  {device.platform === 'huawei_vrp' ? 'reset routing-engine' : 'systemctl restart frr'}
+                </div>
               </button>
 
               <button
@@ -778,7 +805,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             title="Прогноз телеметрии (горизонт 6 часов)"
             accent="bg-indigo-600"
             right={
-              <span className="flex gap-1">
+              <span className="flex flex-wrap gap-1">
                 {METRICS.map((m) => (
                   <button
                     key={m.id}
@@ -807,7 +834,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     <AlertTriangle className="w-5 h-5 shrink-0" />
                     <div>
                       <span className="font-semibold">Внимание! </span>
-                      Метрика «{forecastData.label}» превысит порог {forecastData.threshold}% примерно через{' '}
+                      Метрика «{forecastData.label}» превысит порог {forecastData.threshold}{forecastData.metric === 'load_1m' ? '' : '%'} примерно через{' '}
                       <strong>{forecastData.breach_in_minutes} мин</strong>. Рекомендуется балансировка ECMP.
                     </div>
                   </div>
@@ -816,7 +843,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     <CheckCircle2 className="w-5 h-5 shrink-0" />
                     <div>
                       <span className="font-semibold">Штатный режим: </span>
-                      В ближайшие 6 часов превышения порога {forecastData.threshold}% не прогнозируется.
+                      В ближайшие 6 часов превышения порога {forecastData.threshold}{forecastData.metric === 'load_1m' ? '' : '%'} не прогнозируется.
                     </div>
                   </div>
                 )}

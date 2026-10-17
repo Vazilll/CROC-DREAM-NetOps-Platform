@@ -211,7 +211,9 @@ def test_allowed_system_restricts_device_visibility_and_records_session_telemetr
     # Owner inspects /api/v1/users and sees bound_ip, bound_client_id, last_seen_at
     profile = client.get(f"/api/v1/users/{created['id']}", headers=ADMIN).json()
     assert profile["bound_client_id"] == "laptop-spine1"
-    assert profile["bound_ip"] == "10.20.30.40"
+    # A client-supplied X-Forwarded-For must NOT be trusted (spoofable); only the socket peer
+    # (or uvicorn's trusted-proxy resolution) counts.
+    assert profile["bound_ip"] == "testclient"
     assert profile["last_seen_at"] is not None
 
     # /api/v1/users/me returns the full user profile
@@ -322,33 +324,50 @@ def test_matryoshka_bootstrap_and_owner_pc_recovery(
     assert claim_data["bound_client_id"] == "pc-owner-1"
     recovery_key = claim_data["recovery_key"]
     assert recovery_key.startswith("crk_owner_")
+    # Claim opens an HttpOnly owner session cookie and returns the CSRF token.
+    assert "netops_sid" in claim.cookies
+    assert "httponly" in claim.headers["set-cookie"].lower()
+    csrf = {"X-CSRF-Token": claim_data["csrf_token"]}
+
+    cfg_payload = {
+        "cluster_name": "CROC-DOCKER-CLUSTER-1",
+        "github_repo_url": "https://github.com/Vazilll/CROC-DREAM-NetOps-Platform",
+        "bootstrap_completed": True,
+    }
+    # Session cookie without CSRF header is rejected.
+    assert client.post("/api/v1/system/bootstrap/configure", json=cfg_payload).status_code == 403
 
     # Step 2 & 3: Owner configures GitHub, Telegram & marks bootstrap_completed
-    cfg = client.post(
-        "/api/v1/system/bootstrap/configure",
-        json={
-            "cluster_name": "CROC-DOCKER-CLUSTER-1",
-            "github_repo_url": "https://github.com/Vazilll/CROC-DREAM-NetOps-Platform",
-            "bootstrap_completed": True,
-        },
-    )
+    cfg = client.post("/api/v1/system/bootstrap/configure", json=cfg_payload, headers=csrf)
     assert cfg.status_code == 200
 
     # Step 4: Discover / unpack server in offline mode
     disc = client.post(
         "/api/v1/system/bootstrap/discover-server",
         json={"mode": "offline"},
+        headers=csrf,
     )
     assert disc.status_code == 200
     assert disc.json()["synced_total"] == 4
 
-    # Stranger on PC #2 tries to claim owner without recovery key -> 403 Forbidden
-    stranger = client.post(
-        "/api/v1/system/bootstrap/claim-owner",
-        json={"cluster_name": "HACKED"},
-        headers={"X-Client-Id": "pc-stranger-99"},
-    )
-    assert stranger.status_code == 403
+    # Owner's own session sees the recovery key; anonymous callers never do.
+    assert client.get("/api/v1/system/bootstrap/status").json()["owner"]["recovery_key"]
+    client.cookies.clear()
+    anon_status = client.get("/api/v1/system/bootstrap/status").json()
+    assert anon_status["owner"]["recovery_key"] is None
+    assert recovery_key not in anon_status["telegram"]["deep_link_claim"]
+
+    # Anonymous callers cannot reconfigure the cluster.
+    assert client.post("/api/v1/system/bootstrap/configure", json=cfg_payload).status_code == 401
+
+    # Stranger on PC #2 (even spoofing the owner's X-Client-Id) cannot claim without the key
+    for cid in ("pc-stranger-99", "pc-owner-1"):
+        stranger = client.post(
+            "/api/v1/system/bootstrap/claim-owner",
+            json={"cluster_name": "HACKED"},
+            headers={"X-Client-Id": cid},
+        )
+        assert stranger.status_code == 403
 
     # Owner moves to PC #2 (old PC lost) and recovers using Master Recovery Key
     recovered = client.post(
@@ -358,5 +377,6 @@ def test_matryoshka_bootstrap_and_owner_pc_recovery(
     )
     assert recovered.status_code == 200
     assert recovered.json()["bound_client_id"] == "pc-owner-new-2"
+    assert client.get("/api/v1/auth/me").json()["role"] == "owner"
 
 

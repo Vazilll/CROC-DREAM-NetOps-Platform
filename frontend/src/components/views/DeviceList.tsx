@@ -136,25 +136,30 @@ export const DeviceList: React.FC<DeviceListProps> = ({
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return devices
-      .filter(
-        (d) =>
-          (!q || `${d.hostname} ${d.management_ip}`.toLowerCase().includes(q)) &&
-          (!platform || d.platform === platform) &&
-          (!role || d.role === role) &&
-          (!status || d.status === status) &&
-          (!operStatus || (d.oper_status ?? 'UP') === operStatus)
-      )
-      .sort((a, b) => {
-        if (sort.key === 'management_ip') {
-          const x = ipKey(a.management_ip);
-          const y = ipKey(b.management_ip);
-          return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
-        }
-        const x = String(sort.key === 'oper_status' ? (a.oper_status ?? 'UP') : a[sort.key]);
-        const y = String(sort.key === 'oper_status' ? (b.oper_status ?? 'UP') : b[sort.key]);
-        return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
+    const filtered = devices.filter(
+      (d) =>
+        (!platform || d.platform === platform) &&
+        (!role || d.role === role) &&
+        (!status || d.status === status) &&
+        (!operStatus || (d.oper_status ?? 'UP') === operStatus)
+    );
+    if (q) {
+      const tokens = q.split(/\s+/).filter(Boolean);
+      return filtered.filter((d) => {
+        const hay = `${d.hostname} ${d.management_ip} ${d.platform} ${PLATFORM_NAMES[d.platform] ?? ''} ${d.role} ${ROLE_NAMES[d.role] ?? ''} ${d.status} ${d.site ?? ''}`.toLowerCase();
+        return tokens.every((tok) => hay.includes(tok));
       });
+    }
+    return [...filtered].sort((a, b) => {
+      if (sort.key === 'management_ip') {
+        const x = ipKey(a.management_ip);
+        const y = ipKey(b.management_ip);
+        return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
+      }
+      const x = String(sort.key === 'oper_status' ? (a.oper_status ?? 'UP') : a[sort.key]);
+      const y = String(sort.key === 'oper_status' ? (b.oper_status ?? 'UP') : b[sort.key]);
+      return (x > y ? 1 : x < y ? -1 : 0) * sort.dir;
+    });
   }, [devices, query, platform, role, status, operStatus, sort]);
 
   const toggle = (id: number) =>

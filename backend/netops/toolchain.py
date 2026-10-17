@@ -8,7 +8,6 @@ from netops.errors import PipelineError
 from netops.intent.models import InventoryDevice
 from netops.intent.repository import IntentRepository
 from netops.network.base import (
-
     ConfigCollector,
     ConfigDeployer,
     ConfigRenderer,
@@ -56,6 +55,10 @@ class Toolchain:
 
 
 def build_toolchain(settings: Settings) -> Toolchain:
+    import os
+
+    if "PYTEST_CURRENT_TEST" not in os.environ:
+        settings.apply_runtime_overlay(respect_explicit=True)
     # Драйвер Scrapli/Nornir регистрируется здесь под своим значением NETOPS_NETWORK_DRIVER.
     match settings.network_driver:
         case "offline":
@@ -64,7 +67,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
             deployer: ConfigDeployer = lab
             health_probe: HealthProbe = lab
         case "scrapli":
-            from netops.network.scrapli_driver import ScrapliNetworkDriver  # noqa: PLC0415
+            from netops.network.scrapli_driver import ScrapliNetworkDriver
 
             driver = ScrapliNetworkDriver()
             collector = driver
@@ -76,11 +79,12 @@ def build_toolchain(settings: Settings) -> Toolchain:
         for name, profile in settings.auth_profiles.items()
     }
     try:
-        import json  # noqa: PLC0415
+        from netops.services.state import get_state_manager
 
-        custom_auth_file = settings.offline_lab_path / "custom_auth_profiles.json"
-        if custom_auth_file.is_file():
-            raw_profiles = json.loads(custom_auth_file.read_text(encoding="utf-8"))
+        raw_profiles = get_state_manager(settings).get_db_state(
+            "custom_auth_profiles", {}, database_url=settings.database_url
+        )
+        if isinstance(raw_profiles, dict):
             for prof_name, prof_data in raw_profiles.items():
                 if isinstance(prof_data, dict) and "username" in prof_data:
                     creds_map[prof_name] = Credentials(
@@ -109,7 +113,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
 
 
 def _get_ai_guard(settings: Settings) -> Any:
-    from netops.services.ai_guard import AiTelemetryGuard  # noqa: PLC0415
+    from netops.services.ai_guard import AiTelemetryGuard
 
     return AiTelemetryGuard(settings)
 

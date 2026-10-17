@@ -48,6 +48,7 @@ export interface Translations {
 
   groupTesting: string;
   tabLab: string;
+  tabEmergency: string;
 
   // Dashboard Metric Cards
   cardDevices: string;
@@ -224,6 +225,7 @@ export const translations: Record<Locale, Translations> = {
 
     groupTesting: 'ТЕСТИРОВАНИЕ',
     tabLab: 'Chaos Lab',
+    tabEmergency: 'Emergency Hub',
 
     cardDevices: 'Оборудование',
     cardDevicesNormal: 'норма',
@@ -364,7 +366,7 @@ export const translations: Record<Locale, Translations> = {
     cluster: 'Cluster',
     tokens: 'Tokens',
 
-    aiCopilot: 'AI',
+    aiCopilot: 'Copilot',
     aiAssistant: 'AI Assistant',
     toggleTheme: 'Toggle Theme (Dark / Light)',
     themeDark: 'Dark',
@@ -391,6 +393,7 @@ export const translations: Record<Locale, Translations> = {
 
     groupTesting: 'TESTING',
     tabLab: 'Chaos Lab',
+    tabEmergency: 'Emergency Hub',
 
     cardDevices: 'Hardware Devices',
     cardDevicesNormal: 'healthy',

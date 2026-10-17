@@ -147,27 +147,46 @@ async def stream_job_logs(
     response_model=JobDiffRead,
     summary="Текущий и целевой конфиг, патчи наката и отката",
 )
-def get_job_diff(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> JobDiffRead:
+def get_job_diff(
+    job_id: uuid.UUID, service: JobServiceDep, container: ContainerDep, _: Viewer
+) -> JobDiffRead:
     job = service.get_with_diff(job_id)
-    return JobDiffRead(
-        job_id=job.id,
-        job_type=job.type,
-        devices=[
+    toolchain = None
+    devices_out: list[DeviceDiffRead] = []
+    for target in job.targets:
+        if target.device_id is None:
+            continue
+        intended_cfg = target.intended_snapshot.content if target.intended_snapshot else None
+        if not intended_cfg and target.device is not None:
+            try:
+                from netops.intent import InventoryDevice
+                from netops.toolchain import build_toolchain
+
+                if toolchain is None:
+                    toolchain = build_toolchain(container.settings)
+                intent = toolchain.intents.load_device_intent(target.hostname)
+                if intent is not None:
+                    spec = InventoryDevice.model_validate(target.device)
+                    rendered = toolchain.renderer.render(spec, intent)
+                    intended_cfg = toolchain.normalizer.normalize(target.device.platform, rendered)
+            except Exception:
+                pass
+        devices_out.append(
             DeviceDiffRead(
                 device_id=target.device_id,
                 hostname=target.hostname,
                 status=target.status,
                 error=target.error,
                 running_config=target.running_snapshot.content if target.running_snapshot else None,
-                intended_config=(
-                    target.intended_snapshot.content if target.intended_snapshot else None
-                ),
+                intended_config=intended_cfg,
                 remediation_patch=target.remediation_config,
                 rollback_patch=target.rollback_config,
             )
-            for target in job.targets
-            if target.device_id is not None
-        ],
+        )
+    return JobDiffRead(
+        job_id=job.id,
+        job_type=job.type,
+        devices=devices_out,
     )
 
 

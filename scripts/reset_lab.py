@@ -66,28 +66,15 @@ def reset_environment(seed: bool = False) -> None:
         except Exception as exc:
             logger.warning("Пропуск БД %s: %s", url, exc)
 
-    # 2. Reset Runtime Overlay, User Tokens, Access Registry, Chaos & Audit files
-    for fname, empty_val in [
-        ("chaos_events.json", "[]\n"),
-        ("emergency_audit.jsonl", ""),
-        ("runtime_settings.json", "{}\n"),
-        ("user_tokens.json", "{}\n"),
-        ("access_registry.json", "{}\n"),
-        ("telegram_bindings.json", "{}\n"),
-        ("telegram_subscribers.json", "[]\n"),
-        ("telemetry_cache.json", "{}\n"),
-        ("custom_auth_profiles.json", "{}\n"),
-    ]:
-        fpath = lab_dir / fname
-        fpath.write_text(empty_val, encoding="utf-8")
-
-    for b_fname, empty_val in [
-        ("user_tokens.json", "{}\n"),
-        ("telemetry_cache.json", "{}\n"),
-    ]:
-        bfpath = BACKEND_DIR / b_fname
-        if bfpath.exists():
-            bfpath.write_text(empty_val, encoding="utf-8")
+    # 2. Purge any legacy .json / .jsonl files (all state now resides in PostgreSQL system_state)
+    for directory in (lab_dir, BACKEND_DIR):
+        for pattern in ("*.json", "*.jsonl"):
+            for fpath in directory.glob(pattern):
+                try:
+                    fpath.unlink()
+                    logger.info("Удалён устаревший JSON-файл состояния: %s", fpath.name)
+                except Exception as exc:
+                    logger.warning("Не удалось удалить %s: %s", fpath.name, exc)
 
     # 3. Restore Clean Baseline Device Configs (admin / admin)
     intent_repo = IntentRepository(PROJECT_ROOT / "intent", inventory_file="inventory.yaml")
@@ -115,7 +102,7 @@ def reset_environment(seed: bool = False) -> None:
         logger.error("Error generating configs: %s", exc)
 
     print("=================================================================")
-    print("  [OK] Сброс окружения (PostgreSQL + SQLite + JSON) завершён!")
+    print("  [OK] Сброс окружения (PostgreSQL + SQLite, без JSON) завершён!")
     print("=================================================================")
 
 

@@ -58,7 +58,7 @@ class JobRunner:
             recorder = JobRecorder(session, job)
             recorder.start()
 
-            from netops.services.freeze import get_freeze_state, is_factory_frozen  # noqa: PLC0415
+            from netops.services.freeze import get_freeze_state, is_factory_frozen
 
             if job.type in (JobType.DEPLOY, JobType.DRIFT_REMEDIATE):
                 if is_factory_frozen():
@@ -103,8 +103,8 @@ class JobRunner:
                 recorder.finish()
 
             try:
-                from netops.services.notifier import send_telegram_message  # noqa: PLC0415
-                from netops.settings import get_settings  # noqa: PLC0415
+                from netops.services.notifier import send_telegram_message
+                from netops.settings import get_settings
 
                 settings = get_settings()
                 if settings.telegram_bot_token and job.created_by != "scheduler":

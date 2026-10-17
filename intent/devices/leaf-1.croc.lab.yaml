@@ -2,11 +2,11 @@
 hostname: "leaf-1.croc.lab"
 
 interfaces:
-  - name: "LoopBack0"
-    description: "Router-ID / BGP announce"
+  - name: "Vbdif10"
+    description: "Anycast gateway VLAN10 10.20.1.0/24"
     enabled: true
     mode: "l3"
-    ipv4_address: "10.255.0.1/32"
+    ipv4_address: "10.20.1.1/24"
     mtu: 1500
 
   - name: "GE1/0/0"
@@ -16,6 +16,7 @@ interfaces:
     ipv4_address: "10.10.0.1/31"
     mtu: 1500
     acl_in: "FABRIC-IN"
+    ospf_area: "0.0.0.0"
 
   - name: "GE1/0/1"
     description: "Uplink to spine2 Ethernet1"
@@ -24,30 +25,32 @@ interfaces:
     ipv4_address: "10.10.0.5/31"
     mtu: 1500
     acl_in: "FABRIC-IN"
+    ospf_area: "0.0.0.0"
 
-  - name: "GE1/0/9"
-    description: "Access to host-a"
+  - name: "LoopBack0"
+    description: "Router-ID / BGP announce / VTEP source"
     enabled: true
     mode: "l3"
-    ipv4_address: "10.20.1.1/24"
+    ipv4_address: "10.255.0.1/32"
     mtu: 1500
+    ospf_area: "0.0.0.0"
 
 bgp:
   asn: 65001
   router_id: "10.255.0.1"
+  evpn: true
+  vxlan_vni: 10010
   neighbors:
     - peer_ip: "10.10.0.0"
       remote_asn: 65000
       description: "spine1"
       announced_prefixes:
         - "10.255.0.1/32"
-        - "10.20.1.0/24"
     - peer_ip: "10.10.0.4"
       remote_asn: 65000
       description: "spine2"
       announced_prefixes:
         - "10.255.0.1/32"
-        - "10.20.1.0/24"
 
 acls:
   - name: "FABRIC-IN"
@@ -56,6 +59,9 @@ acls:
       - sequence: 10
         action: "permit"
         protocol: "icmp"
+      - sequence: 15
+        action: "permit"
+        protocol: "ospf"
       - sequence: 20
         action: "permit"
         protocol: "tcp"

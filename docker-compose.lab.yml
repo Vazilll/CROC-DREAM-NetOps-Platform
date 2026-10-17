@@ -13,14 +13,18 @@ services:
     networks: [default, clab_mgmt]
 
   api: &live
+    networks: [default, clab_mgmt]
     environment:
       NETOPS_NETWORK_DRIVER: scrapli
       # Устройства стенда настроены с community public; в базовом compose v2c не проверяется.
       NETOPS_SNMP_COMMUNITY: ${NETOPS_SNMP_COMMUNITY:-public}
-      NETOPS_INTENT_REPO_PATH: /data/intent-live
+      NETOPS_INTENT_REPO_PATH: /data/intent
+      NETOPS_INVENTORY_FILE: ${NETOPS_INVENTORY_FILE:-inventory.yaml}
     volumes:
-      - ${INTENT_LIVE:-./intent-live}:/data/intent-live:ro
+      - ${INTENT:-./intent}:/data/intent:rw
       - ${TEMPLATES:-./templates}:/data/templates:ro
+      - ${LAB:-./lab/running}:/data/lab/running:rw
+      - ${MONITORING:-./monitoring}:/data/monitoring:ro
 
   worker: *live
   beat: *live
