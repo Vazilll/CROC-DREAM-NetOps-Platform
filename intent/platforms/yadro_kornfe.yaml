@@ -1,3 +1,6 @@
+# ==============================================================================
+# БЛОК 1: ИДЕНТИФИКАЦИЯ СТЕНДА И ВЕНДОРА (TCP / SSH / CLI ТРИГГЕРЫ)
+# ==============================================================================
 platform: yadro_kornfe
 vendor: YADRO
 default_password: admin
@@ -12,6 +15,10 @@ ssh_banners:
 version_signatures:
   - YADRO
   - Kornfe
+
+# ==============================================================================
+# БЛОК 2: ИНСПЕКЦИЯ ТОПОЛОГИИ И КОНФИГУРАЦИИ (DISCOVERY & DRIFT ENGINE)
+# ==============================================================================
 interface_prefixes:
   - Ethernet
   - Eth
@@ -28,16 +35,10 @@ commands:
   hostname_filter: show running-config | include hostname
   interfaces_brief: show ip interface brief
   lldp_neighbors: show lldp neighbors
-telemetry:
-  cpu_pct:
-    command: top -bn1 | head -n 5
-    parser: parse_arista_cpu
-  memory_pct:
-    command: top -bn1 | head -n 5
-    parser: parse_arista_memory
-  uplink_util_pct:
-    command: show interfaces counters rates
-    parser: max_yadro_link_utilization
+
+# ==============================================================================
+# БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)
+# ==============================================================================
 gnmi:
   default_port: 6030
   check_command: show gnmi
@@ -57,6 +58,24 @@ protocol_priority:
   - gnmi
   - snmp
   - ssh_cli
+
+# ==============================================================================
+# БЛОК 4: КАСТОМНЫЙ SSH CLI СБОРЩИК МЕТРИК (POOLED SSH FALLBACK ENGINE)
+# ==============================================================================
+telemetry:
+  cpu_pct:
+    command: top -bn1 | head -n 5
+    parser: parse_arista_cpu
+  memory_pct:
+    command: top -bn1 | head -n 5
+    parser: parse_arista_memory
+  uplink_util_pct:
+    command: show interfaces counters rates
+    parser: max_yadro_link_utilization
+
+# ==============================================================================
+# БЛОК 5: АВАРИЙНОЕ УПРАВЛЕНИЕ (EMERGENCY HUB)
+# ==============================================================================
 emergency_commands:
   reset_bgp_sessions: clear ip bgp *
   rollback_last_commit: rollback configuration

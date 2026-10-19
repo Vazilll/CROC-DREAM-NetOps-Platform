@@ -19,6 +19,7 @@ import type {
   BootstrapConfigureResponse,
   BootstrapExposureInfo,
   BootstrapStatusResponse,
+  CollectorPlanResponse,
   CopilotReplyWithAction,
   Device,
   DeviceDetail,
@@ -507,6 +508,26 @@ export class NetOpsApiClient extends NetOpsHttpClient {
       body: JSON.stringify({ frozen, reason }),
     });
   }
+
+  async getCollectorPlan(): Promise<CollectorPlanResponse> {
+    return this.request<CollectorPlanResponse>('/telemetry/collectors');
+  }
+
+  async setDeviceCollectorProtocol(
+    hostname: string,
+    protocol: 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli'
+  ): Promise<CollectorPlanResponse> {
+    return this.request<CollectorPlanResponse>(`/telemetry/collectors/${encodeURIComponent(hostname)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ protocol }),
+    });
+  }
+
+  async refreshCollectorPlan(): Promise<{ status: string }> {
+    return this.request<{ status: string }>('/telemetry/collectors/refresh', {
+      method: 'POST',
+    });
+  }
 }
 
 export const api = new NetOpsApiClient();
@@ -514,3 +535,4 @@ export const api = new NetOpsApiClient();
 export function startApiSession(): void {
   api.setReady(bootstrapAuthSession((token) => api.login(token)));
 }
+

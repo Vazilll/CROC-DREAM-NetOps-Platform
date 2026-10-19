@@ -589,6 +589,35 @@ export interface ServerDiscoveryResponse {
   updated?: number;
 }
 
+export interface ProtocolSupportInfo {
+  supported: boolean;
+  port?: number;
+  verified_by?: string | null;
+  tls?: boolean | null;
+  cli_supported?: boolean;
+  tcp_open?: boolean;
+  path?: string;
+  snmp_agent?: string[];
+}
+
+export interface CollectorDevicePlan {
+  protocol: string;
+  selected_mode?: string;
+  port: number;
+  host: string;
+  platform: string;
+  fabric_id: string;
+  verified_by?: string | null;
+  supported_protocols?: Record<string, ProtocolSupportInfo>;
+}
+
+export interface CollectorPlanResponse {
+  refreshed_at: string | null;
+  protocols: Record<string, number>;
+  devices: Record<string, CollectorDevicePlan>;
+  overrides?: Record<string, string>;
+}
+
 export function getErrorMessage(err: unknown, fallback = 'Unexpected error'): string {
   if (err instanceof Error && err.message) {
     return err.message;
@@ -604,3 +633,4 @@ export function getErrorMessage(err: unknown, fallback = 'Unexpected error'): st
   }
   return fallback;
 }
+

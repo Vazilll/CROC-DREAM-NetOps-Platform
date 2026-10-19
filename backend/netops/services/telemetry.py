@@ -253,8 +253,9 @@ def detect_optimal_telemetry_protocol(
     snmp_port: int | None = None, exporter_port: int | None = None,
     management_port: int | None = None, timeout: float = 0.5,
     platform_profile: Any = None, repo_path: Path | None = None, gnmi_probe: Any = None,
+    preferred_protocol: str | None = None,
 ) -> dict[str, object]:
-    """Pick the best telemetry protocol from PlatformProfile.protocol_priority."""
+    """Probe all candidate telemetry protocols from PlatformProfile and pick the active one."""
     from netops.enums import TelemetryProtocol
     from netops.services import protocol_probe
 
@@ -263,42 +264,62 @@ def detect_optimal_telemetry_protocol(
         host, management_port=management_port, platform=platform, platform_profile=profile,
         gnmi_port=gnmi_port, snmp_port=snmp_port, exporter_port=exporter_port, repo_path=repo_path,
     )
-    fallback: dict[str, object] = {
+    ssh_entry: dict[str, object] = {
         "protocol": TelemetryProtocol.SSH_CLI, "port": ports.get("ssh", 22),
         "verified_by": "ssh_session" if ssh_send is not None else None,
         "cli_supported": ssh_send is not None, "tcp_open": False,
     }
     if profile is None:
-        return fallback
+        return ssh_entry
 
     probe_gnmi = gnmi_probe or protocol_probe.gnmic_capabilities
     snmp_agent: list[str] = []
-    for proto in profile.protocol_priority or ["gnmi", "node_exporter", "snmp", "ssh_cli"]:
+    supported_protocols: dict[str, dict[str, object]] = {
+        TelemetryProtocol.SSH_CLI.value: {
+            "supported": True,
+            "port": ports.get("ssh", 22),
+            "verified_by": "ssh_session" if ssh_send is not None else "ssh_cli_profile",
+            "cli_supported": ssh_send is not None,
+        }
+    }
+    candidates: dict[str, dict[str, object]] = {TelemetryProtocol.SSH_CLI.value: ssh_entry}
+    priority = list(profile.protocol_priority or ["gnmi", "node_exporter", "snmp", "ssh_cli"])
+
+    for proto in priority:
         if proto in ("ssh_cli", "ssh"):
-            break
+            continue
         if proto == "gnmi" and profile.gnmi:
             port = ports.get("gnmi") or profile.gnmi.default_port
-            if not protocol_probe.tcp_open(host, port, timeout):
-                continue
+            is_open = protocol_probe.tcp_open(host, port, timeout)
             caps = (
                 probe_gnmi(host, port, username, password, timeout=max(timeout, 3.0))
-                if username and password
+                if (is_open and username and password)
                 else None
             )
-            cli_ok = _cli_reports_gnmi(ssh_send, profile.gnmi)
-            if (caps is not None and not caps.ok) or (caps is None and not cli_ok):
-                continue
-            return {
-                "protocol": TelemetryProtocol.GNMI, "port": port,
-                "verified_by": "gnmi_capabilities" if caps is not None else "cli+tcp",
+            cli_ok = _cli_reports_gnmi(ssh_send, profile.gnmi) if is_open else False
+            ok = is_open and not ((caps is not None and not caps.ok) or (caps is None and not cli_ok))
+            verified = ("gnmi_capabilities" if caps is not None else "cli+tcp") if ok else None
+            supported_protocols[TelemetryProtocol.GNMI.value] = {
+                "supported": ok, "port": port, "verified_by": verified,
                 "tls": caps.tls if caps is not None else None,
-                "cli_supported": cli_ok, "tcp_open": True,
+                "cli_supported": cli_ok, "tcp_open": is_open,
             }
-        if proto in ("node_exporter", "prometheus_exporter") and profile.exporter:
+            if ok:
+                candidates[TelemetryProtocol.GNMI.value] = {
+                    "protocol": TelemetryProtocol.GNMI, "port": port,
+                    "verified_by": verified, "tls": caps.tls if caps is not None else None,
+                    "cli_supported": cli_ok, "tcp_open": True,
+                }
+        elif proto in ("node_exporter", "prometheus_exporter") and profile.exporter:
             port = ports.get("exporter") or profile.exporter.port
             path = profile.exporter.path or "/metrics"
-            if protocol_probe.prometheus_exporter_ok(host, port, path, timeout):
-                return {
+            ok = protocol_probe.prometheus_exporter_ok(host, port, path, timeout)
+            supported_protocols[TelemetryProtocol.PROMETHEUS_EXPORTER.value] = {
+                "supported": ok, "port": port, "path": path,
+                "verified_by": "http_metrics" if ok else None, "tcp_open": ok,
+            }
+            if ok:
+                candidates[TelemetryProtocol.PROMETHEUS_EXPORTER.value] = {
                     "protocol": TelemetryProtocol.PROMETHEUS_EXPORTER, "port": port, "path": path,
                     "verified_by": "http_metrics", "cli_supported": False, "tcp_open": True,
                 }
@@ -308,13 +329,44 @@ def detect_optimal_telemetry_protocol(
                 host, port, community=snmp_community, timeout=timeout
             )
             snmp_agent = sorted(versions)
-            if "v2c" in versions:
-                return {
+            ok = "v2c" in versions
+            supported_protocols[TelemetryProtocol.SNMP.value] = {
+                "supported": ok, "port": port,
+                "verified_by": "snmp_v2c_response" if ok else None,
+                "snmp_agent": snmp_agent,
+            }
+            if ok:
+                candidates[TelemetryProtocol.SNMP.value] = {
                     "protocol": TelemetryProtocol.SNMP, "port": port,
                     "verified_by": "snmp_v2c_response", "snmp_agent": snmp_agent,
                     "cli_supported": False, "tcp_open": False,
                 }
-    return {**fallback, "snmp_agent": snmp_agent} if snmp_agent else fallback
+
+    # Select active protocol: honor preferred_protocol if supported, else first in priority
+    chosen: dict[str, object] | None = None
+    norm_pref = (
+        TelemetryProtocol.PROMETHEUS_EXPORTER.value
+        if preferred_protocol == "node_exporter"
+        else preferred_protocol
+    )
+    if norm_pref and norm_pref != "auto" and norm_pref in candidates:
+        chosen = dict(candidates[norm_pref])
+    else:
+        for proto in priority:
+            key = (
+                TelemetryProtocol.PROMETHEUS_EXPORTER.value
+                if proto == "node_exporter"
+                else (TelemetryProtocol.SSH_CLI.value if proto == "ssh" else proto)
+            )
+            if key in candidates:
+                chosen = dict(candidates[key])
+                break
+    if chosen is None:
+        chosen = dict(ssh_entry)
+    if snmp_agent and "snmp_agent" not in chosen:
+        chosen["snmp_agent"] = snmp_agent
+    chosen["supported_protocols"] = supported_protocols
+    return chosen
 
 
 def collect_fleet_metrics_parallel(

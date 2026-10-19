@@ -144,12 +144,65 @@ def trigger_telemetry_collection(
     }
 
 
+class CollectorOverrideRequest(BaseModel):
+    protocol: str
+
+
 @router.get(
     "/collectors",
     summary="Last protocol plan: which devices stream via gNMI / SNMP / exporter or stay on SSH",
 )
-def get_collector_plan(_: Viewer) -> dict[str, Any]:
-    return targets.last_collector_plan() or {"refreshed_at": None, "protocols": {}, "devices": {}}
+def get_collector_plan(service: DeviceServiceDep, _: Viewer) -> dict[str, Any]:
+    plan = targets.last_collector_plan()
+    overrides = targets.get_protocol_overrides()
+    if plan and plan.get("devices"):
+        return {**plan, "overrides": overrides}
+    # Build immediate baseline from DB devices if background refresh hasn't run yet
+    devices_map: dict[str, Any] = {}
+    for d in service.list_devices(limit=500):
+        plat = str(getattr(d.platform, "value", d.platform))
+        ports = resolve_device_ports(str(d.management_ip), management_port=d.management_port, platform=plat)
+        override = overrides.get(d.hostname)
+        active_proto = override if (override and override != "auto") else "ssh_cli"
+        devices_map[d.hostname] = {
+            "protocol": active_proto,
+            "selected_mode": override or "auto",
+            "port": ports.get(active_proto if active_proto != "prometheus_exporter" else "exporter", d.management_port),
+            "host": str(d.management_ip),
+            "platform": plat,
+            "fabric_id": d.fabric_id or "default",
+            "verified_by": f"manual_override:{override}" if override else "ssh_cli_profile",
+            "supported_protocols": {
+                "gnmi": {"supported": False, "port": ports.get("gnmi", 6030), "verified_by": None},
+                "snmp": {"supported": False, "port": ports.get("snmp", 161), "verified_by": None},
+                "prometheus_exporter": {"supported": False, "port": ports.get("exporter", 9100), "verified_by": None},
+                "ssh_cli": {"supported": True, "port": ports.get("ssh", d.management_port), "verified_by": "ssh_cli_profile"},
+            },
+        }
+    return {"refreshed_at": None, "protocols": {}, "devices": devices_map, "overrides": overrides}
+
+
+@router.put(
+    "/collectors/{hostname}",
+    summary="Select telemetry collection protocol for a device (auto, gnmi, snmp, prometheus_exporter, ssh_cli)",
+)
+def set_collector_protocol(
+    hostname: str,
+    body: CollectorOverrideRequest,
+    session: SessionDep,
+    container: ContainerDep,
+    _: Operator,
+) -> dict[str, Any]:
+    allowed = {"auto", "gnmi", "snmp", "prometheus_exporter", "node_exporter", "ssh_cli"}
+    proto = body.protocol.strip().lower()
+    if proto not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported protocol '{body.protocol}'. Allowed: {sorted(allowed)}",
+        )
+    return targets.set_device_protocol_override(
+        session, build_toolchain(container.settings), container.settings, hostname, proto
+    )
 
 
 @router.post(
@@ -185,4 +238,5 @@ def get_snmp_http_sd() -> list[dict[str, Any]]:
 )
 def get_exporter_http_sd() -> list[dict[str, Any]]:
     return list(targets.get_exporter_sd_targets())
+
 

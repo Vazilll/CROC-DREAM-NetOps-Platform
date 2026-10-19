@@ -1,3 +1,6 @@
+# ==============================================================================
+# БЛОК 1: ИДЕНТИФИКАЦИЯ СТЕНДА И ВЕНДОРА (TCP / SSH / CLI ТРИГГЕРЫ)
+# ==============================================================================
 platform: huawei_vrp
 vendor: Huawei Technologies
 default_password: F5ga6jfkig
@@ -15,6 +18,10 @@ version_signatures:
   - Huawei
   - VRP
   - HUAWEI
+
+# ==============================================================================
+# БЛОК 2: ИНСПЕКЦИЯ ТОПОЛОГИИ И КОНФИГУРАЦИИ (DISCOVERY & DRIFT ENGINE)
+# ==============================================================================
 interface_prefixes:
   - GE
   - Gigabit
@@ -32,16 +39,10 @@ commands:
   hostname_filter: display current-configuration | include sysname
   interfaces_brief: display ip interface brief
   lldp_neighbors: display lldp neighbor brief
-telemetry:
-  cpu_pct:
-    command: display cpu
-    parser: parse_huawei_cpu
-  memory_pct:
-    command: display memory
-    parser: parse_huawei_memory
-  uplink_util_pct:
-    command: display interface brief
-    parser: max_huawei_link_utilization
+
+# ==============================================================================
+# БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)
+# ==============================================================================
 gnmi:
   default_port: 57400
   check_command: display grpc
@@ -62,6 +63,24 @@ protocol_priority:
   - gnmi
   - snmp
   - ssh_cli
+
+# ==============================================================================
+# БЛОК 4: КАСТОМНЫЙ SSH CLI СБОРЩИК МЕТРИК (POOLED SSH FALLBACK ENGINE)
+# ==============================================================================
+telemetry:
+  cpu_pct:
+    command: display cpu
+    parser: parse_huawei_cpu
+  memory_pct:
+    command: display memory
+    parser: parse_huawei_memory
+  uplink_util_pct:
+    command: display interface brief
+    parser: max_huawei_link_utilization
+
+# ==============================================================================
+# БЛОК 5: АВАРИЙНОЕ УПРАВЛЕНИЕ (EMERGENCY HUB)
+# ==============================================================================
 emergency_commands:
   reset_bgp_sessions: reset bgp all
   rollback_last_commit: rollback configuration last 1

@@ -305,10 +305,19 @@ async def copilot_chat(
         ai_anomalies=ai_anomalies,
         top_k=12,
     )
-    lines = [
-        f"- {d.hostname}: {d.role}, {d.platform}, статус {d.status}"
-        for d in rag_devices
-    ]
+    from netops.telemetry import targets
+
+    plan_devices = (targets.last_collector_plan() or {}).get("devices") or {}
+    lines: list[str] = []
+    for d in rag_devices:
+        p_info = plan_devices.get(d.hostname) or {}
+        active_proto = p_info.get("protocol", "ssh_cli")
+        sup_map = p_info.get("supported_protocols") or {}
+        sup_list = [k for k, v in sup_map.items() if isinstance(v, dict) and v.get("supported")] or [active_proto]
+        lines.append(
+            f"- {d.hostname}: {d.role}, {d.platform}, статус {d.status}, "
+            f"протокол сбора={active_proto} (поддерживаются: {', '.join(sup_list)})"
+        )
     if len(rag_devices) < len(devices):
         lines.insert(
             0,

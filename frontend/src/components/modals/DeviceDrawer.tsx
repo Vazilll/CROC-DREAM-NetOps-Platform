@@ -9,7 +9,7 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { DeviceDetail, UserRole } from '../../api';
+import type { CollectorDevicePlan, DeviceDetail, UserRole } from '../../api';
 import { StatusBadge, Sparkline } from '../layout/ui';
 import { PLATFORM_NAMES } from '../../constants';
 
@@ -31,6 +31,8 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
   onOpenFullPage,
 }) => {
   const [device, setDevice] = useState<DeviceDetail | null>(null);
+  const [collectorPlan, setCollectorPlan] = useState<CollectorDevicePlan | null>(null);
+  const [protoSaving, setProtoSaving] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [prevDeviceId, setPrevDeviceId] = useState<number | null>(deviceId);
   const [activeTab, setActiveTab] = useState<'interfaces' | 'bgp' | 'config' | 'metrics'>('interfaces');
@@ -40,16 +42,20 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
   if (deviceId !== prevDeviceId) {
     setPrevDeviceId(deviceId);
     setDevice(null);
+    setCollectorPlan(null);
     setLoading(Boolean(deviceId));
   }
 
   useEffect(() => {
     if (!deviceId) return;
     let active = true;
-    api
-      .getDevice(deviceId)
-      .then((d) => {
-        if (active) setDevice(d);
+    Promise.all([api.getDevice(deviceId), api.getCollectorPlan().catch(() => null)])
+      .then(([d, plan]) => {
+        if (!active) return;
+        setDevice(d);
+        if (plan?.devices?.[d.hostname]) {
+          setCollectorPlan(plan.devices[d.hostname]);
+        }
       })
       .catch(() => {
         if (active) setDevice(null);
@@ -390,7 +396,6 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                         </span>
                       </div>
 
-                      {/* SVG Area Load sparkline */}
                       {device.sparkline && device.sparkline.length > 0 ? (
                         <div className="pt-2">
                           <Sparkline
@@ -403,9 +408,93 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                         </div>
                       ) : (
                         <div className="h-16 flex items-center justify-center text-xs text-zinc-500 font-mono">
-                          Ожидание опроса Scrapli...
+                          Ожидание опроса телеметрии...
                         </div>
                       )}
+                    </div>
+
+                    {/* Protocol Capabilities Matrix & Scenario Selector (PostgreSQL system_state) */}
+                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.08] space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <div className="text-xs font-semibold text-white font-mono">
+                            Сценарий сбора метрик и триггеры стенда
+                          </div>
+                          <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
+                            Активный канал:{' '}
+                            <span className="text-cyan-300 font-semibold uppercase">
+                              {collectorPlan?.protocol || 'ssh_cli'}
+                            </span>
+                            {collectorPlan?.port ? ` (:${collectorPlan.port})` : ''}
+                            {collectorPlan?.verified_by ? ` · ${collectorPlan.verified_by}` : ''}
+                          </div>
+                        </div>
+                        <select
+                          disabled={isViewer || protoSaving}
+                          value={collectorPlan?.selected_mode || 'auto'}
+                          onChange={async (e) => {
+                            const val = e.target.value as 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli';
+                            setProtoSaving(true);
+                            try {
+                              const updated = await api.setDeviceCollectorProtocol(device.hostname, val);
+                              if (updated?.devices?.[device.hostname]) {
+                                setCollectorPlan(updated.devices[device.hostname]);
+                              }
+                            } catch {
+                              // noop
+                            } finally {
+                              setProtoSaving(false);
+                            }
+                          }}
+                          className="px-2.5 py-1.5 rounded-lg bg-[#07080c] border border-white/[0.12] text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
+                        >
+                          <option value="auto">Авто (Каскад триггеров)</option>
+                          <option value="gnmi">gNMI (Streaming)</option>
+                          <option value="snmp">SNMP v2c/v3 (UDP)</option>
+                          <option value="prometheus_exporter">Node Exporter (HTTP)</option>
+                          <option value="ssh_cli">Кастомный SSH CLI (Пул)</option>
+                        </select>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        {([
+                          { key: 'gnmi', label: 'gNMI Stream', desc: 'CLI + gRPC Capabilities' },
+                          { key: 'snmp', label: 'SNMP v2c/v3', desc: 'UDP BER sysDescr.0' },
+                          { key: 'prometheus_exporter', label: 'Node Exporter', desc: 'HTTP /metrics' },
+                          { key: 'ssh_cli', label: 'Custom SSH CLI', desc: 'Пул 1 сессии + YAML парсер' },
+                        ] as const).map((p) => {
+                          const info = collectorPlan?.supported_protocols?.[p.key];
+                          const isSupported = p.key === 'ssh_cli' ? true : Boolean(info?.supported);
+                          const isActive = (collectorPlan?.protocol || 'ssh_cli') === p.key;
+                          return (
+                            <div
+                              key={p.key}
+                              className={`p-2.5 rounded-lg border text-[11px] font-mono ${
+                                isActive
+                                  ? 'bg-cyan-500/10 border-cyan-500/30 text-white'
+                                  : 'bg-white/[0.015] border-white/[0.06] text-zinc-400'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-zinc-200">{p.label}</span>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    isSupported
+                                      ? 'bg-emerald-500/15 text-emerald-300'
+                                      : 'bg-zinc-500/15 text-zinc-400'
+                                  }`}
+                                >
+                                  {isSupported ? 'Доступен' : 'Откл'}
+                                </span>
+                              </div>
+                              <div className="text-[10px] text-zinc-500 mt-1 truncate">
+                                {info?.port ? `Порт :${info.port} · ` : ''}
+                                {info?.verified_by || p.desc}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     <div className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] space-y-1.5 text-xs text-zinc-400">

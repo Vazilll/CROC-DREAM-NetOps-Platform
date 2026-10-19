@@ -72,3 +72,22 @@ def test_refresh_collector_targets_writes_files_without_secrets(
     assert is_externally_collected("nonexistent.croc.lab") is False
 
 
+def test_set_device_protocol_override_persists_to_postgres(
+    session, toolchain, settings, devices
+) -> None:
+    from netops.telemetry.targets import get_protocol_overrides, set_device_protocol_override
+
+    host = sorted(devices)[0]
+    updated = set_device_protocol_override(session, toolchain, settings, host, "snmp")
+    assert get_protocol_overrides()[host] == "snmp"
+    assert updated["devices"][host]["protocol"] == "snmp"
+    assert updated["devices"][host]["selected_mode"] == "snmp"
+    assert is_externally_collected(host) is True
+
+    # Reset back to auto
+    reset_plan = set_device_protocol_override(session, toolchain, settings, host, "auto")
+    assert host not in get_protocol_overrides()
+    assert reset_plan["devices"][host]["selected_mode"] == "auto"
+
+
+

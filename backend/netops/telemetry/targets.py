@@ -44,6 +44,7 @@ GNMIC_TARGETS_FILE = "gnmic_targets.yaml"
 SNMP_TARGETS_FILE = "prometheus_snmp_targets"
 EXPORTER_TARGETS_FILE = "prometheus_exporter_targets"
 PROTOCOLS_STATE_KEY = "netops:telemetry:protocols"
+PROTOCOL_OVERRIDES_KEY = "netops:telemetry:overrides"
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -51,6 +52,63 @@ def _atomic_write(path: Path, content: str) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     os.replace(tmp, path)
+
+
+def get_protocol_overrides() -> dict[str, str]:
+    sm = get_state_manager()
+    raw = sm.get_json(PROTOCOL_OVERRIDES_KEY) or sm.get_db_state(PROTOCOL_OVERRIDES_KEY, {})
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def _make_ssh_trigger_sender(device: Device, toolchain: Toolchain) -> Callable[[str], str] | None:
+    if toolchain.health_probe.__class__.__name__ != "ScrapliNetworkDriver":
+        return None
+    try:
+        from netops.network.scrapli_driver import _ParamikoConnAdapter
+
+        target = toolchain.target_for(InventoryDevice.model_validate(device))
+
+        def _send(cmd: str) -> str:
+            with _ParamikoConnAdapter(target, timeout_ops=4.0) as conn:
+                return str(conn.send_command(cmd).result or "")
+
+        return _send
+    except Exception:
+        return None
+
+
+def _apply_protocol_override(
+    item: dict[str, Any], override: str | None, platform: str, management_port: int
+) -> dict[str, Any]:
+    from netops.services.telemetry import resolve_device_ports
+
+    item["selected_mode"] = override or "auto"
+    if not override or override == "auto":
+        return item
+    norm = (
+        TelemetryProtocol.PROMETHEUS_EXPORTER.value
+        if override == "node_exporter"
+        else override
+    )
+    supported = item.get("supported_protocols") or {}
+    ports = resolve_device_ports(
+        item.get("host"), management_port=management_port, platform=platform
+    )
+    spec = supported.get(norm) if isinstance(supported, dict) else None
+    port_map = {
+        TelemetryProtocol.GNMI.value: ports.get("gnmi", 6030),
+        TelemetryProtocol.SNMP.value: ports.get("snmp", 161),
+        TelemetryProtocol.PROMETHEUS_EXPORTER.value: ports.get("exporter", 9100),
+        TelemetryProtocol.SSH_CLI.value: ports.get("ssh", management_port or 22),
+    }
+    resolved_port = (spec.get("port") if isinstance(spec, dict) else None) or port_map.get(norm, 22)
+    return {
+        **item,
+        "protocol": norm,
+        "port": int(resolved_port),
+        "verified_by": f"manual_override:{norm}",
+        "selected_mode": norm,
+    }
 
 
 def _probe_device(
@@ -62,6 +120,14 @@ def _probe_device(
     except Exception:
         username = password = None
     community = settings.snmp_community.get_secret_value() if settings.snmp_community else None
+    override = get_protocol_overrides().get(device.hostname)
+    extra_kwargs: dict[str, Any] = {}
+    if detect is detect_optimal_telemetry_protocol:
+        ssh_send = _make_ssh_trigger_sender(device, toolchain)
+        if ssh_send is not None:
+            extra_kwargs["ssh_send"] = ssh_send
+        if override:
+            extra_kwargs["preferred_protocol"] = override
     try:
         result = detect(
             str(device.management_ip),
@@ -70,18 +136,22 @@ def _probe_device(
             username=username,
             password=password,
             snmp_community=community,
+            **extra_kwargs,
         )
     except Exception as exc:  # одна сломанная нода не должна ронять планирование всего флота
         logger.warning("Проба протоколов для %s упала: %s", device.hostname, exc)
         result = {"protocol": TelemetryProtocol.SSH_CLI, "error": str(exc)}
     protocol = result.get("protocol", TelemetryProtocol.SSH_CLI)
-    return {
+    base_item = {
         **result,
         "protocol": str(getattr(protocol, "value", protocol)),
         "host": str(device.management_ip),
         "platform": device.platform.value,
         "fabric_id": device.fabric_id or "default",
     }
+    return _apply_protocol_override(
+        base_item, override, device.platform.value, device.management_port
+    )
 
 
 def build_target_files(plan: dict[str, dict[str, Any]]) -> dict[str, Any]:
@@ -241,3 +311,57 @@ def is_externally_collected(hostname: str) -> bool:
         TelemetryProtocol.PROMETHEUS_EXPORTER.value,
         TelemetryProtocol.SNMP.value,
     )
+
+
+def set_device_protocol_override(
+    session: Session,
+    toolchain: Toolchain,
+    settings: Settings,
+    hostname: str,
+    protocol: str,
+) -> dict[str, Any]:
+    """Persist user/AI telemetry protocol choice ('auto', 'gnmi', 'snmp', 'prometheus_exporter', 'ssh_cli')."""
+    sm = get_state_manager()
+    overrides = get_protocol_overrides()
+    norm = (
+        TelemetryProtocol.PROMETHEUS_EXPORTER.value
+        if protocol == "node_exporter"
+        else protocol.strip().lower()
+    )
+    if norm in ("auto", ""):
+        overrides.pop(hostname, None)
+    else:
+        overrides[hostname] = norm
+    sm.set_json(PROTOCOL_OVERRIDES_KEY, overrides)
+    sm.set_db_state(PROTOCOL_OVERRIDES_KEY, overrides)
+
+    device = session.scalar(select(Device).where(Device.hostname == hostname))
+    plan_doc = last_collector_plan() or {"refreshed_at": utcnow().isoformat(), "protocols": {}, "devices": {}}
+    devices_map = dict(plan_doc.get("devices") or {})
+    if device is not None:
+        devices_map[hostname] = _probe_device(
+            device, toolchain, settings, detect_optimal_telemetry_protocol
+        )
+    elif hostname in devices_map:
+        devices_map[hostname] = _apply_protocol_override(
+            dict(devices_map[hostname]), norm, str(devices_map[hostname].get("platform", "linux_server")), 22
+        )
+
+    files = build_target_files(devices_map)
+    _atomic_write(
+        settings.offline_lab_path / GNMIC_TARGETS_FILE,
+        yaml.safe_dump(files[GNMIC_TARGETS_FILE], sort_keys=True, allow_unicode=True),
+    )
+    sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
+    sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
+
+    summary = {
+        "refreshed_at": utcnow().isoformat(),
+        "protocols": dict(Counter(item.get("protocol", "ssh_cli") for item in devices_map.values())),
+        "devices": devices_map,
+        "overrides": overrides,
+    }
+    sm.set_json(PROTOCOLS_STATE_KEY, summary)
+    sm.set_db_state(PROTOCOLS_STATE_KEY, summary)
+    return summary
+
