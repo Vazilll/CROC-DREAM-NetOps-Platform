@@ -182,3 +182,52 @@ def test_send_command_waits_past_echo_pause_for_arista_top() -> None:
     assert "90.0 id" in res.result
     assert res.result.rstrip().endswith("spine-2.croc.lab#")
 
+
+def test_paramiko_adapter_reuses_pooled_session_and_skips_hidden_jump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from netops.network import scrapli_driver
+    from netops.network.scrapli_driver import _ParamikoConnAdapter
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    scrapli_driver._SESSION_POOL.clear()
+    connect_calls = 0
+
+    class FakeTransport:
+        def is_active(self) -> bool:
+            return True
+
+    class FakeShell:
+        closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    class FakeClient:
+        def get_transport(self) -> FakeTransport:
+            return FakeTransport()
+
+        def close(self) -> None:
+            pass
+
+    def fake_establish(self: _ParamikoConnAdapter) -> None:
+        nonlocal connect_calls
+        assert self.proxy_jump is None
+        connect_calls += 1
+        self.client = FakeClient()
+        self.shell = FakeShell()
+        self.authenticated_password = "admin"
+
+    monkeypatch.setattr(_ParamikoConnAdapter, "_establish_fresh_session", fake_establish)
+    tgt = _target(Platform.HUAWEI_VRP, "leaf-1.croc.lab")
+
+    with _ParamikoConnAdapter(tgt, timeout=5) as c1:
+        s1 = c1.shell
+    with _ParamikoConnAdapter(tgt, timeout=5) as c2:
+        s2 = c2.shell
+
+    assert connect_calls == 1
+    assert s1 is s2
+    scrapli_driver._SESSION_POOL.clear()
+
+

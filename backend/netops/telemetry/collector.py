@@ -36,6 +36,12 @@ def collect(
     include_fabric_label: bool = False,
     max_workers: int = 16,
 ) -> list[Sample]:
+    try:
+        from netops.services.retention import pre_collect_cleanup
+
+        pre_collect_cleanup(session)
+    except Exception:
+        pass
     dev_samples = (
         device_samples(
             session,
@@ -293,6 +299,21 @@ def device_samples(
         dev, lbls, exp, tgt, prep_err, ports = item
         if prep_err is not None or tgt is None:
             return dev, lbls, None, prep_err, ports
+        if (
+            toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
+            and _is_server_device(dev)
+        ):
+            from netops.network.base import HealthSnapshot
+            from netops.telemetry import targets
+
+            if targets.is_externally_collected(dev.hostname):
+                return (
+                    dev,
+                    lbls,
+                    HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}),
+                    None,
+                    ports,
+                )
         try:
             return dev, lbls, toolchain.health_probe.snapshot(tgt, exp), None, ports
         except Exception as exc:

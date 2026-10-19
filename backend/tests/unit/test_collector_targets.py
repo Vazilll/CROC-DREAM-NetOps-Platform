@@ -66,7 +66,7 @@ def test_refresh_collector_targets_writes_files_without_secrets(
     assert last_collector_plan()["devices"].keys() == summary["devices"].keys()
     assert is_externally_collected(hosts[0]) is True
     assert is_externally_collected(hosts[1]) is True
-    assert is_externally_collected(hosts[2]) is False
+    assert is_externally_collected(hosts[2]) is True
     if len(hosts) > 3:
         assert is_externally_collected(hosts[-1]) is False
     assert is_externally_collected("nonexistent.croc.lab") is False

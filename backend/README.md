@@ -24,7 +24,6 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Аварийный пульт (`Emergency Hub`: прямой CLI, экстренный патч, Soft/Hard Reset, `Factory Freeze`) | `netops/api/routes/emergency.py`, `netops/services/freeze.py` |
 | 4-шаговый визард инициализации «Матрёшка», GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/notifier.py` |
 | RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами и областями доступа (`allowed_scopes`) | `netops/api/deps.py`, `netops/services/users.py` |
-| Встроенный MCP-сервер (`FastMCP`) для управления фабрикой из ИИ-агентов | `netops/mcp_server.py` |
 | Общий docker-compose: бэкенд, фронтенд, PostgreSQL, Redis, миграции, воркер, Beat, Prometheus, Telegram-бот | `../docker-compose.yml` |
 | CI/CD: линтеры и тесты, сборка образа, smoke-тест всего стека, публикация образа в GHCR | `../.github/workflows/ci-cd.yml`, `scripts/smoke_stack.py` |
 | OpenAPI/Swagger | `/docs`, `/openapi.json` |
@@ -37,7 +36,7 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 
 ```
 backend/
-├── run_local.py                     # Автономный лаунчер для локальной разработки (SQLite + Eager Celery + Seed)
+├── Dockerfile                       # Контейнерный образ бэкенда и воркеров (uvicorn / celery)
 ├── pyproject.toml                   # Зависимости проекта и настройки ruff / black / mypy / pytest
 ├── alembic.ini                      # Конфигурация миграций БД
 ├── migrations/                      # Версии схемы базы данных Alembic
@@ -45,36 +44,43 @@ backend/
 │   └── smoke_stack.py               # Сквозной smoke-тест Docker-стека
 ├── tools/
 │   └── Statistical Forecast_server.py            # Микросервер инференса временных рядов Statistical Forecast
-├── tests/                           # 300+ модульных и интеграционных тестов (unit / integration / api)
+├── tests/                           # 622 модульных и интеграционных теста (unit / integration / api)
 └── netops/
     ├── main.py                      # Точка входа ASGI (uvicorn netops.main:app)
-    ├── settings.py                  # Типизированная конфигурация Pydantic Settings (NETOPS_*)
+    ├── settings.py                  # Типизированная конфигурация Pydantic Settings (NETOPS_*) + Runtime Overlay
+    ├── constants.py                 # Чтение единых констант и портов из config/constants.yaml
     ├── enums.py                     # Перечисления домена (Platform, DeviceRole, DeviceStatus, JobType, JobStatus, UserRole)
     ├── errors.py                    # Иерархия доменных исключений
     ├── security.py                  # Хэширование токенов (SHA-256) и криптографические утилиты
     ├── toolchain.py                 # Фабрика сетевого драйвера: собирает OfflineLab или Scrapli по NETOPS_NETWORK_DRIVER
-    ├── mcp_server.py                # MCP-сервер (Model Context Protocol) для подключения внешних ИИ-агентов
     ├── api/                         # Слой HTTP / WebSocket контроллеров FastAPI
     │   ├── app.py                   # Фабрика create_app(), CORS, роутеры, /healthz, /readyz, /metrics
-    │   ├── deps.py                  # DI-контейнер, аутентификация Bearer/Session, RBAC-гарды (Viewer, Operator, Admin)
+    │   ├── deps.py                  # DI-контейнер, аутентификация Bearer/Session, RBAC-гарды и изоляция allowed_system
     │   ├── errors.py                # Глобальные обработчики исключений → JSON (404, 409, 422, 503)
     │   └── routes/
-    │       ├── devices.py           # CRUD узлов, /devices/probe, телеметрия, снапшоты, quick-action, reset-golden
+    │       ├── auth.py              # Вход по сессиям, инвайтам, 6-значным кодам и local-owner-console
+    │       ├── config.py            # Публичная конфигурация ролевых портов консолей
+    │       ├── devices.py           # CRUD узлов, /devices/probe, снапшоты, quick-action, reset-golden
     │       ├── jobs.py              # Запуск dry-run и deploy, лог шагов, вычисление diff
     │       ├── drift.py             # Внеочередной скан дрейфа, отчёт и авто-ремедиация (remediate)
-    │       ├── insights.py          # Прогноз Statistical Forecast (/forecast), AI Guard (/ai-guard), Chaos Lab (/chaos), Copilot (/copilot), /jobs/{id}/explain
-    │       ├── emergency.py         # Аварийная консоль (/emergency/command, /patch, /soft-reset, /hard-reset, /freeze, /audit)
-    │       ├── system.py            # Визард «Матрёшка» (/system/bootstrap/*), GitHub SoT (/git/*), WebSocket (/ws/ticket, /ws/stream)
-    │       └── users.py             # Управление пользователями, ролями, TTL-токенами и /auth/me
+    │       ├── telemetry.py         # Единое API телеметрии (/telemetry/series, /collect, /collectors, HTTP SD /sd/snmp и /sd/exporter)
+    │       ├── insights.py          # Прогноз Statistical Forecast (/forecast), гибридный RRF-поиск и сводка по фабрике
+    │       ├── insights_copilot.py  # AI Pre-Flight Guard (/ai-guard), NetOps Copilot (/copilot/chat) и Telegram-сводка
+    │       ├── emergency.py         # Аварийный пульт: диагностический CLI (/emergency/command) и журнал аудита (/emergency/audit)
+    │       ├── emergency_reset.py   # Экстренный патч (/emergency/patch), Soft Reset и Hard Reset
+    │       ├── system.py            # Визард «Матрёшка» (/system/bootstrap/*), /healthz, /readyz, /metrics, /system/freeze
+    │       ├── system_git_integrations.py # GitHub SoT (/git/status, /git/sync, /git/commit-diff, /git/webhook) и статус интеграций
+    │       └── users.py             # Управление пользователями, ролями, TTL-токенами и областями allowed_system
     ├── db/                          # Слой подключения к СУБД
     │   ├── base.py                  # Декларативная база SQLAlchemy 2.0
     │   └── session.py               # Движок и фабрика транзакционных сессий
     ├── models/                      # ORM-таблицы базы данных
     │   ├── device.py                # Устройство фабрики (Device)
-    │   ├── job.py                   # Задача (Job), цели (JobTarget) и лог шагов (JobStepLog)
+    │   ├── job.py                   # Задача (Job), цели (JobTarget) и лог шагов (JobLog)
     │   ├── snapshot.py              # Снимок конфигурации (ConfigSnapshot)
     │   ├── drift.py                 # Запись обнаруженного дрейфа (DriftRecord)
-    │   └── user.py                  # Пользователь, роль, скоупы и срок действия токена (User)
+    │   ├── user.py                  # Пользователь, роль, allowed_system и срок действия токена (User)
+    │   └── system_state.py          # Таблица ключ-значение SystemState для Runtime Overlay и аудита
     ├── schemas/                     # Контракты запросов и ответов Pydantic v2
     │   ├── common.py, devices.py, drift.py, intent.py, jobs.py, users.py
     ├── intent/                      # Работа с Git Source of Truth и валидация YAML
@@ -82,9 +88,11 @@ backend/
     │   ├── repository.py            # Чтение и запись файлов в каталоге intent/
     │   ├── lint.py                  # Межузловая проверка фабрики (пересечения IP/подсетей, дубли Router ID и ASN)
     │   └── netbox.py                # Экспорт/импорт топологии в формат NetBox
-    ├── network/                     # Сетевые драйверы, рендеринг шаблонов и нормализация CLI
+    ├── network/                     # Сетевые драйверы, пул SSH-сессий, парсеры таблиц и нормализация CLI
     │   ├── base.py                  # Протоколы ConfigCollector, ConfigDeployer, HealthProbe
-    │   ├── scrapli_driver.py        # Живой SSH-драйвер для Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex (Scrapli + Paramiko)
+    │   ├── ssh_pool.py              # Пул постоянных SSH-сессий (_SESSION_POOL), мьютексы (_DEVICE_LOCKS) и опциональный Jump-канал
+    │   ├── table_parsers.py         # Единый парсер таблиц BGP, интерфейсов и потерь ping по платформам
+    │   ├── scrapli_driver.py        # Транзакционный драйвер (Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex, Linux)
     │   ├── offline.py               # Файловый эмулятор сети (OfflineLab) поверх каталога lab/running/
     │   ├── rendering.py             # Генератор целевых конфигов из шаблонов Jinja2 (templates/<platform>/*.j2)
     │   ├── normalization.py         # Очистка шума и выделение управляемых секций перед сравнением
@@ -97,20 +105,37 @@ backend/
     │   ├── deployment.py            # Логика DEPLOY (pre-check → apply commit confirmed → post-check → confirm/rollback)
     │   ├── pipelines.py             # Логика DRIFT_SCAN и DRIFT_REMEDIATE
     │   └── recorder.py              # Запись прогресса и шагов выполнения в БД
-    ├── services/                    # Прикладные доменные сервисы
-    │   ├── devices.py, jobs.py, drift.py, users.py
-    │   ├── discovery.py             # SSH-зондирование (/devices/probe), Brownfield-парсинг и привязка к Git SoT
+    ├── services/                    # Прикладные доменные сервисы (все модули < 500 строк)
+    │   ├── devices.py, jobs.py, drift.py, users.py, sessions.py
+    │   ├── retention.py             # Пред-коллекторный чистильщик логов (/var/log/netops/*.log), RAM-кэшей и старых записей БД
+    │   ├── state.py                 # Ядро StateManager (Redis + PostgreSQL SystemState + Memory fallback)
+    │   ├── state_domains.py         # Доменный миксин StateDomainsMixin (блокировки, кэш телеметрии, шаблонов, Factory Freeze)
+    │   ├── discovery.py             # Оркестратор SSH-зондирования (/devices/probe), онбординга и привязки к Git SoT
+    │   ├── discovery_profiles.py    # Загрузка YAML-профилей платформ (intent/platforms/*.yaml) и детекция баннеров
+    │   ├── discovery_parsers.py     # Парсеры железа, интерфейсов Linux/CLI и соседей LLDP
+    │   ├── discovery_brownfield.py  # Извлечение BGP, ACL и генерация стартового YAML-интента из running-config
+    │   ├── bootstrap.py             # 4-шаговый визард «Матрёшка»
+    │   ├── bootstrap_discovery.py   # Авто-обнаружение узлов стенда (Containerlab / TCP-скан / Offline)
+    │   ├── bootstrap_exposure.py    # Обратный SSH-туннель (ssh -R) для выдачи публичного доступа внешним участникам
+    │   ├── bootstrap_owner.py       # Привязка и восстановление прав Владельца (Owner)
+    │   ├── telemetry.py             # Координатор сбора метрик, резолвинга портов и выбора протокола (gNMI/Exporter/SNMP/SSH)
+    │   ├── telemetry_parsers.py     # Реестр CLI-парсеров PARSER_REGISTRY (CPU, RAM, Uplink, Disk, Load)
+    │   ├── telemetry_prometheus.py  # Прямые запросы временных рядов из Prometheus и VictoriaMetrics
     │   ├── git_sot.py               # Метаданные Git с 10-секундным TTL-кэшем, git pull и синхронизация
-    │   ├── bootstrap.py             # 4-шаговый визард «Матрёшка», перенос прав Owner и параллельный TCP-дискавери сервера
     │   ├── chaos.py                 # Сценарии Chaos Engineering (инъекция дрейфа, падение портов, сброс к эталону)
     │   ├── forecast.py              # Расчёт прогнозов временных рядов Statistical Forecast (квантили p10/p50/p90 и ETA отказа)
     │   ├── ai_guard.py              # Эвристический и ИИ-анализ безопасности патча перед деплоем (Pre-Flight Guard)
     │   ├── llm.py                   # Интеграция с LLM (OpenRouter / Gemini / локальная эвристика) для объяснения diff и Copilot
-    │   ├── freeze.py                # Глобальный рубильник заморозки изменений (Factory Freeze в Redis / памяти)
-    │   ├── telemetry.py             # Парсинг живых CLI-метрик CPU/RAM/Uplink по SSH и кэширование в lab/running/
+    │   ├── freeze.py                # Глобальный рубильник заморозки изменений (Factory Freeze)
     │   └── notifier.py              # Диспетчер уведомлений в Telegram, реестр доступов и синхронизация токенов
-    ├── telemetry/                   # Фоновый сбор метрик Prometheus и Telegram-бот
-    │   ├── collector.py, metrics.py, bot.py
+    ├── telemetry/                   # Единый конвейер метрик Prometheus / VictoriaMetrics и Telegram-бот
+    │   ├── collector.py             # Проход сбора (вызывает pre_collect_cleanup -> собирает срезы -> пушит в VictoriaMetrics)
+    │   ├── targets.py               # Авто-генерация целей для gnmic, snmp_exporter и node_exporter
+    │   ├── metrics.py               # Каталог метрик и сериализация в формат Prometheus
+    │   ├── bot.py                   # Ядро и поллинг Telegram-бота
+    │   ├── bot_auth.py              # Авторизация и привязка чатов Telegram к ролям и стендам
+    │   ├── bot_views.py             # Экраны отчётов (/status, /drift, /jobs, /metrics, /users, /security)
+    │   └── bot_actions.py           # Команды управления (/collect, /scan, /freeze, /ai)
     └── worker/                      # Конфигурация Celery и периодических задач Beat
         ├── celery_app.py
         └── tasks.py
@@ -118,47 +143,23 @@ backend/
 
 ---
 
-## Быстрый старт
+## Запуск в Docker-контейнерах
 
-### Вариант А — Автономный локальный запуск одной командой (без Docker и Redis)
-
-Для быстрой локальной разработки или демонстрации на ноутбуке предусмотрен скрипт [`run_local.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/run_local.py). Он автоматически поднимает SQLite-базу, включает синхронный режим Celery (`task_always_eager=True`), засевает 4 устройства CLOS-фабрики и запускает сервер на порту `8001`:
+Вся платформа запускается единым Docker-стеком из корня репозитория:
 
 ```bash
-backend/.venv/bin/python backend/run_local.py
+docker compose up --build -d
 ```
 
-### Вариант Б — Полный продакшн-стек (PostgreSQL + Redis + Celery)
+При старте контейнер `api` автоматически применяет миграции (`alembic upgrade head`) и поднимает ASGI-сервер `uvicorn netops.main:app`; контейнеры `worker`, `beat` и `telegram-bot` используют тот же собранный образ `netops-backend`.
 
-Нужны Python 3.11+ и [uv](https://docs.astral.sh/uv/).
+Для локального прогона тестов и линтеров внутри `backend/`:
 
 ```bash
-cd backend
-uv sync                      # зависимости + dev-инструменты
-cp .env.example .env         # поправить пути и токены
-uv run alembic upgrade head  # схема БД
-uv run uvicorn netops.main:app --reload
+backend/.venv/bin/pytest backend/tests/
+backend/.venv/bin/ruff check backend/
 ```
 
-Воркер и планировщик (нужен Redis):
-
-```bash
-uv run celery -A netops.worker.tasks worker --loglevel=INFO
-uv run celery -A netops.worker.tasks beat --loglevel=INFO
-```
-
-Всю платформу поднимает `docker-compose.yml` в корне репозитория (из корня):
-
-```bash
-docker compose up --build
-```
-
-При старте API применяет миграции (`alembic upgrade head`) и запускает сервер; воркер и Beat
-стартуют, когда API стал `healthy`. Настройки бэкенда берутся из `backend/.env`. Порты и каталоги с intent, шаблонами и
-офлайн-стендом можно переопределить переменными `API_PORT`, `POSTGRES_PORT`, `INTENT_REPO`,
-`TEMPLATES`, `OFFLINE_LAB` и т. д. (см. шапку `docker-compose.yml`).
-
-Swagger: <http://localhost:8000/docs> (или <http://127.0.0.1:8001/docs> при запуске через `run_local.py`). Авторизация в API — заголовок `Authorization: Bearer <token>`.
 
 ### Если в базе нет таблиц
 

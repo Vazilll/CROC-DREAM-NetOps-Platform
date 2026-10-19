@@ -45,9 +45,6 @@ import type {
 } from './types';
 
 export class NetOpsApiClient extends NetOpsHttpClient {
-  // --------------------------------------------------------------------------
-  // Device & Topology Management
-  // --------------------------------------------------------------------------
 
   async getDevices(): Promise<Device[]> {
     return this.request<Device[]>('/devices');
@@ -106,10 +103,6 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     return this.request('/inventory/sync', { method: 'POST' });
   }
 
-  // --------------------------------------------------------------------------
-  // Automation Pipelines (Dry-Run & Deploy)
-  // --------------------------------------------------------------------------
-
   async createDryRun(deviceIds: number[]): Promise<{ job_id: string; status: JobStatus }> {
     return this.request('/jobs/dry-run', {
       method: 'POST',
@@ -147,10 +140,6 @@ export class NetOpsApiClient extends NetOpsHttpClient {
   async getJobDiff(id: string): Promise<JobDiff> {
     return this.request<JobDiff>(`/jobs/${id}/diff`);
   }
-
-  // --------------------------------------------------------------------------
-  // Drift Detection & Remediation
-  // --------------------------------------------------------------------------
 
   async scanDrift(deviceIds?: number[]): Promise<{ job_id: string; status: JobStatus }> {
     const validIds = deviceIds && deviceIds.length > 0 ? deviceIds : null;
@@ -521,4 +510,7 @@ export class NetOpsApiClient extends NetOpsHttpClient {
 }
 
 export const api = new NetOpsApiClient();
-api.setReady(bootstrapAuthSession((token) => api.login(token)));
+/** Вызывать только после loadConsoleConfig() (см. main.tsx). */
+export function startApiSession(): void {
+  api.setReady(bootstrapAuthSession((token) => api.login(token)));
+}

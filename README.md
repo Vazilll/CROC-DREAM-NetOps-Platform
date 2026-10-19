@@ -13,14 +13,14 @@
 
 | Модуль / Каталог | Инструкция | За что отвечает блок |
 |------------------|------------|----------------------|
-| **`backend/`** | [**`backend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/README.md) | Серверное ядро FastAPI, PostgreSQL/SQLite + Alembic, Celery/Redis, транзакционные пайплайны `dry-run` / `deploy` / `drift`, драйверы `Scrapli` и `OfflineLab`, Statistical Forecast, `AI Guard`, `Emergency Hub`, `FastMCP` |
-| **`frontend/`** | [**`frontend/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/README.md) | Клиентское ядро NOC (React 19 + TypeScript 5.9, `0 any`), раскладка по папкам `layout/`, `views/`, `modals/`, `charts/`, темы `Dark`/`Light`, локализация `RU`/`EN`, визард «Матрёшка», хоткеи |
-| **`intent/`** | [**`intent/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/intent/README.md) | Git Source of Truth: реестр устройств `inventory.yaml`, декларативные профили узлов `devices/*.yaml` и правила нормализации `diff_filters.yaml` |
-| **`templates/`** | [**`templates/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates/README.md) | Мульти-вендорный движок шаблонов Jinja2 (`StrictUndefined`) для 6 сетевых ОС (`Cisco IOS-XE`, `Arista EOS`, `Huawei VRP`, `Eltex MES`, `Juniper Junos`, `YADRO KORNFE`) |
-| **`lab/`** | [**`lab/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/lab/README.md) | Лабораторный стенд CLOS: эталонные конфигурации `golden_configs/`, файловый эмулятор `running/` и скрипт сброса `reset_lab.sh` |
-| **`scripts/`** | [**`scripts/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/scripts/README.md) | CLI-утилиты самодиагностики (`doctor.py`), проверки SSH-стенда (`verify_live_lab.py`), сброса (`reset_lab.py`) и демо-прогона (`automate_netops.py`) |
-| **`docs/`** | [**`docs/backend-architecture.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/docs/backend-architecture.md) | Глубокое описание внутренней архитектуры бэкенда, конечного автомата задач и правил Post-Check (`docs/templates-integration.md`, `docs/LIVE_LAB_GUIDE.md`) |
-| **`mobile/`** | [**`mobile/README.md`**](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/mobile/README.md) | Мобильный компаньон дежурного инженера NOC |
+| **`backend/`** | [**`backend/README.md`**](backend/README.md) | Серверное ядро FastAPI, PostgreSQL + Alembic, Celery/Redis, транзакционные пайплайны `dry-run` / `deploy` / `drift`, пул сессий `ssh_pool.py` + `table_parsers.py`, `retention.py` (автоочистка логов и кэшей), Statistical Forecast, `AI Guard`, `Emergency Hub` |
+| **`frontend/`** | [**`frontend/README.md`**](frontend/README.md) | Клиентское ядро NOC (React 19 + TypeScript 5.9, `0 any`), раскладка по папкам `layout/`, `views/`, `modals/`, `charts/`, темы `Dark`/`Light`, локализация `RU`/`EN`, визард «Матрёшка», хоткеи |
+| **`intent/`** | [**`intent/README.md`**](intent/README.md) | Git Source of Truth: реестр устройств `inventory.yaml`, декларативные профили узлов `devices/*.yaml`, профили платформ `platforms/*.yaml` и правила нормализации `diff_filters.yaml` |
+| **`templates/`** | [**`templates/README.md`**](templates/README.md) | Мульти-вендорный движок шаблонов Jinja2 (`StrictUndefined`) для 6 сетевых ОС (`Cisco IOS-XE`, `Arista EOS`, `Huawei VRP`, `Eltex MES`, `Juniper Junos`, `YADRO KORNFE`) |
+| **`lab/`** | [**`lab/README.md`**](lab/README.md) | Лабораторный стенд CLOS: эталонные конфигурации `golden_configs/`, файловый эмулятор `running/` и скрипт сброса `reset_lab.sh` |
+| **`scripts/`** | [**`scripts/README.md`**](scripts/README.md) | CLI-утилиты самодиагностики (`doctor.py`), проверки SSH-стенда (`verify_live_lab.py`), сброса (`reset_lab.py`) и демо-прогона (`automate_netops.py`) |
+| **`docs/`** | [**`docs/backend-architecture.md`**](docs/backend-architecture.md) | Глубокое описание внутренней архитектуры бэкенда, единого конвейера телеметрии, пред-очистки логов и правил Post-Check (`docs/templates-integration.md`, `docs/LIVE_LAB_GUIDE.md`) |
+| **`mobile/`** | [**`mobile/README.md`**](mobile/README.md) | Мобильный компаньон дежурного инженера NOC |
 
 ---
 
@@ -30,7 +30,7 @@
 2. [Поддерживаемые вендоры (6 платформ)](#2-поддерживаемые-вендоры-6-платформ)
 3. [Текущий статус модулей](#3-текущий-статус-модулей)
 4. [Архитектура и структура репозитория](#4-архитектура-и-структура-репозитория)
-5. [Быстрый старт](#5-быстрый-старт)
+5. [Быстрый старт (Docker)](#5-быстрый-старт-docker)
 6. [Сквозной демо-сценарий (для защиты)](#6-сквозной-демо-сценарий-для-защиты)
 
 ---
@@ -42,11 +42,11 @@
 - Платформа выполняет **Pre-Flight Lint** всей фабрики (проверка пересечений IP/масок, дублей Router ID и ASN).
 - Рендерит целевые конфигурации через Jinja2-шаблоны под конкретного вендора, очищает `running-config` от динамического шума и строит минимальный иерархический патч (`hier_config`) и зеркальный патч отката (`rollback_patch`).
 - Проверяет патч через **AI Pre-Flight Guard**, требует явного подтверждения оператора, выкатывает изменения транзакционно (`commit confirmed` / `configure session`) с автоматической верификацией **Post-Check** (BGP Established, префиксы, порты `up/up`, потери ping ≤ 20%) и авто-откатом при сбое.
-- Каждые 15 минут сканирует сеть на конфигурационный дрейф (**Drift Engine**) и прогнозирует исчерпание ресурсов CPU и аплинков с помощью модели временных рядов **Statistical Forecast**.
+- Каждые 15 минут сканирует сеть на конфигурационный дрейф (**Drift Engine**), выполняет пред-очистку логов/снапшотов (`retention.pre_collect_cleanup`), собирает телеметрию через каскад `gNMI → Node Exporter → SNMP → SSH Pool` в **VictoriaMetrics / Prometheus** и прогнозирует исчерпание ресурсов с помощью модели временных рядов **Statistical Forecast**.
 
 **Ключевой сквозной конвейер:**
 
-`Git/YAML Intent → Pre-Flight Lint → Jinja2 Render → Dry-Run & Hier-Diff → AI Guard & Approval → Transactional Deploy / Auto-Rollback → Drift & Statistical Forecast Monitoring`
+`Git/YAML Intent → Pre-Flight Lint → Jinja2 Render → Dry-Run & Hier-Diff → AI Guard & Approval → Transactional Deploy / Auto-Rollback → Unified Telemetry & Statistical Forecast`
 
 ---
 
@@ -69,16 +69,16 @@
 
 | Подсистема | Статус | Где реализовано |
 |------------|--------|-----------------|
-| **Backend Core (FastAPI + SQLAlchemy 2.0 + Alembic + Celery/Redis)** | ✅ Готово (100% тестов проходят) | [`backend/netops/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops) |
-| **Pre-Flight Intent Linter & Pydantic Schema** | ✅ Готово (`inventory.yaml` и `devices/*.yaml` синхронизированы) | [`backend/netops/intent/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/intent) |
-| **Multi-Vendor Jinja2 Templates (6 платформ)** | ✅ Готово (`base`, `interfaces`, `acls`, `bgp`) | [`templates/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/templates) |
-| **Иерархический Diff и Нормализация CLI** | ✅ Готово (`hier_config` + `diff_filters.yaml`) | [`backend/netops/network/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network) |
-| **Двойной сетевой контур (`Scrapli SSH` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API) | [`scrapli_driver.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/scrapli_driver.py), [`offline.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/network/offline.py) |
-| **Предиктивная аналитика Statistical Forecast + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/forecast.py), [`ai_guard.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/services/ai_guard.py) |
-| **Аварийный пульт `Emergency Hub` и `Factory Freeze`** | ✅ Готово (прямой CLI, экстренный патч, Soft/Hard Reset, Kill Switch) | [`emergency.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/emergency.py), [`EmergencyHub.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/EmergencyHub.tsx) |
-| **4-шаговый визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (Telegram Owner, SSH Probe, матрица паролей, GitHub SoT, `Dark`/`Light`, `RU`/`EN`) | [`system.py`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/api/routes/system.py), [`WelcomeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/WelcomeModal.tsx) |
-| **Frontend NOC SPA (React 19 + TS Strict, `0 any`)** | ✅ Готово (25 компонентов в 4 доменных папках, 2D/3D топология, RBAC) | [`frontend/src/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src) |
-| **Наблюдаемость (Prometheus `/metrics` + Telegram Bot)** | ✅ Готово | [`backend/netops/telemetry/`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/backend/netops/telemetry) |
+| **Backend Core (FastAPI + SQLAlchemy 2.0 + Alembic + Celery/Redis)** | ✅ Готово (622 теста проходят, все модули < 500 строк) | [`backend/netops/`](backend/netops) |
+| **Pre-Flight Intent Linter & Pydantic Schema** | ✅ Готово (`inventory.yaml` и `devices/*.yaml` синхронизированы) | [`backend/netops/intent/`](backend/netops/intent) |
+| **Multi-Vendor Jinja2 Templates (6 платформ)** | ✅ Готово (`base`, `interfaces`, `acls`, `bgp`) | [`templates/`](templates) |
+| **Иерархический Diff и Нормализация CLI** | ✅ Готово (`hier_config` + `diff_filters.yaml`) | [`backend/netops/network/`](backend/netops/network) |
+| **Двойной сетевой контур (`ssh_pool.py` + `table_parsers.py` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API, 1 VTY-сессия на узел) | [`ssh_pool.py`](backend/netops/network/ssh_pool.py), [`table_parsers.py`](backend/netops/network/table_parsers.py), [`scrapli_driver.py`](backend/netops/network/scrapli_driver.py) |
+| **Предиктивная аналитика Statistical Forecast + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](backend/netops/services/forecast.py), [`ai_guard.py`](backend/netops/services/ai_guard.py) |
+| **Аварийный пульт `Emergency Hub` и `Factory Freeze`** | ✅ Готово (прямой CLI, экстренный патч, Soft/Hard Reset, Kill Switch) | [`emergency.py`](backend/netops/api/routes/emergency.py), [`emergency_reset.py`](backend/netops/api/routes/emergency_reset.py) |
+| **4-шаговый визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (Telegram Owner, SSH Probe, матрица паролей, GitHub SoT, `Dark`/`Light`, `RU`/`EN`) | [`system.py`](backend/netops/api/routes/system.py), [`system_git_integrations.py`](backend/netops/api/routes/system_git_integrations.py) |
+| **Frontend NOC SPA (React 19 + TS Strict, `0 any`)** | ✅ Готово (2D/3D топология, RBAC, изоляция `allowed_system`) | [`frontend/src/`](frontend/src) |
+| **Единый конвейер наблюдаемости и очистки (`retention.py` + `collector.py` + `VictoriaMetrics`)** | ✅ Готово (автоочистка логов/БД перед сбором, gNMI/SNMP/Exporter/SSH) | [`retention.py`](backend/netops/services/retention.py), [`backend/netops/telemetry/`](backend/netops/telemetry) |
 
 ---
 
@@ -87,51 +87,46 @@
 ```text
 CROC-DREAM-NetOps-Platform/
 ├── README.md                  # Главный навигатор по платформе (этот файл)
-├── docker-compose.yml         # Полный стек: postgres, redis, api, worker, beat, prometheus, telegram-bot
+├── Dockerfile                 # All-in-One контейнерный образ платформы (docker/entrypoint.sh)
+├── docker-compose.yml         # Полный микросервисный стек: postgres, redis, api, worker, beat, victoriametrics, prometheus, gnmic, snmp-exporter, node-exporter, grafana, telegram-bot, frontend
 ├── backend/                   # Серверное ядро FastAPI + Celery + Scrapli (см. backend/README.md)
-│   ├── netops/                # Пакеты: api/, services/, pipeline/, network/, intent/, models/, schemas/, telemetry/, worker/
+│   ├── Dockerfile             # Контейнерный образ бэкенда и воркеров
+│   ├── netops/                # Доменные модули (все файлы < 500 строк): api/, services/, pipeline/, network/, intent/, models/, schemas/, telemetry/, worker/
 │   ├── migrations/            # Миграции схемы БД (Alembic)
-│   ├── tests/                 # Модульные, API и интеграционные тесты (pytest)
-│   └── run_local.py           # Автономный лаунчер без Docker (SQLite + Eager Celery + авто-сидинг)
+│   └── tests/                 # 622 модульных, API и интеграционных теста (pytest)
 ├── frontend/                  # Клиентский интерфейс NOC на React 19 + TypeScript (см. frontend/README.md)
 │   └── src/
-│       ├── api.ts             # Строго типизированный HTTP-клиент API
+│       ├── api/               # Строго типизированный HTTP-клиент API
 │       ├── App.tsx            # Корневой оркестратор состояния и хоткеев
 │       └── components/
 │           ├── layout/        # Каркас и дизайн-система (Header, Sidebar, MobileNav, CommandPalette, ui)
 │           ├── views/         # Рабочие экраны (Dashboard, DeviceList, DevicePage, DiffViewer, DriftView, JobsView, ChaosLabView, EmergencyHub, SlidesPresentation)
 │           ├── modals/        # Модальные окна и дроверы (WelcomeModal, ShareModal, DryRunModal, AddDeviceModal, DeviceDrawer, DeviceDetailModal, CopilotPanel, ShortcutsModal)
 │           └── charts/        # Визуализация (TopologyMap 2D, Topology3D, ForecastChart)
-├── intent/                    # Git Source of Truth: inventory.yaml, inventory.live.yaml, devices/*.yaml, diff_filters.yaml (см. intent/README.md)
+├── intent/                    # Git Source of Truth: inventory.yaml, platforms/*.yaml, devices/*.yaml (см. intent/README.md)
 ├── templates/                 # Шаблоны Jinja2 для 6 платформ: cisco_iosxe, arista_eos, huawei_vrp, eltex_mes, juniper_junos, yadro_kornfe (см. templates/README.md)
 ├── lab/                       # Лабораторный стенд: golden_configs/, running/, reset_lab.sh (см. lab/README.md)
 ├── scripts/                   # Инженерные CLI-утилиты: doctor.py, verify_live_lab.py, reset_lab.py, automate_netops.py (см. scripts/README.md)
-├── monitoring/                # Конфигурация сбора метрик Prometheus (prometheus.yml)
+├── monitoring/                # Конфигурация Prometheus, SNMP Exporter, gNMIc и дашборды Grafana
 └── docs/                      # Архитектурная документация и гайды (backend-architecture.md, LIVE_LAB_GUIDE.md, templates-integration.md)
 ```
 
 ---
 
-## 5. Быстрый старт
+## 5. Быстрый старт (Docker)
 
-### Вариант A — Локальный запуск без Docker за 30 секунд (рекомендуется для разработки и демо)
-
-```bash
-# 1. Запуск Backend (SQLite + синхронный пайплайн, порт 8001)
-backend/.venv/bin/python backend/run_local.py
-# API: http://127.0.0.1:8001 | Swagger: http://127.0.0.1:8001/docs
-
-# 2. Запуск Frontend (Vite dev server, порт 5173)
-npm --prefix frontend run dev
-# UI: http://127.0.0.1:5173 | Визард настройки: http://127.0.0.1:5173/?setup=1
-```
-
-### Вариант B — Полный продакшн-стек в Docker Compose
+Единая точка входа в платформу — собранный Docker-стек:
 
 ```bash
 docker compose up --build -d
 python3 backend/scripts/smoke_stack.py
 ```
+
+- **Консоль Владельца (Owner)**: `http://localhost:5173`
+- **Ролевые консоли (Admin / Operator / Jury)**: `http://localhost:5174`, `:5175`, `:5176`
+- **Swagger / OpenAPI**: `http://localhost:8001/docs`
+- **Grafana / Prometheus / VictoriaMetrics**: `http://localhost:3000`, `:9090`, `:8428/vmui`
+
 
 ---
 

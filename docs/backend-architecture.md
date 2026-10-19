@@ -25,40 +25,41 @@ Celery через Redis. Все сетевые операции идут в во
 
 ```
 backend/netops/
-├── api/              HTTP/WS-слой: роутеры, зависимости, обработка ошибок
+├── api/              HTTP-слой: роутеры, зависимости, обработка ошибок
 │   ├── app.py        сборка FastAPI, CORS, контейнер зависимостей
-│   ├── deps.py       сессия БД, аутентификация по токену, проверка роли и скоупов
+│   ├── deps.py       сессия БД, аутентификация по токену/сессии, проверка роли и allowed_system
 │   ├── errors.py     исключения домена → коды HTTP
-│   └── routes/       devices, jobs, drift, insights, emergency, system, users
+│   └── routes/       auth, config, devices, jobs, drift, telemetry, insights (+ insights_copilot), emergency (+ emergency_reset), system (+ system_git_integrations), users
 ├── schemas/          Pydantic-модели запросов и ответов API
-├── services/         Прикладная логика: что можно делать и при каких условиях
-│   ├── jobs.py       создание задач, проверки конфликтов, постановка в очередь
+├── services/         Прикладная логика (все модули < 500 строк)
+│   ├── jobs.py       создание задач, проверки конфликтов (SELECT FOR UPDATE), постановка в очередь
 │   ├── devices.py    CRUD устройств, импорт инвентаря
-│   ├── discovery.py  SSH-зондирование (/devices/probe), Brownfield-парсинг и привязка к SoT
-│   ├── git_sot.py    кэшированные метаданные Git (TTL 10 с) и синхронизация git pull
-│   ├── bootstrap.py  4-шаговый визард «Матрёшка» и параллельный TCP-дискавери сервера
-│   ├── chaos.py      сценарии Chaos Lab (SSH и файловый стенд)
-│   ├── drift.py      отчёт по дрейфу
-│   ├── users.py      пользователи, роли, TTL-токены и скоупы
-│   ├── forecast.py   прогнозирование временных рядов Statistical Forecast (p10/p50/p90, ETA SLA)
-│   ├── ai_guard.py   Pre-Flight проверка безопасности изменений перед деплоем
-│   ├── freeze.py     глобальная аварийная заморозка изменений (Factory Freeze)
-│   ├── telemetry.py  парсинг живых CLI-метрик CPU/RAM/Uplink по SSH и кэш
-│   ├── notifier.py   диспетчер уведомлений Telegram, реестр доступов и привязки
-│   └── llm.py        пояснение диффа моделью и чат-ассистент NetOps Copilot
+│   ├── retention.py  пред-коллекторный чистильщик логов (/var/log/netops/*.log), RAM-кэшей и старых записей БД
+│   ├── state.py      StateManager (Redis + PostgreSQL SystemState + Memory fallback)
+│   ├── state_domains.py миксин блокировок, кэшей телеметрии/шаблонов и Factory Freeze
+│   ├── discovery.py  оркестратор SSH-зондирования (/devices/probe), онбординга и привязки к SoT
+│   ├── discovery_profiles.py профили платформ (intent/platforms/*.yaml) и детекция баннеров
+│   ├── discovery_parsers.py  парсеры железа, интерфейсов и LLDP-топологии
+│   ├── discovery_brownfield.py извлечение BGP/ACL и генерация YAML-интента из running-config
+│   ├── bootstrap.py, bootstrap_discovery.py, bootstrap_exposure.py, bootstrap_owner.py
+│   ├── telemetry.py, telemetry_parsers.py, telemetry_prometheus.py
+│   ├── git_sot.py, chaos.py, drift.py, users.py, sessions.py
+│   └── forecast.py, ai_guard.py, freeze.py, notifier.py, llm.py
 ├── pipeline/         Выполнение задач в воркере
 │   ├── runner.py     берёт задачу по id, блокирует строку, выбирает пайплайн
 │   ├── pipelines.py  четыре пайплайна: dry-run, deploy, скан и устранение дрейфа
 │   ├── planning.py   рендер intent, сбор running-config, нормализация, дифф
 │   ├── deployment.py транзакционное применение с post-check и откатом
 │   └── recorder.py   статусы задачи и журнал шагов
-├── network/          Работа с оборудованием и конфигами
+├── network/          Единый коннектор к оборудованию и работа с конфигами
 │   ├── base.py       протоколы: коллектор, деплойер, health-проба, дифф, рендер
+│   ├── ssh_pool.py   пул постоянных SSH-сессий (_SESSION_POOL), мьютексы (_DEVICE_LOCKS) и опциональный Jump
+│   ├── table_parsers.py единый парсер таблиц BGP, интерфейсов и потерь ping
+│   ├── scrapli_driver.py транзакционный драйвер по SSH (Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex, Linux)
 │   ├── offline.py    файловый стенд для разработки и CI (lab/running/)
-│   ├── scrapli_driver.py  живой драйвер по SSH (Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex)
 │   ├── rendering.py  Jinja2 со StrictUndefined (templates/<platform>/*.j2)
-│   ├── normalization.py   фильтры диффа по правилам из diff_filters.yaml
-│   ├── diff_filters.yaml  правила Ани: что отбрасывать, что сравнивать
+│   ├── normalization.py фильтры диффа по правилам из diff_filters.yaml
+│   ├── diff_filters.yaml декларативные правила очистки CLI по вендорам
 │   ├── diff.py       расчёт патчей наката и отката через hier_config
 │   └── health.py     правила Health-Check: что считать аварией
 ├── intent/           Источник правды: YAML-репозиторий
@@ -66,18 +67,20 @@ backend/netops/
 │   ├── repository.py чтение и запись файлов в intent/
 │   ├── lint.py       проверки по фабрике: дубли router-id и адресов
 │   └── netbox.py     синхронизация топологии с форматом NetBox
-├── models/           Таблицы SQLAlchemy (Device, Job, ConfigSnapshot, DriftRecord, User)
-├── telemetry/        Метрики и телеграм-бот
+├── models/           Таблицы SQLAlchemy (Device, Job, ConfigSnapshot, DriftRecord, User, SystemState)
+├── telemetry/        Единый конвейер метрик и телеграм-бот
 │   ├── metrics.py    каталог метрик и вывод в формате Prometheus
-│   ├── collector.py  сбор из базы и со стенда, запись замеров
-│   └── bot.py        бот: оповещения и команды
+│   ├── collector.py  пред-очистка (pre_collect_cleanup), сбор среза и прямой пуш в VictoriaMetrics
+│   ├── targets.py    авто-генерация целей для gnmic, snmp_exporter и node_exporter
+│   └── bot.py (+ bot_auth.py, bot_views.py, bot_actions.py)
 ├── worker/           Celery: приложение, расписание, задачи
 ├── db/               Движок, сессии, базовый класс, ожидание базы при старте
-├── mcp_server.py     FastMCP-сервер для управления платформой из внешних ИИ-агентов
-├── settings.py       Все настройки из переменных NETOPS_*
+├── settings.py       Все настройки из переменных NETOPS_* и Runtime Overlay
+├── constants.py      Чтение констант из config/constants.yaml
 ├── enums.py          Платформы, роли, статусы устройств и задач
 └── toolchain.py      Сборка набора инструментов под текущий драйвер
 ```
+
 
 ## Как связаны слои
 

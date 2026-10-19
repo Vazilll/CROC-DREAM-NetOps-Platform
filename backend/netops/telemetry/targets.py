@@ -236,4 +236,8 @@ def is_externally_collected(hostname: str) -> bool:
     if not plan:
         return False
     proto = (plan.get("devices") or {}).get(hostname, {}).get("protocol")
-    return proto in (TelemetryProtocol.GNMI.value, TelemetryProtocol.PROMETHEUS_EXPORTER.value)
+    return proto in (
+        TelemetryProtocol.GNMI.value,
+        TelemetryProtocol.PROMETHEUS_EXPORTER.value,
+        TelemetryProtocol.SNMP.value,
+    )

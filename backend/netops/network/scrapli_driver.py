@@ -1,6 +1,6 @@
 """Live network driver for Containerlab using Scrapli (spec 2.4, 2.6).
 
-Connects over SSH to Cisco IOS-XE and Arista EOS nodes, runs commands,
+Connects over SSH to Cisco IOS-XE, Arista EOS, and Huawei VRP nodes, runs commands,
 stages changes inside transaction sessions, and takes operational health snapshots.
 """
 
@@ -9,12 +9,12 @@ from __future__ import annotations
 import concurrent.futures
 import contextlib
 import logging
+import os
 import re
-import threading
+import time
 from collections.abc import Mapping, Sequence
 from types import MappingProxyType
 
-from netops.constants import unset_password_marker
 from netops.enums import Platform
 from netops.network.base import (
     BgpSessionState,
@@ -25,6 +25,27 @@ from netops.network.base import (
     HealthSnapshot,
     InterfaceState,
 )
+from netops.network.ssh_pool import (
+    _CLI_METRICS_DEDUP_SEC,
+    _DEAD_ENDPOINTS,
+    _DEVICE_LOCKS,
+    _JUMP_LOCK,
+    _LAST_CLI_METRICS_TS,
+    _POOL_GUARD,
+    _SESSION_IDLE_TTL,
+    _SESSION_POOL,
+    _check_tcp_endpoint,
+    _close_pooled_session,
+    _get_device_lock,
+    connect_with_sock,
+    establish_fresh_session,
+    execute_shell_command,
+    execute_shell_configs,
+    open_jump_channel,
+    resolve_clab_jump_defaults,
+    resolve_container_endpoint,
+)
+from netops.network.table_parsers import collect_device_health_tables
 from netops.services.telemetry import collect_metrics_from_cli
 
 logger = logging.getLogger(__name__)
@@ -67,32 +88,8 @@ class _ScrapliResponse:
         self.failed = failed
 
 
-_JUMP_LOCK = threading.Lock()
-_DEAD_ENDPOINTS: dict[tuple[str, int], float] = {}
-
-
-def _check_tcp_endpoint(host: str, port: int, timeout: float = 2.5) -> bool:
-    import os
-    import socket
-    import time
-
-    if "PYTEST_CURRENT_TEST" in os.environ:
-        return True
-    now = time.monotonic()
-    dead_ts = _DEAD_ENDPOINTS.get((host, port))
-    if dead_ts is not None and (now - dead_ts) < 8.0:
-        return False
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            _DEAD_ENDPOINTS.pop((host, port), None)
-            return True
-    except OSError:
-        _DEAD_ENDPOINTS[(host, port)] = time.monotonic()
-        return False
-
-
 class _ParamikoConnAdapter:
-    """Transparent SSH adapter for environments where native Scrapli transport is unavailable."""
+    """Transparent SSH adapter with per-device lock and persistent session pooling."""
 
     def __init__(
         self, target: DeviceTarget, timeout: int = 15, proxy_jump: str | None = None
@@ -104,389 +101,114 @@ class _ParamikoConnAdapter:
         self._jump_client = None
         self.shell = None
         self.authenticated_password: str | None = None
+        self._device_lock = None
+        self._use_pool: bool = False
+        self._invalidate_pool: bool = False
 
     def _resolve_clab_jump_defaults(self) -> tuple[str, str, int, str | None]:
-        import os
-
-        user = os.getenv("NETOPS_CLAB_USER", "")
-        host = os.getenv("NETOPS_CLAB_HOST", "")
-        port_raw = os.getenv("NETOPS_CLAB_PORT", "")
-        pwd = os.getenv("NETOPS_CLAB_PASSWORD", "") or None
-        if not host and "PYTEST_CURRENT_TEST" not in os.environ:
-            try:
-                from netops.settings import get_settings
-
-                s = get_settings()
-                s.apply_runtime_overlay()
-                host = s.clab_host or ""
-                user = user or s.clab_user or "crocdream"
-                port_raw = port_raw or str(s.clab_port or 221)
-                if not pwd and s.clab_password:
-                    pwd = s.clab_password.get_secret_value() or None
-            except Exception:
-                pass
-        return (
-            user or "crocdream",
-            host,
-            int(port_raw) if str(port_raw).isdigit() else 221,
-            pwd,
-        )
+        return resolve_clab_jump_defaults()
 
     def _resolve_container_endpoint(
         self, host: str, dest_host: str, dest_port: int
     ) -> tuple[str, int]:
-        import os
-
-        if dest_host == host and "PYTEST_CURRENT_TEST" not in os.environ:
-            with contextlib.suppress(Exception):
-                from netops.services.state import get_state_manager
-
-                rt_data = get_state_manager().get_db_state("runtime_settings", {})
-                if isinstance(rt_data, dict):
-                    port_map = rt_data.get("clab_port_map")
-                    if isinstance(port_map, dict) and str(dest_port) in port_map:
-                        return str(port_map[str(dest_port)]), 22
-        return ("127.0.0.1" if dest_host == host else dest_host), dest_port
+        return resolve_container_endpoint(host, dest_host, dest_port)
 
     def _open_jump_channel(self, paramiko_mod, jump_spec: str, dest_host: str, dest_port: int):
-        import os
-
-        user, host, port, jump_pwd = self._resolve_clab_jump_defaults()
-        if jump_spec and jump_spec != "auto":
-            spec = jump_spec.strip()
-            if "@" in spec:
-                u_part, spec = spec.split("@", 1)
-                if ":" in u_part:
-                    user, jump_pwd = u_part.split(":", 1)
-                else:
-                    user = u_part
-            if ":" in spec:
-                h_part, p_part = spec.rsplit(":", 1)
-                host = h_part
-                if p_part.isdigit():
-                    port = int(p_part)
-            else:
-                host = spec
-
-        target_ip, target_port = self._resolve_container_endpoint(host, dest_host, dest_port)
-
-        if self._jump_client is not None:
-            t_existing = self._jump_client.get_transport()
-            if t_existing is not None and t_existing.is_active():
-                return t_existing.open_channel(
-                    "direct-tcpip", (target_ip, target_port), ("127.0.0.1", 0)
-                )
-            with contextlib.suppress(Exception):
-                self._jump_client.close()
-            self._jump_client = None
-
-        if not host:
-            raise TimeoutError("Jump host is not configured")
-
-        with _JUMP_LOCK:
-            jump = paramiko_mod.SSHClient()
-            jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
-            key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
-            key_file = key_path if os.path.isfile(key_path) else None
-            jump.connect(
-                host,
-                port=port,
-                username=user,
-                password=jump_pwd,
-                key_filename=key_file,
-                look_for_keys=not bool(jump_pwd),
-                allow_agent=not bool(jump_pwd),
-                timeout=min(self.timeout, 8),
-                banner_timeout=12,
-                auth_timeout=10,
-            )
-            self._jump_client = jump
-            transport = jump.get_transport()
-            return transport.open_channel(
-                "direct-tcpip", (target_ip, target_port), ("127.0.0.1", 0)
-            )
+        return open_jump_channel(self, paramiko_mod, jump_spec, dest_host, dest_port)
 
     def _connect_with_sock(self, paramiko_mod, username: str, password: str, sock=None) -> None:
-        candidate_passwords: list[str] = []
-        with contextlib.suppress(Exception):
-            from netops.services.discovery import load_platform_profiles
+        connect_with_sock(self, paramiko_mod, username, password, sock=sock)
 
-            profiles = load_platform_profiles()
-            plat_key = self.target.platform.value
-            plat_prof = profiles.get(plat_key)
-            own_default = str(plat_prof.get("default_password") or "") if plat_prof else ""
-            other_defaults = {
-                str(p.get("default_password") or "")
-                for k, p in profiles.items()
-                if k != plat_key and p.get("default_password")
-            }
-            if password and password != unset_password_marker() and password not in other_defaults:
-                candidate_passwords.append(password)
-            if own_default and own_default not in candidate_passwords:
-                candidate_passwords.append(own_default)
-            if password and password != unset_password_marker() and password not in candidate_passwords:
-                candidate_passwords.append(password)
-            for prof in profiles.values():
-                dp = str(prof.get("default_password") or "")
-                if dp and dp not in candidate_passwords:
-                    candidate_passwords.append(dp)
-        for fallback_pw in (password,):
-            if fallback_pw and fallback_pw not in candidate_passwords:
-                candidate_passwords.append(fallback_pw)
-
-        last_err: Exception | None = None
-        for idx, cand_pw in enumerate(candidate_passwords):
-            current_sock = sock if idx == 0 else None
-            if idx > 0 and sock is not None:
-                current_sock = self._open_jump_channel(
-                    paramiko_mod,
-                    self.proxy_jump or "auto",
-                    self.target.host,
-                    self.target.port,
-                )
-            try:
-                self.client.connect(
-                    self.target.host,
-                    port=self.target.port,
-                    username=username,
-                    password=cand_pw,
-                    sock=current_sock,
-                    look_for_keys=False,
-                    allow_agent=False,
-                    timeout=min(self.timeout, 12),
-                    banner_timeout=15,
-                    auth_timeout=12,
-                )
-                self.authenticated_password = cand_pw
-                return
-            except paramiko_mod.ssh_exception.BadAuthenticationType as bad_auth_exc:
-                last_err = bad_auth_exc
-                try:
-                    transport = self.client.get_transport()
-                    if transport is None or not transport.is_active():
-                        if current_sock is not None:
-                            current_sock = self._open_jump_channel(
-                                paramiko_mod,
-                                self.proxy_jump or "auto",
-                                self.target.host,
-                                self.target.port,
-                            )
-                            transport = paramiko_mod.Transport(current_sock)
-                        else:
-                            transport = paramiko_mod.Transport((self.target.host, self.target.port))
-                        transport.start_client(timeout=min(self.timeout, 12))
-                        self.client._transport = transport
-                    transport.auth_interactive(
-                        username,
-                        lambda title, instructions, prompt_list, pw=cand_pw: [
-                            pw for _ in prompt_list
-                        ],
-                    )
-                    self.authenticated_password = cand_pw
-                    return
-                except paramiko_mod.ssh_exception.AuthenticationException as interactive_exc:
-                    last_err = interactive_exc
-                    with contextlib.suppress(Exception):
-                        self.client.close()
-                    continue
-            except paramiko_mod.ssh_exception.AuthenticationException as auth_exc:
-                last_err = auth_exc
-                with contextlib.suppress(Exception):
-                    self.client.close()
-                continue
-        if last_err is not None:
-            raise last_err
+    def _establish_fresh_session(self) -> None:
+        establish_fresh_session(self)
 
     def __enter__(self):
-        import os
-        import time
-
-        import paramiko
-
-        logging.getLogger("paramiko").setLevel(logging.CRITICAL)
-        self.client = paramiko.SSHClient()
-        if os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes"):
-            self.client.load_system_host_keys()
-            self.client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        else:
-            # ponytail: AutoAddPolicy for Containerlab; set NETOPS_SSH_STRICT_HOST_KEY=true in prod
-            self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        password = getattr(self.target.credentials, "password", "")
-        username = self.target.credentials.username
-        _, clab_host, _, _ = self._resolve_clab_jump_defaults()
-        is_internal_docker_ip = False
-        if clab_host and self.target.host != clab_host:
-            with contextlib.suppress(ValueError):
-                import ipaddress
-
-                is_internal_docker_ip = ipaddress.ip_address(
-                    self.target.host
-                ) in ipaddress.ip_network("172.16.0.0/12")
-        is_clab_target = bool(
-            clab_host
-            and (self.target.host == clab_host or is_internal_docker_ip)
-            and "PYTEST_CURRENT_TEST" not in os.environ
-        )
-
+        key = (self.target.host, self.target.port)
+        self._device_lock = _get_device_lock(self.target.host, self.target.port)
+        self._device_lock.acquire()
         try:
-            sock = None
-            if self.proxy_jump:
-                sock = self._open_jump_channel(
-                    paramiko, self.proxy_jump, self.target.host, self.target.port
-                )
-            elif is_clab_target and (
-                self.target.platform == Platform.HUAWEI_VRP or is_internal_docker_ip
-            ):
-                try:
-                    sock = self._open_jump_channel(
-                        paramiko, "auto", self.target.host, self.target.port
+            self._use_pool = "PYTEST_CURRENT_TEST" not in os.environ
+            if self._use_pool:
+                with _POOL_GUARD:
+                    pooled = _SESSION_POOL.get(key)
+                if pooled is not None:
+                    now = time.monotonic()
+                    last_used = float(pooled.get("last_used") or 0.0)
+                    client = pooled.get("client")
+                    shell = pooled.get("shell")
+                    transport = (
+                        client.get_transport()  # type: ignore[attr-defined]
+                        if client is not None and hasattr(client, "get_transport")
+                        else None
                     )
-                except Exception:
-                    if not _check_tcp_endpoint(self.target.host, self.target.port, timeout=1.5):
-                        raise
-                    sock = None
-            try:
-                self._connect_with_sock(paramiko, username, password, sock=sock)
-            except (paramiko.ssh_exception.SSHException, OSError) as exc:
-                if is_clab_target and (
-                    "protocol banner" in str(exc).lower()
-                    or "no existing session" in str(exc).lower()
-                    or "eof" in str(exc).lower()
-                ):
-                    for _retry in range(2):
-                        time.sleep(0.35)
-                        try:
-                            sock = self._open_jump_channel(
-                                paramiko, "auto", self.target.host, self.target.port
-                            )
-                            self._connect_with_sock(paramiko, username, password, sock=sock)
-                            break
-                        except (paramiko.ssh_exception.SSHException, OSError):
-                            if _retry == 1:
-                                raise
-                else:
-                    raise
+                    shell_alive = bool(
+                        shell is not None and not getattr(shell, "closed", False)
+                    )
+                    if (
+                        (now - last_used) < _SESSION_IDLE_TTL
+                        and transport is not None
+                        and transport.is_active()
+                        and shell_alive
+                    ):
+                        self.client = client
+                        self.shell = shell
+                        self._jump_client = pooled.get("jump_client")
+                        self.authenticated_password = pooled.get("authenticated_password")  # type: ignore[assignment]
+                        pooled["last_used"] = now
+                        return self
+                    _close_pooled_session(self.target.host, self.target.port)
 
-            self.shell = self.client.invoke_shell()
-            time.sleep(0.8)
-            while self.shell.recv_ready():
-                _ = self.shell.recv(8192)
-
-            if self.target.platform in (Platform.ARISTA_EOS, Platform.CISCO_IOSXE):
-                self.shell.send("enable\nterminal length 0\n")
-            elif self.target.platform == Platform.HUAWEI_VRP:
-                self.shell.send("screen-length 0 temporary\n")
-
-            init_deadline = time.time() + 4.0
-            init_buf = ""
-            while time.time() < init_deadline:
-                if self.shell.recv_ready():
-                    init_buf += self.shell.recv(8192).decode("utf-8", errors="ignore")
-                    time.sleep(0.1)
-                elif ("length 0" in init_buf) and init_buf.rstrip().endswith(("#", ">", "]")):
-                    break
-                else:
-                    time.sleep(0.15)
+            self._establish_fresh_session()
+            if self._use_pool and self.client is not None and self.shell is not None:
+                with _POOL_GUARD:
+                    _SESSION_POOL[key] = {
+                        "client": self.client,
+                        "shell": self.shell,
+                        "jump_client": self._jump_client,
+                        "platform": self.target.platform,
+                        "authenticated_password": self.authenticated_password,
+                        "last_used": time.monotonic(),
+                    }
             return self
         except Exception:
-            self.client.close()
-            if self._jump_client:
-                self._jump_client.close()
+            self._device_lock.release()
+            self._device_lock = None
             raise
 
     def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
-        import time
+        try:
+            key = (self.target.host, self.target.port)
+            if self._use_pool and exc_type is None and not self._invalidate_pool:
+                with _POOL_GUARD:
+                    if key in _SESSION_POOL:
+                        _SESSION_POOL[key]["last_used"] = time.monotonic()
+                        return
+            if self._use_pool:
+                _close_pooled_session(self.target.host, self.target.port)
+                return
 
-        if self.shell is not None:
-            with contextlib.suppress(Exception):
-                if self.target.platform == Platform.HUAWEI_VRP:
-                    self.shell.send("return\nquit\n")
-                else:
-                    self.shell.send("exit\n")
-                time.sleep(0.1)
-                self.shell.close()
-        if self.client:
-            self.client.close()
-        if self._jump_client:
-            self._jump_client.close()
+            if self.shell is not None:
+                with contextlib.suppress(Exception):
+                    if self.target.platform == Platform.HUAWEI_VRP:
+                        self.shell.send("return\nquit\ny\n")
+                    else:
+                        self.shell.send("exit\n")
+                    time.sleep(0.1)
+                    self.shell.close()
+            if self.client:
+                self.client.close()
+            if self._jump_client:
+                self._jump_client.close()
+        finally:
+            if self._device_lock is not None:
+                self._device_lock.release()
+                self._device_lock = None
 
     def send_command(self, cmd: str) -> _ScrapliResponse:
-        import time
-
-        if self.shell is None:
-            raise RuntimeError("SSH shell session is not initialized")
-        while self.shell.recv_ready():
-            _ = self.shell.recv(16384)
-        self.shell.send(f"{cmd}\n")
-        time.sleep(0.15)
-        output = ""
-        cmd_prefix = cmd.strip()[:16]
-        deadline = time.time() + self.timeout
-        last_recv_at = time.time()
-        while time.time() < deadline:
-            if self.shell.recv_ready():
-                output += self.shell.recv(16384).decode("utf-8", errors="ignore")
-                last_recv_at = time.time()
-                time.sleep(0.05)
-            elif output and (not cmd_prefix or cmd_prefix in output):
-                stripped = output.rstrip()
-                last_line = stripped.rsplit("\n", 1)[-1].strip()
-                has_body = "\n" in stripped
-                if self.target.platform == Platform.HUAWEI_VRP:
-                    is_prompt = has_body and (
-                        (last_line.startswith("<") and last_line.endswith(">"))
-                        or (last_line.startswith("[") and last_line.endswith("]"))
-                    )
-                else:
-                    is_prompt = (
-                        has_body
-                        and last_line != "#"
-                        and len(last_line) > 1
-                        and last_line.endswith(("#", ">", "]", "$", "%"))
-                    )
-                if is_prompt:
-                    time.sleep(0.05)
-                    if not self.shell.recv_ready():
-                        break
-                    continue
-                if has_body and (time.time() - last_recv_at) >= 2.5:
-                    break
-                time.sleep(0.1)
-            else:
-                time.sleep(0.1)
-        return _ScrapliResponse(output)
+        return _ScrapliResponse(execute_shell_command(self, cmd))
 
     def send_configs(self, lines: Sequence[str]) -> _ScrapliResponse:
-        import time
-
-        if self.shell is None:
-            raise RuntimeError("SSH shell session is not initialized")
-
-        if self.target.platform == Platform.HUAWEI_VRP:
-            self.shell.send("system-view\n")
-            time.sleep(0.2)
-            for line in lines:
-                self.shell.send(f"{line}\n")
-                time.sleep(0.08)
-            self.shell.send("commit\nreturn\n")
-        elif self.target.platform == Platform.ARISTA_EOS:
-            for line in lines:
-                self.shell.send(f"{line}\n")
-                time.sleep(0.08)
-        else:
-            self.shell.send("configure terminal\n")
-            time.sleep(0.2)
-            for line in lines:
-                self.shell.send(f"{line}\n")
-                time.sleep(0.08)
-            self.shell.send("end\n")
-
-        time.sleep(0.5)
-        output = ""
-        while self.shell.recv_ready():
-            output += self.shell.recv(16384).decode("utf-8", errors="ignore")
-            time.sleep(0.08)
-        return _ScrapliResponse(output)
+        return _ScrapliResponse(execute_shell_configs(self, lines))
 
 
 class ScrapliNetworkDriver:
@@ -519,8 +241,6 @@ class ScrapliNetworkDriver:
         return results
 
     def _fetch_single(self, target: DeviceTarget) -> str:
-        import time
-
         if target.platform == Platform.HUAWEI_VRP:
             cmd = "display current-configuration"
         elif target.platform == Platform.LINUX_SERVER:
@@ -538,7 +258,12 @@ class ScrapliNetworkDriver:
                         raise RuntimeError("Empty response from device")
                     from netops.telemetry.targets import is_externally_collected
 
-                    if not is_externally_collected(target.hostname):
+                    now_ts = time.monotonic()
+                    last_m = _LAST_CLI_METRICS_TS.get(target.hostname, 0.0)
+                    if not is_externally_collected(target.hostname) and (
+                        now_ts - last_m >= _CLI_METRICS_DEDUP_SEC
+                    ):
+                        _LAST_CLI_METRICS_TS[target.hostname] = now_ts
                         collect_metrics_from_cli(
                             target.hostname,
                             target.platform.value,
@@ -642,109 +367,30 @@ class ScrapliNetworkDriver:
     def snapshot(
         self, target: DeviceTarget, expected: HealthExpectations | None
     ) -> HealthSnapshot:
-        bgp_sessions: dict[str, BgpSessionState] = {}
-        interfaces: dict[str, InterfaceState] = {}
-        ping_losses: dict[str, float] = {}
-
         with self._get_connection(target) as conn:
-            if target.platform == Platform.HUAWEI_VRP:
-                bgp_out = conn.send_command("display bgp peer").result
-                for line in bgp_out.splitlines():
-                    match = re.search(
-                        r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(Established|Active|Idle|Connect|\d+)",
-                        line.strip(),
-                        re.IGNORECASE,
-                    )
-                    if match:
-                        peer_ip, state_or_pfx = match.groups()
-                        is_est = state_or_pfx.isdigit() or state_or_pfx.lower() == "established"
-                        prefixes = int(state_or_pfx) if state_or_pfx.isdigit() else 1
-                        bgp_sessions[peer_ip] = BgpSessionState(
-                            "Established" if is_est else state_or_pfx,
-                            prefixes_accepted=prefixes if is_est else 0,
-                        )
-
-                int_out = conn.send_command("display ip interface brief").result
-                for line in int_out.splitlines():
-                    parts = line.split()
-                    if (
-                        len(parts) >= 4
-                        and parts[0].startswith(("GE", "Loop", "Gigabit", "Eth", "Vb"))
-                        and parts[1].lower() != "unassigned"
-                    ):
-                        status = "up" if "up" in parts[2].lower() else "down"
-                        proto = "up" if "up" in parts[3].lower() else "down"
-                        interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
-            else:
-                bgp_out = conn.send_command("show ip bgp summary").result
-                ip_pattern = re.compile(r"^\d+\.\d+\.\d+\.\d+$")
-                for line in bgp_out.splitlines():
-                    parts = line.strip().split()
-                    peer_ip = next((p for p in parts if ip_pattern.match(p)), None)
-                    if not peer_ip or len(parts) < 4 or "identifier" in line.lower():
-                        continue
-                    last = parts[-1]
-                    if last.isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState(
-                            "Established", prefixes_accepted=int(last)
-                        )
-                    elif len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
-                        bgp_sessions[peer_ip] = BgpSessionState(
-                            "Established", prefixes_accepted=int(parts[-2])
-                        )
-                    else:
-                        bgp_sessions[peer_ip] = BgpSessionState(last, prefixes_accepted=0)
-
-                int_out = conn.send_command("show ip interface brief").result
-                for line in int_out.splitlines():
-                    parts = line.split()
-                    if target.platform == Platform.CISCO_IOSXE and len(parts) >= 6:
-                        if parts[0].startswith(("Gigabit", "Loop")):
-                            interfaces[parts[0]] = InterfaceState(
-                                status=parts[4], protocol=parts[5]
-                            )
-                    elif len(parts) >= 4 and parts[0].startswith(
-                        ("Ethernet", "Loop", "Management")
-                    ):
-                        status = "up" if "up" in parts[2].lower() else "down"
-                        proto = "up" if "up" in parts[3].lower() else "down"
-                        interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
-
-            from netops.telemetry.targets import is_externally_collected
-
-            cli_metrics = (
-                {}
-                if is_externally_collected(target.hostname)
-                else collect_metrics_from_cli(
-                    target.hostname,
-                    target.platform.value,
-                    lambda c: conn.send_command(c).result,
-                )
+            return collect_device_health_tables(
+                conn,
+                target,
+                expected,
+                last_cli_metrics_ts=_LAST_CLI_METRICS_TS,
+                cli_metrics_dedup_sec=_CLI_METRICS_DEDUP_SEC,
             )
 
-            if expected:
-                for peer in expected.bgp_peers:
-                    if target.platform == Platform.CISCO_IOSXE:
-                        ping_cmd = f"ping {peer} repeat 5"
-                    elif target.platform == Platform.HUAWEI_VRP:
-                        ping_cmd = f"ping -c 5 {peer}"
-                    else:
-                        ping_cmd = f"ping {peer} count 5"
-                    ping_out = conn.send_command(ping_cmd).result
-                    rate_match = re.search(
-                        r"(?:Success rate is |packet loss, |transmitted, \d+ received, )(\d+)%",
-                        ping_out,
-                    )
-                    ping_losses[peer] = (100.0 - float(rate_match.group(1))) if rate_match else 0.0
 
-        return HealthSnapshot(
-            bgp_sessions=bgp_sessions,
-            interfaces=interfaces,
-            ping_loss_percent=ping_losses,
-            cpu_pct=cli_metrics.get("cpu_pct"),
-            memory_pct=cli_metrics.get("memory_pct"),
-            uplink_util_pct=cli_metrics.get("uplink_util_pct"),
-            disk_util_pct=cli_metrics.get("disk_util_pct"),
-            network_rate_mbps=cli_metrics.get("network_rate_mbps"),
-            load_1m=cli_metrics.get("load_1m"),
-        )
+__all__ = [
+    "ARISTA_SESSION",
+    "HUAWEI_COMMIT_LIST",
+    "SCRAPLI_PLATFORMS",
+    "TRANSACTIONAL_PLATFORMS",
+    "_DEAD_ENDPOINTS",
+    "_DEVICE_LOCKS",
+    "_JUMP_LOCK",
+    "_LAST_CLI_METRICS_TS",
+    "_SESSION_POOL",
+    "BgpSessionState",
+    "InterfaceState",
+    "ScrapliNetworkDriver",
+    "_ParamikoConnAdapter",
+    "_check_tcp_endpoint",
+    "_latest_commit_id",
+]
