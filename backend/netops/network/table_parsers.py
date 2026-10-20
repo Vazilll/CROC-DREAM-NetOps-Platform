@@ -27,17 +27,16 @@ def parse_bgp_table(platform: Platform, output: str) -> dict[str, BgpSessionStat
     if platform == Platform.HUAWEI_VRP:
         for line in output.splitlines():
             match = re.search(
-                r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\s+(Established|Active|Idle|Connect|\d+)",
+                r"^(\d+\.\d+\.\d+\.\d+)\s+.*?\b(Established|Active|Idle|Connect|OpenSent|OpenConfirm)\b\s*(\d+)?\s*$",
                 line.strip(),
                 re.IGNORECASE,
             )
             if match:
-                peer_ip, state_or_pfx = match.groups()
-                is_est = state_or_pfx.isdigit() or state_or_pfx.lower() == "established"
-                prefixes = int(state_or_pfx) if state_or_pfx.isdigit() else 1
+                peer_ip, state, pfx = match.groups()
+                is_est = state.lower() == "established"
                 bgp_sessions[peer_ip] = BgpSessionState(
-                    "Established" if is_est else state_or_pfx,
-                    prefixes_accepted=prefixes if is_est else 0,
+                    "Established" if is_est else state,
+                    prefixes_accepted=int(pfx) if (is_est and pfx) else (1 if is_est else 0),
                 )
         return bgp_sessions
 

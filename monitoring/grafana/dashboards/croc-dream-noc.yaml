@@ -65,7 +65,7 @@ panels:
           steps:
             - { color: "#10b981", value: null }
     targets:
-      - expr: netops_devices_total
+      - expr: max by (status) (netops_devices_total)
         legendFormat: "{{status}}"
         refId: A
 
@@ -202,7 +202,7 @@ panels:
     targets:
       - rawQuery: true
         editorMode: code
-        rawSql: "SELECT hostname, fabric_id, COALESCE(site, fabric_id) AS site, platform, role, status, management_ip, last_checked_at FROM devices WHERE ('${fabric_id:raw}' IN ('$__all', '.*', '') OR fabric_id ~ '${fabric_id:regex}') ORDER BY fabric_id, hostname;"
+        rawSql: "SELECT hostname, fabric_id, COALESCE(site, fabric_id) AS site, platform, role, status, management_ip, last_checked_at FROM devices WHERE fabric_id ~ '^(${fabric_id:regex})$' OR '${fabric_id:raw}' = '.*' ORDER BY fabric_id, hostname;"
         format: table
         refId: A
 
