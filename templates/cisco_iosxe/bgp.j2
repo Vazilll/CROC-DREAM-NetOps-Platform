@@ -12,10 +12,16 @@ router bgp {{ intent.bgp.asn }}
  neighbor {{ neighbor.peer_ip }} password {{ neighbor.password }}
 {% endif %}
 {% endfor %}
+ !
  address-family ipv4
-{% for prefix in intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique %}
+{% set prefixes = intent.bgp.neighbors | map(attribute="announced_prefixes") | sum(start=[]) | unique | list %}
+{% if prefixes %}
+{% for prefix in prefixes %}
   network {{ prefix.network_address }} mask {{ prefix.netmask }}
 {% endfor %}
+{% else %}
+  network {{ intent.bgp.router_id }} mask 255.255.255.255
+{% endif %}
 {% for neighbor in intent.bgp.neighbors %}
   neighbor {{ neighbor.peer_ip }} activate
 {% endfor %}
