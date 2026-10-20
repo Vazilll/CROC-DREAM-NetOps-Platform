@@ -113,6 +113,15 @@ def load_profile_for_platform(
     search_dirs: list[Path] = []
     if repo_path is not None:
         search_dirs.extend([repo_path / "platforms", repo_path / "intent" / "platforms", repo_path])
+    try:
+        from netops.settings import get_settings
+
+        settings_repo = get_settings().intent_repo_path
+        if settings_repo:
+            search_dirs.extend([settings_repo / "platforms", settings_repo])
+    except Exception:
+        pass
+    search_dirs.append(Path("/data/intent/platforms"))
     repo_root = Path(__file__).resolve().parents[3]
     search_dirs.extend([
         repo_root / "intent" / "platforms",

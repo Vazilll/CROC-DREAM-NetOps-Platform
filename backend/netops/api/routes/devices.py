@@ -110,6 +110,51 @@ def get_device(
 ) -> DeviceDetail:
     device = service.get(device_id)
     assert_device_allowed(device, principal.allowed_system)
+    if (
+        not device.hardware_specs
+        and device.status != DeviceStatus.UNREACHABLE
+        and container.settings.network_driver != "offline"
+        and "PYTEST_CURRENT_TEST" not in os.environ
+    ):
+        try:
+            import json
+
+            from netops.intent.models import InventoryDevice
+            from netops.network.scrapli_driver import _ParamikoConnAdapter
+            from netops.services.discovery_parsers import (
+                _parse_ssh_hardware_specs,
+                _parse_ssh_topology,
+            )
+            from netops.services.telemetry import collect_metrics_from_cli
+            from netops.toolchain import build_toolchain
+
+            toolchain = build_toolchain(container.settings)
+            target = toolchain.target_for(InventoryDevice.model_validate(device))
+            with _ParamikoConnAdapter(target, timeout=10, proxy_jump=device.proxy_jump) as conn:
+                _, os_ver, cpu_cores, ram_gb, disk_gb = _parse_ssh_hardware_specs(
+                    conn, device.platform, device.platform.value
+                )
+                _, ifaces, lldp = _parse_ssh_topology(conn, device.platform, device.hostname)
+                collect_metrics_from_cli(
+                    device.hostname,
+                    device.platform.value,
+                    lambda c: conn.send_command(c).result,
+                )
+                device.hardware_specs = json.dumps(
+                    {
+                        "os_version": os_ver,
+                        "cpu_cores": cpu_cores,
+                        "ram_gb": ram_gb,
+                        "disk_gb": disk_gb,
+                        "interfaces": ifaces,
+                        "lldp_neighbors": lldp,
+                    },
+                    ensure_ascii=False,
+                )
+                service._session.commit()
+                service._enrich_device(device)
+        except Exception:
+            pass
     detail = DeviceDetail.model_validate(device)
     try:
         detail.intent = container.intents.load_device_intent(device.hostname)

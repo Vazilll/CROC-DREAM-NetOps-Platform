@@ -315,9 +315,41 @@ def device_samples(
                     ports,
                 )
         try:
-            return dev, lbls, toolchain.health_probe.snapshot(tgt, exp), None, ports
+            snap = toolchain.health_probe.snapshot(tgt, exp)
+            hw_json: str | None = None
+            if (
+                not dev.hardware_specs
+                and toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
+            ):
+                try:
+                    import json
+
+                    from netops.services.discovery_parsers import (
+                        _parse_ssh_hardware_specs,
+                        _parse_ssh_topology,
+                    )
+
+                    with toolchain.health_probe._get_connection(tgt) as conn:
+                        _, os_ver, cpu_cores, ram_gb, disk_gb = _parse_ssh_hardware_specs(
+                            conn, dev.platform, dev.platform.value
+                        )
+                        _, ifaces, lldp = _parse_ssh_topology(conn, dev.platform, dev.hostname)
+                        hw_json = json.dumps(
+                            {
+                                "os_version": os_ver,
+                                "cpu_cores": cpu_cores,
+                                "ram_gb": ram_gb,
+                                "disk_gb": disk_gb,
+                                "interfaces": ifaces,
+                                "lldp_neighbors": lldp,
+                            },
+                            ensure_ascii=False,
+                        )
+                except Exception:
+                    pass
+            return dev, lbls, snap, None, ports, hw_json
         except Exception as exc:
-            return dev, lbls, None, exc, ports
+            return dev, lbls, None, exc, ports, None
 
     workers = max(1, min(max_workers, len(probe_tasks)))
     if workers == 1:
@@ -328,7 +360,9 @@ def device_samples(
 
     samples: list[Sample] = []
     status_changed = False
-    for device, labels, health, err, _ports in results:
+    for item_res in results:
+        device, labels, health, err, _ports = item_res[:5]
+        hw_json = item_res[5] if len(item_res) > 5 else None
         if err is not None or health is None:
             from netops.services.telemetry import clear_live_metrics
 
@@ -343,6 +377,11 @@ def device_samples(
         if device.status == DeviceStatus.UNREACHABLE:
             device.status = DeviceStatus.IN_SYNC
             status_changed = True
+        if hw_json and not device.hardware_specs:
+            device.hardware_specs = hw_json
+            status_changed = True
+        device.last_checked_at = utcnow()
+        status_changed = True
         samples.append(Sample(metrics.DEVICE_REACHABLE, 1.0, labels))
         if _is_server_device(device):
             samples.extend(_emit_server_samples(health, labels, device.hostname))

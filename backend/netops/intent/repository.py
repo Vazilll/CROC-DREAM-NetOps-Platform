@@ -25,7 +25,12 @@ PLATFORMS_DIR = "platforms"
 DIFF_FILTERS_FILE = "diff_filters.yaml"
 _YAML_SUFFIXES = (".yaml", ".yml")
 
-_DEFAULT_PLATFORMS_DIR = Path(__file__).resolve().parents[3] / "intent" / "platforms"
+_REPO_PLATFORMS_DIR = Path(__file__).resolve().parents[3] / "intent" / "platforms"
+_DEFAULT_PLATFORMS_DIR = (
+    Path("/data/intent/platforms")
+    if Path("/data/intent/platforms").is_dir()
+    else _REPO_PLATFORMS_DIR
+)
 _DEFAULT_DIFF_FILTERS_PATH = Path(__file__).resolve().parents[1] / "network" / "diff_filters.yaml"
 
 ModelT = TypeVar("ModelT", bound=BaseModel)

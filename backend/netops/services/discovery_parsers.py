@@ -112,7 +112,7 @@ def _parse_ssh_hardware_specs(
             ram_gb = round(int(m_mb.group(1)) / 1024, 2)
     if ram_gb is None and cmds.get("memory"):
         mem_out = conn.send_command(str(cmds["memory"])).result
-        m_hw = re.search(r"Total\s*:\s*(\d+)", mem_out, re.IGNORECASE)
+        m_hw = re.search(r"Total(?:\s+Memory)?\s*:\s*(\d+)", mem_out, re.IGNORECASE)
         if m_hw:
             val = int(m_hw.group(1))
             ram_gb = round(val / (1024 * 1024 if val > 100_000 else 1024), 2)

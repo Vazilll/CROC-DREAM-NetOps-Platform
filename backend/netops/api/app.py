@@ -55,10 +55,17 @@ def create_app(
                     ensure_public_role_tunnels_async(settings)
                 if rt.get("bootstrap_completed"):
                     from netops.services import DeviceService
+                    from netops.worker.celery_app import (
+                        COLLECT_METRICS_TASK,
+                        REFRESH_COLLECTOR_TARGETS_TASK,
+                    )
 
                     snapshot = container.intents.load()
                     with container.session_factory() as session:
                         DeviceService(session).sync_inventory(snapshot.inventory)
+                    celery_app = create_celery_app(settings)
+                    celery_app.send_task(COLLECT_METRICS_TASK)
+                    celery_app.send_task(REFRESH_COLLECTOR_TARGETS_TASK)
             except Exception:
                 pass
         yield

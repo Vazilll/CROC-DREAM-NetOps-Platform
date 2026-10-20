@@ -313,6 +313,10 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                 dev = dev_by_host.get(sw["hostname"])
                 if dev is not None:
                     dev.status = DeviceStatus.IN_SYNC
+                    if sw.get("hardware_specs"):
+                        import json
+
+                        dev.hardware_specs = json.dumps(sw["hardware_specs"], ensure_ascii=False)
                     rcfg = (sw.get("running_config") or "").strip()
                     if rcfg:
                         session.add(
