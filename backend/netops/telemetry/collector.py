@@ -317,8 +317,10 @@ def device_samples(
         try:
             snap = toolchain.health_probe.snapshot(tgt, exp)
             hw_json: str | None = None
+            from netops.services.discovery_parsers import _needs_hardware_specs
+
             if (
-                not dev.hardware_specs
+                _needs_hardware_specs(dev.hardware_specs)
                 and toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
             ):
                 try:
@@ -377,7 +379,7 @@ def device_samples(
         if device.status == DeviceStatus.UNREACHABLE:
             device.status = DeviceStatus.IN_SYNC
             status_changed = True
-        if hw_json and not device.hardware_specs:
+        if hw_json:
             device.hardware_specs = hw_json
             status_changed = True
         device.last_checked_at = utcnow()

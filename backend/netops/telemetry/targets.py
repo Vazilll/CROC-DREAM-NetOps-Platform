@@ -45,6 +45,8 @@ SNMP_TARGETS_FILE = "prometheus_snmp_targets"
 EXPORTER_TARGETS_FILE = "prometheus_exporter_targets"
 PROTOCOLS_STATE_KEY = "netops:telemetry:protocols"
 PROTOCOL_OVERRIDES_KEY = "netops:telemetry:overrides"
+# UDP-релей стенда для SNMP: хост публикует 16000+<последний октет IP> -> агент коммутатора.
+SNMP_RELAY_BASE_PORT = int(os.environ.get("SNMP_RELAY_BASE_PORT", "16000"))
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -124,13 +126,25 @@ def _probe_device(
     extra_kwargs: dict[str, Any] = {}
     if detect is detect_optimal_telemetry_protocol:
         ssh_send = _make_ssh_trigger_sender(device, toolchain)
+        extra_kwargs["timeout"] = 3.0  # стенды достижимы через интернет: 0.5с по умолчанию мало
         if ssh_send is not None:
             extra_kwargs["ssh_send"] = ssh_send
         if override:
             extra_kwargs["preferred_protocol"] = override
+    probe_host = str(device.management_ip)
+    stand_host = getattr(settings, "clab_host", None)
+    try:
+        import ipaddress
+
+        ip_obj = ipaddress.ip_address(probe_host)
+        if stand_host and ip_obj.is_private and device.platform.value != "linux_server":
+            probe_host = str(stand_host)
+            extra_kwargs["snmp_port"] = SNMP_RELAY_BASE_PORT + int(ip_obj.packed[-1])
+    except ValueError:
+        pass
     try:
         result = detect(
-            str(device.management_ip),
+            probe_host,
             device.platform.value,
             management_port=device.management_port,
             username=username,
@@ -145,7 +159,7 @@ def _probe_device(
     base_item = {
         **result,
         "protocol": str(getattr(protocol, "value", protocol)),
-        "host": str(device.management_ip),
+        "host": probe_host,
         "platform": device.platform.value,
         "fabric_id": device.fabric_id or "default",
     }

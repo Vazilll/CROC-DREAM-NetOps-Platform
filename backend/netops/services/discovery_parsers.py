@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import re
 from typing import Any
 
@@ -13,6 +14,16 @@ from netops.services.discovery_profiles import (
     detect_platform_from_version,
     load_platform_profiles,
 )
+
+
+def _needs_hardware_specs(hw_str: str | None) -> bool:
+    if not hw_str:
+        return True
+    try:
+        data = json.loads(hw_str)
+        return not isinstance(data, dict) or data.get("ram_gb") is None or not data.get("os_version")
+    except Exception:
+        return True
 
 
 def _parse_ssh_hardware_specs(

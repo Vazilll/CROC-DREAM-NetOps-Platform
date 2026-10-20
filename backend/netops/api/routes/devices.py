@@ -110,8 +110,10 @@ def get_device(
 ) -> DeviceDetail:
     device = service.get(device_id)
     assert_device_allowed(device, principal.allowed_system)
+    from netops.services.discovery_parsers import _needs_hardware_specs
+
     if (
-        not device.hardware_specs
+        _needs_hardware_specs(device.hardware_specs)
         and device.status != DeviceStatus.UNREACHABLE
         and container.settings.network_driver != "offline"
         and "PYTEST_CURRENT_TEST" not in os.environ

@@ -27,6 +27,7 @@ x-backend: &backend
     NETOPS_OFFLINE_LAB_PATH: /data/lab
     NETOPS_PROMETHEUS_URL: ${NETOPS_PROMETHEUS_URL:-http://prometheus:9090}
     NETOPS_VICTORIAMETRICS_URL: ${NETOPS_VICTORIAMETRICS_URL:-http://victoriametrics:8428}
+    NETOPS_SNMP_COMMUNITY: ${SNMP_COMMUNITY:-}
     # NETOPS_API_TOKENS is intentionally NOT set here: no well-known dev tokens in the stack.
     # Machine API keys (MCP, CI, smoke) go into backend/.env; browsers use HttpOnly cookie sessions.
   volumes:
