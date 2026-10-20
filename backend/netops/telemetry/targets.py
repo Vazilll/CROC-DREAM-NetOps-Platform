@@ -47,6 +47,7 @@ PROTOCOLS_STATE_KEY = "netops:telemetry:protocols"
 PROTOCOL_OVERRIDES_KEY = "netops:telemetry:overrides"
 # UDP-релей стенда для SNMP: хост публикует 16000+<последний октет IP> -> агент коммутатора.
 SNMP_RELAY_BASE_PORT = int(os.environ.get("SNMP_RELAY_BASE_PORT", "16000"))
+GNMI_RELAY_BASE_PORT = int(os.environ.get("GNMI_RELAY_BASE_PORT", "17000"))
 
 
 def _atomic_write(path: Path, content: str) -> None:
@@ -140,6 +141,7 @@ def _probe_device(
         if stand_host and ip_obj.is_private and device.platform.value != "linux_server":
             probe_host = str(stand_host)
             extra_kwargs["snmp_port"] = SNMP_RELAY_BASE_PORT + int(ip_obj.packed[-1])
+            extra_kwargs["gnmi_port"] = GNMI_RELAY_BASE_PORT + int(ip_obj.packed[-1])
     except ValueError:
         pass
     try:

@@ -7,6 +7,7 @@ from netops.api.routes import (
     drift,
     emergency,
     insights,
+    intent_edit,
     jobs,
     system,
     telemetry,
@@ -18,6 +19,7 @@ api_v1.include_router(auth.router)
 api_v1.include_router(config.router)
 api_v1.include_router(system.api_router)
 api_v1.include_router(devices.router)
+api_v1.include_router(intent_edit.router)
 api_v1.include_router(jobs.router)
 api_v1.include_router(drift.router)
 api_v1.include_router(users.router)

@@ -17,6 +17,7 @@ import { api } from '../../api';
 import type { JobDiff, DeviceDiff, JobSummary, RiskExplanation } from '../../api';
 import { translations, type Locale } from '../../i18n';
 import type { AppTheme } from '../layout/Header';
+import { IntentEditor } from './IntentEditor';
 
 interface PlainDiffProps {
   original: string;
@@ -184,7 +185,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   const t = translations[locale];
   const [diffData, setDiffData] = useState<JobDiff | null>(null);
   const [selectedDeviceIndex, setSelectedDeviceIndex] = useState(0);
-  const [activeViewMode, setActiveViewMode] = useState<'diff' | 'remediation' | 'rollback'>('diff');
+  const [activeViewMode, setActiveViewMode] = useState<'diff' | 'remediation' | 'rollback' | 'intent'>('diff');
   const [viewEngine, setViewEngine] = useState<'monaco' | 'plain'>('monaco');
   const [loading, setLoading] = useState(false);
   const [prevJobKey, setPrevJobKey] = useState<string>('');
@@ -534,6 +535,18 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
                   <Undo2 className="w-3.5 h-3.5" />
                   <span>{t.modeRollback}</span>
                 </button>
+
+                <button
+                  onClick={() => setActiveViewMode('intent')}
+                  className={`px-2.5 sm:px-3 py-1 rounded-lg text-xs font-mono transition flex items-center space-x-1.5 cursor-pointer ${
+                    activeViewMode === 'intent'
+                      ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/40 font-semibold'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  <GitBranch className="w-3.5 h-3.5" />
+                  <span>Intent (YAML)</span>
+                </button>
               </div>
 
               <div className="flex items-center space-x-2">
@@ -556,7 +569,17 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
 
             <div className="flex-1 w-full h-[360px] sm:h-[520px] 2xl:h-[680px] rounded-xl overflow-hidden border border-slate-200 dark:border-white/[0.04]">
               {activeDeviceDiff ? (
-                activeViewMode === 'diff' ? (
+                activeViewMode === 'intent' ? (
+                  activeDeviceDiff.device_id ? (
+                    <IntentEditor
+                      deviceId={activeDeviceDiff.device_id}
+                      canEdit={userRole === 'admin' || userRole === 'owner'}
+                      theme={theme}
+                    />
+                  ) : (
+                    <div className="p-8 text-center text-zinc-500 font-mono">Устройство не привязано к БД.</div>
+                  )
+                ) : activeViewMode === 'diff' ? (
                   viewEngine === 'plain' ? (
                     <PlainDiffFallback
                       original={activeDeviceDiff.running_config || '# Running config empty'}

@@ -31,6 +31,8 @@ import type {
   Forecast,
   ForecastAlert,
   GitStatusInfo,
+  IntentSaveResult,
+  IntentSource,
   IntegrationsStatus,
   JobDetail,
   JobDiff,
@@ -506,6 +508,17 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     return this.request('/emergency/freeze', {
       method: 'POST',
       body: JSON.stringify({ frozen, reason }),
+    });
+  }
+
+  async getIntentSource(deviceId: number): Promise<IntentSource> {
+    return this.request<IntentSource>(`/devices/${deviceId}/intent-source`);
+  }
+
+  async saveIntentSource(deviceId: number, yaml: string): Promise<IntentSaveResult> {
+    return this.request<IntentSaveResult>(`/devices/${deviceId}/intent-source`, {
+      method: 'PUT',
+      body: JSON.stringify({ yaml }),
     });
   }
 

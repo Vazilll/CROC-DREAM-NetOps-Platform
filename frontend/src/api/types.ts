@@ -192,6 +192,19 @@ export interface DeviceDiff {
   rollback_patch: string | null;
 }
 
+export interface IntentSource {
+  hostname: string;
+  exists: boolean;
+  yaml: string;
+  editable: boolean;
+}
+
+export interface IntentSaveResult {
+  saved: boolean;
+  hostname: string;
+  issues: Array<{ source: string; field: string; message: string }>;
+}
+
 export interface JobDiff {
   job_id: string;
   job_type: JobType;
