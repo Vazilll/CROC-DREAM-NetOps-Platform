@@ -129,7 +129,8 @@ class StackSmoke:
         devices = self._api.get("/api/v1/devices")
         if len(devices) != self._devices:
             raise SmokeError(f"устройств в базе: {len(devices)}, ожидали {self._devices}")
-        self._device_ids = [device["id"] for device in devices]
+        # Серверы (linux) не имеют intent и не участвуют в dry-run.
+        self._device_ids = [d["id"] for d in devices if "server" not in str(d.get("platform", "")).lower()]
         return ", ".join(sorted(device["hostname"] for device in devices))
 
     def dry_run(self) -> str:
@@ -270,8 +271,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--api", default=f"http://localhost:{os.environ.get('API_PORT', '8001')}")
     parser.add_argument(
         "--token",
-        default=os.environ.get("NETOPS_SMOKE_TOKEN", "dev-admin-token"),
-        help="токен администратора (по умолчанию из backend/.env.example)",
+        default=os.environ.get("NETOPS_SMOKE_TOKEN", ""),
+        help="персональный токен администратора (crk_*): выпускается в консоли Владельца → «Поделиться»",
     )
     parser.add_argument("--devices", type=int, default=4, help="сколько устройств в инвентаре")
     parser.add_argument(
@@ -290,6 +291,9 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
+    if not args.token:
+        print("Нужен токен: задайте NETOPS_SMOKE_TOKEN или --token (выпуск: консоль Владельца → «Поделиться», роль admin).")
+        return 2
     smoke = StackSmoke(
         Api(args.api, args.token),
         devices=args.devices,

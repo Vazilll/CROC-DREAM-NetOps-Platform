@@ -6,6 +6,7 @@ import contextlib
 import ipaddress
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -445,7 +446,7 @@ def execute_shell_command(adapter: Any, cmd: str) -> str:
             time.sleep(0.1)
         else:
             time.sleep(0.1)
-    return output
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", output)
 
 
 def execute_shell_configs(adapter: Any, lines: Sequence[str]) -> str:

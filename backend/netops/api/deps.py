@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session, sessionmaker
 
+from netops.constants import role_locked_ports
 from netops.enums import UserRole
 from netops.intent import IntentRepository
 from netops.services import DeviceService, JobDispatcher, JobService, UserService
@@ -65,6 +66,13 @@ def get_principal(
     if credentials is None:
         principal, record = principal_from_session(request, session, container.settings)
         if principal is not None and record is not None:
+            console_port = (request.headers.get("x-console-port") or "").strip()
+            if principal.role == UserRole.OWNER and console_port in role_locked_ports():
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Owner session is not valid on a role-locked console port",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
             if not csrf_ok(request, record):
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN, detail="Missing or invalid CSRF token"

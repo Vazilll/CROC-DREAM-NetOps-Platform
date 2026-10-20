@@ -21,9 +21,21 @@ def _needs_hardware_specs(hw_str: str | None) -> bool:
         return True
     try:
         data = json.loads(hw_str)
-        return not isinstance(data, dict) or data.get("ram_gb") is None or not data.get("os_version")
+        if not isinstance(data, dict):
+            return True
+        os_ver = str(data.get("os_version") or "").strip().lower()
+        return (
+            data.get("ram_gb") is None
+            or not os_ver
+            or os_ver in ("uname -a", "show version", "display version")
+            or not data.get("interfaces")
+        )
     except Exception:
         return True
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;?]*[A-Za-z]", "", text or "")
 
 
 def _parse_ssh_hardware_specs(
@@ -36,7 +48,7 @@ def _parse_ssh_hardware_specs(
         cmds.get("version")
         or ("uname -a" if initial_platform == Platform.LINUX_SERVER else "show version")
     )
-    ver_out = conn.send_command(ver_cmd).result
+    ver_out = _strip_ansi(conn.send_command(ver_cmd).result)
     detected_platform = detect_platform_from_version(ver_out, initial_platform, profiles)
     plat_cfg = profiles.get(detected_platform.value) or plat_cfg
     cmds = plat_cfg.get("commands") or cmds
@@ -44,26 +56,30 @@ def _parse_ssh_hardware_specs(
     if detected_platform == Platform.LINUX_SERVER:
         cpu_cores = 1
         try:
-            nproc_out = conn.send_command("nproc").result.strip()
-            if nproc_out.isdigit():
-                cpu_cores = int(nproc_out)
+            nproc_out = _strip_ansi(conn.send_command("nproc").result)
+            nproc_digits = [ln.strip() for ln in nproc_out.splitlines() if ln.strip().isdigit()]
+            if nproc_digits:
+                cpu_cores = int(nproc_digits[0])
             else:
-                cpuinfo_out = conn.send_command("grep -c ^processor /proc/cpuinfo").result.strip()
-                if cpuinfo_out.isdigit():
-                    cpu_cores = int(cpuinfo_out)
+                cpuinfo_out = _strip_ansi(
+                    conn.send_command("grep -c ^processor /proc/cpuinfo").result
+                )
+                cpu_digits = [ln.strip() for ln in cpuinfo_out.splitlines() if ln.strip().isdigit()]
+                if cpu_digits:
+                    cpu_cores = int(cpu_digits[0])
         except Exception:
             pass
 
         ram_gb = None
         try:
-            mem_out = conn.send_command("grep MemTotal /proc/meminfo").result
+            mem_out = _strip_ansi(conn.send_command("grep MemTotal /proc/meminfo").result)
             m_mem = re.search(r"MemTotal:\s*(\d+)\s*kB", mem_out, re.IGNORECASE)
             if m_mem:
                 ram_gb = round(int(m_mem.group(1)) / (1024 * 1024), 2)
             else:
-                top_mem = conn.send_command(
-                    str(cmds.get("memory") or "top -bn1 | head -n 5")
-                ).result
+                top_mem = _strip_ansi(
+                    conn.send_command(str(cmds.get("memory") or "top -bn1 | head -n 5")).result
+                )
                 m_top = re.search(r"MiB Mem\s*:\s*([\d.]+)\s*total", top_mem, re.IGNORECASE)
                 if m_top:
                     ram_gb = round(float(m_top.group(1)) / 1024, 2)
@@ -72,7 +88,7 @@ def _parse_ssh_hardware_specs(
 
         disk_gb = None
         try:
-            df_out = conn.send_command("df -m /").result
+            df_out = _strip_ansi(conn.send_command("df -m /").result)
             for line in df_out.splitlines():
                 parts = line.split()
                 if parts and (line.strip().endswith(" /") or parts[-1] == "/"):
@@ -83,7 +99,7 @@ def _parse_ssh_hardware_specs(
                         disk_gb = round(int(parts[1]) / 1024, 2)
                         break
             if disk_gb is None:
-                df_h_out = conn.send_command("df -h /").result
+                df_h_out = _strip_ansi(conn.send_command("df -h /").result)
                 m_h = re.search(
                     r"\s+(\d+(?:\.\d+)?)\s*([GMKT])i?B?\s+.*(?:\s|/)$", df_h_out, re.MULTILINE
                 )
@@ -102,7 +118,10 @@ def _parse_ssh_hardware_specs(
         lines_clean = [
             ln.strip()
             for ln in ver_out.splitlines()
-            if ln.strip() and not ln.strip().endswith(("#", ">", "]", "$"))
+            if ln.strip()
+            and not ln.strip().endswith(("#", ">", "]", "$"))
+            and ln.strip().lower() != ver_cmd.strip().lower()
+            and not ln.strip().lower().startswith("uname ")
         ]
         os_ver = lines_clean[0][:100] if lines_clean else fallback_ver
         return detected_platform, os_ver, cpu_cores, ram_gb, disk_gb
@@ -159,6 +178,7 @@ def _parse_ssh_hardware_specs(
 
 def _parse_linux_interfaces(output: str) -> list[dict[str, Any]]:
     """Parse 'ip addr show' or 'ip -o addr show' into standard L3 interface intent dicts."""
+    output = _strip_ansi(output)
     interfaces: list[dict[str, Any]] = []
     if re.search(r"^\d+:\s+\S+\s+inet\s+", output, re.MULTILINE):
         seen_names: dict[str, dict[str, Any]] = {}
@@ -270,17 +290,22 @@ def _parse_ssh_topology(
 
     hostname = default_hostname
     domain = _resolve_domain()
-    run_out = conn.send_command(
-        str(cmds.get("hostname_filter") or "show running-config | include hostname")
-    ).result
+    run_out = _strip_ansi(
+        conn.send_command(
+            str(cmds.get("hostname_filter") or "show running-config | include hostname")
+        ).result
+    )
     if platform == Platform.LINUX_SERVER and run_out.strip():
-        first_line = run_out.strip().splitlines()[0].strip()
-        if re.match(r"^[A-Za-z0-9._-]+$", first_line) and first_line.lower() not in (
-            "hostname",
-            "sysname",
-            "include",
-        ):
-            hostname = first_line if "." in first_line else f"{first_line}.{domain}"
+        for raw_ln in run_out.splitlines():
+            cand = raw_ln.strip()
+            if (
+                cand
+                and not cand.endswith(("#", ">", "]", "$"))
+                and re.match(r"^[A-Za-z0-9._-]+$", cand)
+                and cand.lower() not in ("hostname", "sysname", "include")
+            ):
+                hostname = cand if "." in cand else f"{cand}.{domain}"
+                break
     else:
         for hm in re.finditer(
             r"^\s*(?:hostname|sysname)\s+([A-Za-z0-9._-]+)", run_out, re.MULTILINE
@@ -304,14 +329,15 @@ def _parse_ssh_topology(
                 hostname = raw_h if "." in raw_h else f"{raw_h}.{domain}"
 
     int_cmd = str(cmds.get("interfaces_brief") or "show ip interface brief")
+    int_out = _strip_ansi(conn.send_command(int_cmd).result)
     interfaces = [
-        line.split()[0]
-        for line in conn.send_command(int_cmd).result.splitlines()
+        line.split()[0].split("@")[0]
+        for line in int_out.splitlines()
         if line.split() and line.split()[0].startswith(if_prefixes)
     ]
     if not interfaces and platform == Platform.LINUX_SERVER:
         try:
-            ip_out = conn.send_command("ip addr show").result
+            ip_out = _strip_ansi(conn.send_command("ip addr show").result)
             interfaces = [it["name"] for it in _parse_linux_interfaces(ip_out)]
         except Exception:
             pass

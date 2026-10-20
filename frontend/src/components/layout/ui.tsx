@@ -6,30 +6,30 @@ const STATUS: Record<string, { label: string; dot: string; text: string; bg: str
   IN_SYNC: {
     label: 'В синхроне',
     dot: 'bg-emerald-400',
-    text: 'text-emerald-600 dark:text-emerald-400',
-    bg: 'bg-emerald-500/10',
-    border: 'border-emerald-500/20',
+    text: 'text-[var(--text-primary)]',
+    bg: 'bg-[var(--bg-elevated)]',
+    border: 'border-[var(--border-subtle)]',
   },
   DRIFT_DETECTED: {
     label: 'Дрейф',
     dot: 'bg-amber-400',
-    text: 'text-amber-600 dark:text-amber-400',
-    bg: 'bg-amber-500/10',
-    border: 'border-amber-500/20',
+    text: 'text-amber-500 dark:text-amber-400',
+    bg: 'bg-amber-500/[0.06]',
+    border: 'border-amber-500/25',
   },
   UNREACHABLE: {
     label: 'Недоступно',
     dot: 'bg-rose-400',
-    text: 'text-rose-600 dark:text-rose-400',
-    bg: 'bg-rose-500/10',
-    border: 'border-rose-500/20',
+    text: 'text-rose-500 dark:text-rose-400',
+    bg: 'bg-rose-500/[0.06]',
+    border: 'border-rose-500/25',
   },
   IN_PROGRESS: {
     label: 'В работе',
-    dot: 'bg-cyan-400 animate-pulse',
-    text: 'text-cyan-600 dark:text-cyan-400',
-    bg: 'bg-cyan-500/10',
-    border: 'border-cyan-500/20',
+    dot: 'bg-zinc-300 animate-pulse',
+    text: 'text-[var(--text-secondary)]',
+    bg: 'bg-[var(--bg-elevated)]',
+    border: 'border-[var(--border-subtle)]',
   },
   UNKNOWN: {
     label: 'Неизвестно',
@@ -57,10 +57,10 @@ export const OperStatusBadge: React.FC<{ status?: OperStatus; className?: string
     <span
       className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] font-mono font-medium tabular-nums ${
         isUp
-          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+          ? 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-subtle)]'
           : isDegraded
-          ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-          : 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
+          ? 'bg-amber-500/[0.06] text-amber-500 dark:text-amber-400 border-amber-500/25'
+          : 'bg-rose-500/[0.06] text-rose-500 dark:text-rose-400 border-rose-500/25'
       } ${className}`}
     >
       <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isUp ? 'bg-emerald-400' : isDegraded ? 'bg-amber-400' : 'bg-rose-400'}`} />

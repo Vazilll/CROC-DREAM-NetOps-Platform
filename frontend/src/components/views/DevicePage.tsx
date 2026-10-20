@@ -106,7 +106,7 @@ const renderFormattedText = (text: string) => {
 export const DevicePage: React.FC<Props> = ({
   deviceId,
   userRole = 'viewer',
-  locale = 'ru',
+  locale: _locale = 'ru',
   onBack,
   onRunDryRun,
   onScanDrift,
@@ -402,7 +402,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
   };
 
   const btn =
-    'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium cursor-pointer transition-colors';
+    'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium cursor-pointer transition-colors';
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -411,14 +411,14 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="flex items-center gap-1 text-xs text-zinc-400 hover:text-white px-2 py-1 rounded-md hover:bg-white/[0.05] transition-colors cursor-pointer"
+            className="flex items-center gap-1 text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] px-2 py-1 rounded-md hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer"
           >
             <ArrowLeft className="w-3.5 h-3.5" />
             <span>Инвентарь</span>
           </button>
-          <div className="h-4 w-px bg-white/[0.1]" />
+          <div className="h-4 w-px bg-[var(--border-subtle)]" />
           <div className="flex items-center gap-2.5">
-            <h1 className="text-xl font-bold text-white tracking-tight font-mono">{device.hostname}</h1>
+            <h1 className="text-xl font-semibold text-[var(--text-primary)] tracking-tight font-mono">{device.hostname}</h1>
             <StatusBadge status={device.status} />
             <OperStatusBadge status={device.oper_status ?? 'UP'} />
             <ManagementModeBadge mode={device.management_mode} />
@@ -430,10 +430,10 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <button
               onClick={handlePromote}
               disabled={promoting}
-              className={`${btn} bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 hover:bg-cyan-500/30`}
+              className={`${btn} bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-hover)] hover:bg-white/[0.08]`}
               title="Перевести устройство в управляемый режим для возможности деплоя"
             >
-              <Zap className="w-3.5 h-3.5" />
+              <Zap className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
               <span>{promoting ? 'Активация…' : 'В управление (Promote)'}</span>
             </button>
           )}
@@ -442,16 +442,16 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <>
               <button
                 onClick={() => onRunDryRun([device.id])}
-                className={`${btn} bg-cyan-500 text-zinc-950 hover:bg-cyan-400 font-semibold shadow-sm`}
+                className={`${btn} bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 font-semibold`}
               >
                 <Play className="w-3.5 h-3.5 fill-current" /> Dry-run
               </button>
 
               <button
                 onClick={() => onScanDrift([device.id])}
-                className={`${btn} border border-white/[0.1] text-zinc-200 hover:bg-white/[0.05]`}
+                className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
               >
-                <ShieldCheck className="w-3.5 h-3.5" /> Скан дрейфа
+                <ShieldCheck className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Скан дрейфа
               </button>
             </>
           )}
@@ -463,27 +463,24 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               handleAskCopilot(q);
               if (onAskCopilot) onAskCopilot(q);
             }}
-            className={`${btn} border border-indigo-400/40 text-indigo-300 hover:bg-indigo-500/10`}
+            className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
           >
-            <Sparkles className="w-3.5 h-3.5" /> Спросить Copilot
+            <Sparkles className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Спросить Copilot
           </button>
 
           <button
             onClick={handleExportPassport}
-            className={`${btn} border border-cyan-500/30 text-cyan-300 hover:bg-cyan-500/10`}
-            title={locale === 'en' ? 'Export Device Passport to Markdown' : 'Экспорт технического паспорта в Markdown'}
+            className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
+            title="Экспорт технического паспорта в Markdown"
           >
-            <FileDown className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{locale === 'en' ? 'Passport (MD)' : 'Паспорт (MD)'}</span>
+            <FileDown className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
+            <span>Паспорт (MD)</span>
           </button>
 
           {canAdmin && (
             <button
               onClick={async () => {
-                const confirmMsg =
-                  locale === 'en'
-                    ? `Are you sure you want to delete ${device.hostname}?`
-                    : `Вы действительно хотите удалить устройство ${device.hostname}?`;
+                const confirmMsg = `Вы действительно хотите удалить устройство ${device.hostname}?`;
                 if (window.confirm(confirmMsg)) {
                   try {
                     if (onDeleteDevice) {
@@ -497,26 +494,26 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   }
                 }
               }}
-              className={`${btn} bg-rose-500/10 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 hover:text-rose-300 font-semibold shadow-sm`}
-              title={locale === 'en' ? 'Delete device' : 'Удалить устройство'}
+              className={`${btn} border border-[var(--border-subtle)] hover:border-rose-500/40 bg-[var(--bg-card)] hover:bg-rose-500/10 text-[var(--text-secondary)] hover:text-rose-400`}
+              title="Удалить устройство"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span>{locale === 'en' ? 'Delete' : 'Удалить'}</span>
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Удалить</span>
             </button>
           )}
         </div>
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-2 border-b border-white/[0.08]">
+      <div className="flex gap-2 border-b border-[var(--border-subtle)]">
         {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
             className={`px-4 py-2.5 text-xs font-medium border-b-2 -mb-px cursor-pointer transition-colors ${
               tab === t
-                ? 'border-cyan-400 text-white bg-white/[0.02]'
-                : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.01]'
+                ? 'border-[var(--text-primary)] text-[var(--text-primary)] bg-[var(--bg-elevated)]/40'
+                : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
             }`}
           >
             {t}
@@ -529,14 +526,14 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
         <div className="space-y-6">
           {/* Safe Mode Alert Banner if MONITORING_ONLY */}
           {device.management_mode === 'MONITORING_ONLY' && (
-            <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-between">
+            <div className="p-4 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
                 <div>
-                  <div className="text-xs font-semibold text-amber-200">
+                  <div className="text-xs font-semibold text-[var(--text-primary)]">
                     Режим пассивного аудита: MONITORING_ONLY (Safe-First)
                   </div>
-                  <div className="text-[11px] text-zinc-400 mt-0.5">
+                  <div className="text-[11px] text-[var(--text-secondary)] mt-0.5">
                     Узел доступен для сбора телеметрии и проверки дрейфа. Мутации конфигурации и деплои заблокированы.
                   </div>
                 </div>
@@ -545,7 +542,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                 <button
                   onClick={handlePromote}
                   disabled={promoting}
-                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500 hover:bg-amber-400 text-zinc-950 transition-colors cursor-pointer shrink-0"
+                  className="px-3 py-1.5 rounded-md text-xs font-semibold bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 transition-colors cursor-pointer shrink-0"
                 >
                   {promoting ? 'Активация…' : 'Подключить прямое управление (Promote)'}
                 </button>
@@ -555,130 +552,125 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
           {/* Specs Bento Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+            <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+              <div className="flex items-center justify-between gap-1.5 text-[var(--text-secondary)] text-xs mb-1">
                 <div className="flex items-center gap-1.5">
-                  <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>{isServer ? 'Вычислительные ядра' : 'Control Plane / ASIC'}</span>
+                  <Cpu className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span>{isServer ? 'Вычислительные ядра' : 'Процессор / CPU'}</span>
                 </div>
                 {liveMetrics.cpu_pct !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 font-mono text-[10px] font-semibold">
-                    CPU {liveMetrics.cpu_pct.current.toFixed(1)}%
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-mono text-[10px] tabular-nums">
+                    Нагрузка {liveMetrics.cpu_pct.current.toFixed(1)}%
                   </span>
                 )}
               </div>
-              <div className="text-lg font-bold text-white font-mono">
-                {specs?.cpu_cores ? `${specs.cpu_cores} vCPU` : '—'}
+              <div className="text-lg font-semibold text-[var(--text-primary)] font-mono tabular-nums">
+                {specs?.cpu_cores
+                  ? `${specs.cpu_cores} vCPU`
+                  : liveMetrics.cpu_pct !== undefined
+                  ? `${liveMetrics.cpu_pct.current.toFixed(1)}%`
+                  : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5 truncate" title={specs?.os_version || ''}>
-                {specs?.os_version ||
-                  (device.status === 'UNREACHABLE'
-                    ? 'Нет данных (стенд выключен)'
-                    : `${PLATFORM_NAMES[device.platform] || device.platform} (не опрошено)`)}
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5 truncate" title={specs?.os_version || ''}>
+                {PLATFORM_NAMES[device.platform] || device.platform}
+                {specs?.cpu_cores && liveMetrics.cpu_pct !== undefined
+                  ? ` • CPU ${liveMetrics.cpu_pct.current.toFixed(1)}%`
+                  : ''}
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+            <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+              <div className="flex items-center justify-between gap-1.5 text-[var(--text-secondary)] text-xs mb-1">
                 <div className="flex items-center gap-1.5">
-                  <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
+                  <HardDrive className="w-3.5 h-3.5 text-[var(--text-muted)]" />
                   <span>Оперативная память</span>
                 </div>
                 {liveMetrics.memory_pct !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 font-mono text-[10px] font-semibold">
-                    RAM {liveMetrics.memory_pct.current.toFixed(1)}%
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-mono text-[10px] tabular-nums">
+                    Нагрузка {liveMetrics.memory_pct.current.toFixed(1)}%
                   </span>
                 )}
               </div>
-              <div className="text-lg font-bold text-white font-mono">
-                {specs?.ram_gb ? `${specs.ram_gb} GB RAM` : '—'}
-              </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">
+              <div className="text-lg font-semibold text-[var(--text-primary)] font-mono tabular-nums">
                 {specs?.ram_gb
-                  ? liveMetrics.memory_pct
-                    ? `Занято ~${((Number(specs.ram_gb) * liveMetrics.memory_pct.current) / 100).toFixed(2)} GB (SSH CLI)`
-                    : 'RAM (по SSH опросу)'
-                  : locale === 'en'
-                  ? 'No telemetry data'
-                  : 'Нет данных (телеметрия не снята)'}
-              </div>
-            </div>
-
-            <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
-                <div className="flex items-center gap-1.5">
-                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>{isServer ? 'Накопитель' : 'BGP Автономная система (Git SoT)'}</span>
-                </div>
-                {!isServer && device.intent?.bgp?.evpn && (
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono text-[10px] font-semibold">
-                    EVPN
-                  </span>
-                )}
-              </div>
-              <div className="text-lg font-bold text-white font-mono">
-                {!isServer && device.intent?.bgp?.asn
-                  ? `AS ${device.intent.bgp.asn}`
-                  : specs?.disk_gb
-                  ? `${specs.disk_gb} GB`
+                  ? `${specs.ram_gb} GB`
+                  : liveMetrics.memory_pct !== undefined
+                  ? `${liveMetrics.memory_pct.current.toFixed(1)}%`
                   : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">
-                {!isServer && device.intent?.bgp?.neighbors
-                  ? `${device.intent.bgp.neighbors.length} eBGP пиров${specs?.disk_gb ? ` • Flash ${specs.disk_gb} GB` : ' (из YAML Intent)'}`
-                  : specs?.disk_gb
-                  ? 'Disk'
-                  : locale === 'en'
-                  ? 'No data'
-                  : 'Нет данных'}
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                {specs?.ram_gb && liveMetrics.memory_pct !== undefined
+                  ? `Занято ~${((Number(specs.ram_gb) * liveMetrics.memory_pct.current) / 100).toFixed(2)} GB (${liveMetrics.memory_pct.current.toFixed(1)}%)`
+                  : liveMetrics.memory_pct !== undefined
+                  ? `Загрузка памяти: ${liveMetrics.memory_pct.current.toFixed(1)}%`
+                  : specs?.ram_gb
+                  ? `Доступно ${specs.ram_gb} GB RAM`
+                  : 'Ожидание опроса телеметрии'}
               </div>
             </div>
 
-            <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+            <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+              <div className="flex items-center justify-between gap-1.5 text-[var(--text-secondary)] text-xs mb-1">
                 <div className="flex items-center gap-1.5">
-                  <Radio className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Сетевые порты и трафик</span>
+                  <HardDrive className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span>{isServer ? 'Дисковый накопитель' : 'Накопитель / Flash'}</span>
+                </div>
+              </div>
+              <div className="text-lg font-semibold text-[var(--text-primary)] font-mono tabular-nums">
+                {specs?.disk_gb ? `${specs.disk_gb} GB` : '—'}
+              </div>
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5">
+                {specs?.disk_gb
+                  ? isServer
+                    ? 'Системный раздел (Root FS)'
+                    : 'Системный Flash-накопитель'
+                  : 'Ожидание опроса'}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)]">
+              <div className="flex items-center justify-between gap-1.5 text-[var(--text-secondary)] text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 text-[var(--text-muted)]" />
+                  <span>Сетевая нагрузка и порты</span>
                 </div>
                 {liveMetrics.uplink_util_pct !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono text-[10px] font-semibold">
-                    Uplink {liveMetrics.uplink_util_pct.current.toFixed(1)}%
+                  <span className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] font-mono text-[10px] tabular-nums">
+                    Аплинк {liveMetrics.uplink_util_pct.current.toFixed(1)}%
                   </span>
                 )}
               </div>
-              <div className="text-lg font-bold text-white font-mono">
-                {specs?.interfaces ? `${specs.interfaces.length}` : `${device.intent?.interfaces.length ?? 0}`}
+              <div className="text-lg font-semibold text-[var(--text-primary)] font-mono tabular-nums">
+                {specs?.interfaces ? `${specs.interfaces.length} порт.` : `${device.intent?.interfaces.length ?? 0} порт.`}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">
+              <div className="text-[11px] text-[var(--text-muted)] mt-0.5 font-mono tabular-nums">
                 {liveMetrics.load_1m !== undefined
-                  ? `Load 1m: ${liveMetrics.load_1m.current.toFixed(2)} • Git SoT`
-                  : locale === 'en'
-                  ? 'Per Git intent'
-                  : 'По декларативному Git-intent'}
+                  ? `Load 1m: ${liveMetrics.load_1m.current.toFixed(2)} • Трафик ${liveMetrics.uplink_util_pct ? liveMetrics.uplink_util_pct.current.toFixed(1) : '0.0'}%`
+                  : 'По декларативному профилю Git SoT'}
               </div>
             </div>
           </div>
 
           {/* Live Telemetry & Protocol Pipeline */}
-          <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08] space-y-3">
+          <div className="p-4 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] space-y-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs font-semibold text-white uppercase tracking-wider">
-                  Live-телеметрия и конвейер сбора метрик
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                <span className="text-xs font-medium text-[var(--text-primary)]">
+                  Показатели нагрузки и конвейер сбора метрик
                 </span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
                   Протокол: {(collectorPlan?.protocol || 'ssh_cli').toUpperCase()} ({device.management_ip}:{collectorPlan?.port ?? device.management_port})
                 </span>
-                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-400">
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-subtle)] text-[var(--text-muted)]">
                   Каскад: {isServer ? 'Node Exporter:9100 → SNMP:161 → SSH_CLI' : 'gNMI:6030 → SNMP:161 → SSH_CLI'}
                 </span>
               </div>
               <button
                 onClick={() => setTab('Прогноз и What-If')}
-                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 cursor-pointer"
+                className="text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] font-medium flex items-center gap-1 cursor-pointer transition-colors"
               >
-                <span>Графики Хольта-Уинтерса и What-If</span>
+                <span>Прогноз нагрузки и What-If</span>
                 <ChevronRight className="w-3.5 h-3.5" />
               </button>
             </div>
@@ -700,23 +692,23 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                       setForecastMetric(m.id);
                       setTab('Прогноз и What-If');
                     }}
-                    className="p-2.5 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.06] text-left transition-colors cursor-pointer"
+                    className="p-2.5 rounded-md bg-[var(--bg-elevated)]/50 hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-left transition-colors cursor-pointer"
                   >
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+                    <div className="flex items-center justify-between text-[11px] text-[var(--text-secondary)] mb-1">
                       <span>{m.label}</span>
-                      <span className="font-mono font-bold text-white">
+                      <span className="font-mono font-semibold text-[var(--text-primary)] tabular-nums">
                         {val !== null ? `${val.toFixed(1)}${m.id === 'load_1m' ? '' : '%'}` : '…'}
                       </span>
                     </div>
                     <div className="w-full h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
                       <div
                         className={`h-full rounded-full transition-all ${
-                          pct > 80 ? 'bg-rose-500' : pct > 60 ? 'bg-amber-400' : 'bg-cyan-400'
+                          pct > 80 ? 'bg-rose-500' : pct > 60 ? 'bg-amber-400' : 'bg-zinc-300'
                         }`}
                         style={{ width: `${Math.max(4, pct)}%` }}
                       />
                     </div>
-                    <div className="text-[10px] text-zinc-500 mt-1 font-mono">
+                    <div className="text-[10px] text-[var(--text-muted)] mt-1 font-mono tabular-nums">
                       {item ? `Пик: ${item.max.toFixed(1)}${m.id === 'load_1m' ? '' : '%'} • ${item.provider}` : 'Загрузка серии…'}
                     </div>
                   </button>
@@ -727,24 +719,27 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
           {/* Network & Identity Card */}
           <div className="grid md:grid-cols-2 gap-4">
-            <Panel title="Сетевое окружение и доступ" accent="bg-cyan-700">
+            <Panel title="Сетевое окружение и доступ">
               <Field label="Роль в фабрике">{ROLE_NAMES[device.role] ?? device.role}</Field>
-              <Field label="Платформа / ОС">{PLATFORM_NAMES[device.platform] ?? device.platform}</Field>
+              <Field label="Платформа / ОС">
+                {PLATFORM_NAMES[device.platform] ?? device.platform}
+                {specs?.os_version ? ` (${specs.os_version})` : ''}
+              </Field>
               <Field label="Management IP">
-                <span className="text-cyan-300 font-semibold">{device.management_ip}:{device.management_port}</span>
+                <span className="text-[var(--text-primary)]">{device.management_ip}:{device.management_port}</span>
               </Field>
               <Field label="Bastion / ProxyJump">
                 {device.proxy_jump ? (
-                  <span className="text-indigo-300">{device.proxy_jump}</span>
+                  <span className="text-[var(--text-secondary)]">{device.proxy_jump}</span>
                 ) : device.platform === 'huawei_vrp' ? (
-                  <span className="text-indigo-300">SSH Jump (Containerlab Host)</span>
+                  <span className="text-[var(--text-secondary)]">SSH Jump (Containerlab Host)</span>
                 ) : (
-                  <span className="text-zinc-500">Прямой доступ (Direct L3)</span>
+                  <span className="text-[var(--text-muted)]">Прямой доступ (Direct L3)</span>
                 )}
               </Field>
               <Field label="Профиль доступа">{device.auth_profile}</Field>
               <Field label="Протокол телеметрии">
-                <span className="text-emerald-400 font-semibold">
+                <span className="text-[var(--text-primary)]">
                   {collectorPlan?.protocol ? collectorPlan.protocol.toUpperCase() : 'SSH_CLI'} (Port {collectorPlan?.port ?? device.management_port})
                 </span>
               </Field>
@@ -753,7 +748,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               </Field>
             </Panel>
 
-            <Panel title="Git SoT Intent & BGP Routing" accent="bg-teal-700">
+            <Panel title="Git SoT Intent & BGP Routing">
               <Field label="Сконфигурировано портов">{device.intent?.interfaces.length ?? 0}</Field>
               <Field label="BGP ASN">{device.intent?.bgp?.asn ? `AS ${device.intent.bgp.asn}` : '—'}</Field>
               <Field label="BGP Router ID">{device.intent?.bgp?.router_id ?? '—'}</Field>
@@ -763,17 +758,17 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                 {device.intent_issues.length > 0 ? (
                   <span className="text-amber-400 font-semibold">{device.intent_issues.length} предупреждений</span>
                 ) : (
-                  <span className="text-emerald-400">100% Валидно</span>
+                  <span className="text-[var(--text-secondary)]">100% Валидно</span>
                 )}
               </Field>
             </Panel>
           </div>
 
           {/* Interfaces Table */}
-          <div className="rounded-xl border border-white/[0.08] bg-[#0c0e14] overflow-hidden">
-            <div className="px-4 py-3 border-b border-white/[0.06] flex items-center justify-between">
-              <span className="text-xs font-semibold text-white tracking-tight">Сетевые интерфейсы (декларативный профиль Git SoT)</span>
-              <span className="text-[11px] text-zinc-500 font-mono">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden">
+            <div className="px-4 py-2.5 bg-[var(--bg-elevated)]/60 border-b border-[var(--border-subtle)] flex items-center justify-between">
+              <span className="text-xs font-medium text-[var(--text-primary)] tracking-tight">Сетевые интерфейсы (декларативный профиль Git SoT)</span>
+              <span className="text-[11px] text-[var(--text-muted)] font-mono">
                 {device.intent?.interfaces.length || 0} настроено в SoT
               </span>
             </div>
@@ -791,22 +786,22 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               <tbody className="divide-y divide-white/[0.04]">
                 {device.intent?.interfaces.map((i) => (
                   <tr key={i.name} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="px-3 py-2 text-cyan-300 font-mono font-medium">{i.name}</td>
-                    <td className="px-3 py-2 text-zinc-400">{i.description ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-zinc-300">{i.ipv4_address ?? '—'}</td>
-                    <td className="px-3 py-2 font-mono text-zinc-400">{i.mtu}</td>
-                    <td className="px-3 py-2 text-zinc-400 font-mono uppercase text-xs">{i.mode}</td>
+                    <td className="px-3 py-2 text-[var(--text-primary)] font-mono font-medium">{i.name}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)]">{i.description ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--text-primary)]">{i.ipv4_address ?? '—'}</td>
+                    <td className="px-3 py-2 font-mono text-[var(--text-secondary)]">{i.mtu}</td>
+                    <td className="px-3 py-2 text-[var(--text-secondary)] font-mono uppercase text-xs">{i.mode}</td>
                     <td className="px-3 py-2">
                       {device.status === 'UNREACHABLE' || device.oper_status === 'DOWN' ? (
-                        <span className="inline-flex items-center gap-1 text-rose-400 text-xs" title="Устройство недоступно по SSH; в Git SoT интерфейс объявлен как enabled">
+                        <span className="inline-flex items-center gap-1.5 text-rose-400 text-xs font-mono" title="Устройство недоступно по SSH; в Git SoT интерфейс объявлен как enabled">
                           <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> unreachable ({i.enabled ? 'SoT: up' : 'SoT: down'})
                         </span>
                       ) : i.enabled ? (
-                        <span className="inline-flex items-center gap-1 text-emerald-400 text-xs">
+                        <span className="inline-flex items-center gap-1.5 text-[var(--text-primary)] text-xs font-mono">
                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> up
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1 text-zinc-500 text-xs">
+                        <span className="inline-flex items-center gap-1.5 text-[var(--text-muted)] text-xs font-mono">
                           <span className="w-1.5 h-1.5 rounded-full bg-zinc-600" /> shutdown
                         </span>
                       )}
@@ -815,7 +810,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                 ))}
                 {!device.intent?.interfaces.length && (
                   <tr>
-                    <td colSpan={6} className="px-3 py-8 text-center text-zinc-500">
+                    <td colSpan={6} className="px-3 py-8 text-center text-[var(--text-muted)]">
                       Интерфейсы еще не импортированы в Intent
                     </td>
                   </tr>
@@ -952,7 +947,6 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
         <div className="space-y-6">
           <Panel
             title="Прогноз телеметрии (горизонт 6 часов)"
-            accent="bg-indigo-600"
             right={
               <span className="flex flex-wrap gap-1">
                 {METRICS.map((m) => (
@@ -960,7 +954,9 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     key={m.id}
                     onClick={() => setForecastMetric(m.id)}
                     className={`px-2.5 py-1 rounded text-xs cursor-pointer transition-colors ${
-                      forecastMetric === m.id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/10'
+                      forecastMetric === m.id
+                        ? 'bg-[var(--text-primary)] text-[var(--bg-main)] font-semibold'
+                        : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)]'
                     }`}
                   >
                     {m.label}
@@ -971,15 +967,15 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
           >
             {forecastError && <div className="text-rose-400 text-sm py-4">{forecastError}</div>}
             {!forecastData && !forecastError && (
-              <div className="text-zinc-500 text-sm py-12 text-center flex flex-col items-center gap-2">
-                <RefreshCw className="w-5 h-5 animate-spin text-cyan-400" />
+              <div className="text-[var(--text-muted)] text-sm py-12 text-center flex flex-col items-center gap-2">
+                <RefreshCw className="w-5 h-5 animate-spin text-[var(--text-secondary)]" />
                 <span>Расчёт прогноза телеметрии…</span>
               </div>
             )}
             {forecastData && (
               <div className="space-y-4">
                 {forecastData.breach_in_minutes !== null ? (
-                  <div className="flex items-center gap-2.5 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3">
+                  <div className="flex items-center gap-2.5 text-sm text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-4 py-3">
                     <AlertTriangle className="w-5 h-5 shrink-0" />
                     <div>
                       <span className="font-semibold">Внимание! </span>
@@ -988,8 +984,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     </div>
                   </div>
                 ) : (
-                  <div className="flex items-center gap-2.5 text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-4 py-3">
-                    <CheckCircle2 className="w-5 h-5 shrink-0" />
+                  <div className="flex items-center gap-2.5 text-sm text-[var(--text-primary)] bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-lg px-4 py-3">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                     <div>
                       <span className="font-semibold">Штатный режим: </span>
                       В ближайшие 6 часов превышения порога {forecastData.threshold}{forecastData.metric === 'load_1m' ? '' : '%'} не прогнозируется.
@@ -999,7 +995,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
                 <ForecastChart data={forecastData} />
 
-                <div className="flex justify-between text-[11px] text-zinc-500">
+                <div className="flex justify-between text-[11px] text-[var(--text-muted)]">
                   <span>Модель: {forecastData.provider}. Коридор вероятностей — квантили 10–90 %.</span>
                   {forecastData.simulated && (
                     <span className="text-amber-500/80">Телеметрия генерируется по синтетическому профилю нагрузки</span>
@@ -1010,22 +1006,22 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
           </Panel>
 
           {/* WHAT-IF CAPACITY SIMULATOR */}
-          <div className="rounded-xl border border-white/[0.08] bg-[#0c0e14] p-5 space-y-4">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 space-y-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-500/40 flex items-center justify-center text-indigo-400">
+                <div className="w-8 h-8 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-secondary)]">
                   <Sliders className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-semibold text-white">
+                  <h3 className="text-sm font-semibold text-[var(--text-primary)]">
                     What-If Симулятор емкости (Stress Test Simulator)
                   </h3>
-                  <p className="text-xs text-zinc-400">
+                  <p className="text-xs text-[var(--text-secondary)]">
                     Оценка стабильности узла при пиковых нагрузках, падении соседних Spine или миграции сервисов.
                   </p>
                 </div>
               </div>
-              <span className="text-xs font-mono text-cyan-400 font-semibold">
+              <span className="text-xs font-mono text-[var(--text-primary)] font-semibold">
                 Добавочная нагрузка: +{whatIfExtraLoad}%
               </span>
             </div>
@@ -1034,46 +1030,46 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <button
                 onClick={() => setWhatIfExtraLoad(15)}
-                className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                className={`p-3 rounded-md border text-left transition-all cursor-pointer ${
                   whatIfExtraLoad === 15
-                    ? 'bg-cyan-500/15 border-cyan-500/40 text-cyan-300'
-                    : 'bg-white/[0.02] border-white/[0.06] text-zinc-300 hover:bg-white/[0.05]'
+                    ? 'bg-[var(--bg-elevated)] border-[var(--border-hover)] text-[var(--text-primary)]'
+                    : 'bg-[var(--bg-subtle)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
                 }`}
               >
                 <div className="text-xs font-semibold">+15% Трафик</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">Всплеск пользовательской активности</div>
+                <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Всплеск пользовательской активности</div>
               </button>
 
               <button
                 onClick={() => setWhatIfExtraLoad(35)}
-                className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                className={`p-3 rounded-md border text-left transition-all cursor-pointer ${
                   whatIfExtraLoad === 35
-                    ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
-                    : 'bg-white/[0.02] border-white/[0.06] text-zinc-300 hover:bg-white/[0.05]'
+                    ? 'bg-[var(--bg-elevated)] border-[var(--border-hover)] text-[var(--text-primary)]'
+                    : 'bg-[var(--bg-subtle)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
                 }`}
               >
                 <div className="text-xs font-semibold">+35% Failover</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">Отказ соседнего коммутатора фабрики</div>
+                <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Отказ соседнего коммутатора фабрики</div>
               </button>
 
               <button
                 onClick={() => setWhatIfExtraLoad(60)}
-                className={`p-3 rounded-lg border text-left transition-all cursor-pointer ${
+                className={`p-3 rounded-md border text-left transition-all cursor-pointer ${
                   whatIfExtraLoad === 60
                     ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
-                    : 'bg-white/[0.02] border-white/[0.06] text-zinc-300 hover:bg-white/[0.05]'
+                    : 'bg-[var(--bg-subtle)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
                 }`}
               >
                 <div className="text-xs font-semibold">+60% DDoS / Spike</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">Аномальный объем входящего трафика</div>
+                <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Аномальный объем входящего трафика</div>
               </button>
 
               <button
                 onClick={() => setWhatIfExtraLoad(0)}
-                className="p-3 rounded-lg border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.05] text-zinc-400 hover:text-white text-left transition-all cursor-pointer"
+                className="p-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-subtle)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] text-left transition-all cursor-pointer"
               >
                 <div className="text-xs font-semibold">Сброс нагрузки</div>
-                <div className="text-[11px] text-zinc-500 mt-0.5">Штатный расчет модели</div>
+                <div className="text-[11px] text-[var(--text-muted)] mt-0.5">Штатный расчет модели</div>
               </button>
             </div>
 
@@ -1088,7 +1084,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               const threshold = forecastData ? forecastData.threshold : 85;
               if (baseVal === null || peakForecast === null) {
                 return (
-                  <div className="p-4 rounded-xl border border-white/[0.08] bg-white/[0.02] text-xs text-zinc-400">
+                  <div className="p-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs text-[var(--text-secondary)]">
                     Недостаточно данных телеметрии с {device.hostname} для расчета нагрузки (+{whatIfExtraLoad}%).
                   </div>
                 );
@@ -1098,9 +1094,9 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               const headroom = +(threshold - projectedPeak).toFixed(1);
               const isSafe = projectedPeak < threshold;
               return (
-                <div className={`p-4 rounded-xl border flex items-start gap-3 animate-fade-in ${
+                <div className={`p-4 rounded-lg border flex items-start gap-3 animate-fade-in ${
                   isSafe
-                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    ? 'bg-[var(--bg-elevated)] border-[var(--border-subtle)] text-[var(--text-primary)]'
                     : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
                 }`}>
                   {isSafe ? (
@@ -1109,12 +1105,12 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <div className="text-xs font-semibold text-white">
+                    <div className="text-xs font-semibold text-[var(--text-primary)]">
                       {isSafe
                         ? `Запас до порога ${threshold}% достаточен (Headroom: ${headroom}%)`
                         : `Прогнозируется превышение порога ${threshold}% (пик: ${projectedPeak}%)`}
                     </div>
-                    <p className="text-[11px] text-zinc-400 mt-1 leading-relaxed">
+                    <p className="text-[11px] text-[var(--text-secondary)] mt-1 leading-relaxed">
                       Текущий замер: {baseVal}% → с добавкой +{whatIfExtraLoad}% составит {projectedNow}% (пик по прогнозу: {projectedPeak}% при пороге {threshold}%).
                     </p>
                   </div>
@@ -1127,7 +1123,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
       {/* TAB 3: SSH ТЕРМИНАЛ (WebTTY Console — Admin / Owner only) */}
       {tab === 'SSH Терминал' && canAdmin && (
-        <div className="rounded-xl border border-white/[0.08] bg-[#07090e] overflow-hidden flex flex-col h-[550px]">
+        <div className="rounded-lg border border-[var(--border-subtle)] bg-[#07090e] overflow-hidden flex flex-col h-[550px]">
           {/* Terminal Titlebar */}
           <div className="px-4 py-2.5 bg-white/[0.03] border-b border-white/[0.06] flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1142,8 +1138,8 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
               </span>
             </div>
             <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono text-emerald-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="text-[11px] font-mono text-zinc-300 flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
                 LIVE SSH
               </span>
               <button
@@ -1286,10 +1282,10 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
           </div>
 
           {/* Terminal Screen */}
-          <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-3 text-zinc-300 selection:bg-cyan-500/40">
+          <div className="flex-1 p-4 font-mono text-xs overflow-y-auto space-y-3 text-zinc-300">
             {terminalOutput.map((item, idx) => (
               <div key={idx} className="space-y-1">
-                <div className="flex items-center gap-2 text-cyan-400">
+                <div className="flex items-center gap-2 text-zinc-400">
                   <span className="text-zinc-600">[{item.time}]</span>
                   <span>{device.hostname}#</span>
                   <span className="text-white font-semibold">{item.command}</span>
@@ -1309,7 +1305,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
           {/* Terminal Input Bar */}
           <div className="p-3 bg-white/[0.02] border-t border-white/[0.06] flex items-center gap-2">
-            <span className="font-mono text-xs text-cyan-400 pl-1">{device.hostname}#</span>
+            <span className="font-mono text-xs text-zinc-400 pl-1">{device.hostname}#</span>
             <input
               type="text"
               value={commandInput}
@@ -1330,7 +1326,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             <button
               onClick={() => handleRunCommand()}
               disabled={terminalRunning}
-              className="px-3 py-1 rounded bg-cyan-500/20 text-cyan-300 hover:bg-cyan-500/30 text-xs font-mono transition-colors cursor-pointer disabled:opacity-50"
+              className="px-3 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-xs font-mono font-medium transition-colors cursor-pointer disabled:opacity-50"
             >
               {terminalRunning ? 'Выполняется…' : 'Отправить'}
             </button>
@@ -1341,7 +1337,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
       {/* TAB 4: AI COPILOT & РЕКОМЕНДАЦИИ */}
       {tab === 'AI Copilot' && (
         <div className="space-y-4">
-          <div className="rounded-2xl border border-slate-200 dark:border-white/[0.08] bg-white dark:bg-[#0c0e14] p-5 md:p-6 space-y-4 shadow-sm dark:shadow-none">
+          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] p-5 md:p-6 space-y-4">
             <div className="flex items-center gap-3 pb-3 border-b border-[var(--border-subtle)]">
               <div className="w-9 h-9 rounded-md bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)]">
                 <Sparkles className="w-4 h-4" />
@@ -1353,7 +1349,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                     {device.hostname}
                   </span>
                 </h3>
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                <p className="text-xs text-[var(--text-secondary)] mt-0.5">
                   Анализ текущей телеметрии, дрейфа, резервирования емкости и синтез рекомендаций по конфигурации.
                 </p>
               </div>
@@ -1361,25 +1357,25 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
 
             {/* Quick Prompt Chips */}
             <div>
-              <div className="text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400 font-bold mb-2">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-[var(--text-muted)] font-semibold mb-2">
                 Рекомендуемые сценарии анализа
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
                   onClick={() => handleAskCopilot(`Потянет ли этот узел дополнительную нагрузку +30%?`)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-subtle)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-primary)] transition-colors cursor-pointer text-left flex items-center gap-2"
                 >
                   <span>Потянет ли узел нагрузку +30%?</span>
                 </button>
                 <button
                   onClick={() => handleAskCopilot(`Как безопасно вывести узел ${device.hostname} на техобслуживание (Drain)?`)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-subtle)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-primary)] transition-colors cursor-pointer text-left flex items-center gap-2"
                 >
                   <span>Сценарий вывода на техобслуживание (Drain)</span>
                 </button>
                 <button
                   onClick={() => handleAskCopilot(`Проанализируй связность BGP и проверь риск сплит-брейна.`)}
-                  className="px-3.5 py-2 rounded-xl text-xs font-medium bg-slate-100/90 hover:bg-indigo-50 dark:bg-white/[0.04] dark:hover:bg-indigo-500/15 border border-slate-200 hover:border-indigo-300 dark:border-white/[0.08] dark:hover:border-indigo-500/40 text-slate-800 dark:text-zinc-200 hover:text-indigo-700 dark:hover:text-indigo-200 transition-all cursor-pointer text-left shadow-xs flex items-center gap-2"
+                  className="px-3 py-1.5 rounded-md text-xs font-medium bg-[var(--bg-subtle)] hover:bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-primary)] transition-colors cursor-pointer text-left flex items-center gap-2"
                 >
                   <span>Проверка BGP связности и сплит-брейна</span>
                 </button>
@@ -1387,10 +1383,10 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </div>
 
             {/* Conversation Log */}
-            <div className="space-y-3 min-h-[180px] max-h-[420px] overflow-y-auto p-4 md:p-5 rounded-2xl bg-slate-50/90 dark:bg-black/40 border border-slate-200/90 dark:border-white/[0.06] flex flex-col">
+            <div className="space-y-3 min-h-[180px] max-h-[420px] overflow-y-auto p-4 md:p-5 rounded-lg bg-[var(--bg-subtle)] border border-[var(--border-subtle)] flex flex-col">
               {copilotHistory.length === 0 && (
-                <div className="m-auto text-center text-xs text-slate-500 dark:text-zinc-500 py-12 font-mono flex flex-col items-center gap-2">
-                  <Sparkles className="w-6 h-6 text-indigo-400 opacity-60 animate-pulse" />
+                <div className="m-auto text-center text-xs text-[var(--text-muted)] py-12 font-mono flex flex-col items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-[var(--text-muted)]" />
                   <span>Задайте вопрос по узлу или выберите одну из готовых тем выше.</span>
                 </div>
               )}
@@ -1402,15 +1398,15 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   } w-full`}
                 >
                   <div className="flex items-center gap-1.5 mb-1 px-1">
-                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">
+                    <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-[var(--text-muted)]">
                       {msg.role === 'user' ? 'Вы' : 'NetOps Copilot'}
                     </span>
                   </div>
                   <div
-                    className={`rounded-2xl text-xs leading-relaxed max-w-[85%] md:max-w-[75%] px-4 py-3 shadow-xs ${
+                    className={`rounded-lg text-xs leading-relaxed max-w-[85%] md:max-w-[75%] px-4 py-3 ${
                       msg.role === 'user'
-                        ? 'bg-indigo-600 text-white rounded-tr-xs shadow-indigo-500/10'
-                        : 'bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-white/[0.08] text-slate-800 dark:text-zinc-200 rounded-tl-xs'
+                        ? 'bg-[var(--text-primary)] text-[var(--bg-main)]'
+                        : 'bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[var(--text-primary)]'
                     }`}
                   >
                     {renderFormattedText(msg.text)}
@@ -1418,7 +1414,7 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                 </div>
               ))}
               {copilotLoading && (
-                <div className="self-start flex items-center gap-2.5 p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-white/[0.08] text-xs text-indigo-600 dark:text-indigo-400 shadow-xs">
+                <div className="self-start flex items-center gap-2.5 p-3 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)]">
                   <RefreshCw className="w-3.5 h-3.5 animate-spin" />
                   <span className="font-mono">Формирование аналитического ответа…</span>
                 </div>
@@ -1435,12 +1431,12 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                   if (e.key === 'Enter') handleAskCopilot(copilotInput);
                 }}
                 placeholder="Задайте вопрос по этому устройству или попросите сгенерировать конфиг…"
-                className="flex-1 bg-white dark:bg-zinc-900 border border-slate-300 dark:border-white/[0.08] focus:border-indigo-500/70 focus:ring-2 focus:ring-indigo-500/20 rounded-xl px-4 py-2.5 text-xs text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none transition-all"
+                className="flex-1 bg-[var(--bg-subtle)] border border-[var(--border-subtle)] focus:border-[var(--text-secondary)] rounded-md px-4 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none transition-colors"
               />
               <button
                 onClick={() => handleAskCopilot(copilotInput)}
                 disabled={copilotLoading || !copilotInput.trim()}
-                className="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center gap-2 transition-all disabled:opacity-40 disabled:hover:bg-indigo-600 cursor-pointer shadow-sm hover:shadow-indigo-500/25 active:scale-[0.98]"
+                className="px-4 py-2 rounded-md bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-xs font-semibold flex items-center gap-2 transition-opacity disabled:opacity-40 cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5" />
                 <span>Спросить</span>

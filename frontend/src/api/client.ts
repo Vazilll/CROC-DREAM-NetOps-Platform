@@ -434,6 +434,10 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     });
   }
 
+  async unlinkOwnerTelegram(): Promise<{ unlinked: boolean }> {
+    return this.request<{ unlinked: boolean }>('/system/owner/telegram/unlink', { method: 'POST' });
+  }
+
   async recoverOwnerAccess(data: {
     action: 'request_telegram_code' | 'verify';
     recovery_key?: string;

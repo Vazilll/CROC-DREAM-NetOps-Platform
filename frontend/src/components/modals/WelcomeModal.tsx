@@ -755,7 +755,25 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
                       {telegramChatId ? ` (${telegramChatId})` : ''}
                     </span>
                   </span>
-                  <span className="px-2 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-bold">OWNER</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await api.unlinkOwnerTelegram();
+                          setTelegramLinked(false);
+                          setTelegramLinkedUser('');
+                          setTelegramChatId('');
+                        } catch (e) {
+                          setTelegramSavedMsg(e instanceof Error ? e.message : String(e));
+                        }
+                      }}
+                      className="px-2 py-0.5 rounded border border-emerald-500/40 hover:bg-emerald-500/20 text-[10px] font-bold cursor-pointer"
+                    >
+                      {isEn ? 'Change' : 'Сменить'}
+                    </button>
+                    <span className="px-2 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-bold">OWNER</span>
+                  </span>
                 </div>
               ) : (
                 <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex items-center justify-between gap-2 text-xs font-mono text-[var(--text-secondary)]">

@@ -9,6 +9,7 @@ from netops.api.routes import (
     insights,
     intent_edit,
     jobs,
+    owner_telegram,
     system,
     telemetry,
     users,
@@ -26,5 +27,6 @@ api_v1.include_router(users.router)
 api_v1.include_router(insights.router)
 api_v1.include_router(emergency.router)
 api_v1.include_router(telemetry.router)
+api_v1.include_router(owner_telegram.router)
 
 __all__ = ["api_v1"]
