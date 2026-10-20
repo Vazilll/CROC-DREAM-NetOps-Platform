@@ -23,11 +23,13 @@ from netops.services.telemetry_parsers import (
     parse_cisco_memory,
     parse_huawei_cpu,
     parse_huawei_memory,
+    parse_linux_audit_logs,
     parse_linux_cpu,
     parse_linux_disk,
     parse_linux_load,
     parse_linux_memory,
     parse_linux_network_rate,
+    parse_sip_sessions,
     register_parser,
 )
 from netops.services.telemetry_prometheus import (
@@ -53,6 +55,8 @@ METRICS: dict[str, MetricSpec] = {
     "disk_util_pct": MetricSpec("Загрузка диска", "%", 90.0),
     "network_rate_mbps": MetricSpec("Сетевой трафик", "Mbps", 1000.0),
     "load_1m": MetricSpec("Load Average (1 мин)", "", 8.0),
+    "audit_log_events": MetricSpec("События безопасности (rsyslog/auditd)", "ev/m", 100.0),
+    "sip_active_sessions": MetricSpec("Активные сессии телефонии (SIP)", "sess", 500.0),
 }
 
 _LIVE_METRIC_CACHE: dict[str, dict[str, list[float]]] = {}
@@ -398,7 +402,8 @@ def metric_series(
 
     cached = get_state_manager().get_telemetry_series(hostname, metric, points)
     if not cached:
-        cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
+        with _CACHE_LOCK:
+            cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
     if len(cached) >= min(points, 4):
         return cached[-points:]
     try:
@@ -424,7 +429,8 @@ __all__ = [
     "detect_optimal_telemetry_protocol", "load_profile_for_platform",
     "max_cisco_link_utilization", "max_percent_column", "metric_series",
     "parse_arista_cpu", "parse_arista_memory", "parse_cisco_cpu", "parse_cisco_memory",
-    "parse_huawei_cpu", "parse_huawei_memory", "parse_linux_cpu", "parse_linux_disk",
-    "parse_linux_load", "parse_linux_memory", "parse_linux_network_rate",
-    "query_prometheus_metric", "record_live_metric", "register_parser", "resolve_device_ports",
+    "parse_huawei_cpu", "parse_huawei_memory", "parse_linux_audit_logs", "parse_linux_cpu",
+    "parse_linux_disk", "parse_linux_load", "parse_linux_memory", "parse_linux_network_rate",
+    "parse_sip_sessions", "query_prometheus_metric", "record_live_metric", "register_parser",
+    "resolve_device_ports",
 ]

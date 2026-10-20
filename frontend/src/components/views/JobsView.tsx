@@ -226,29 +226,43 @@ ${logsText || 'No logs recorded.'}
                   {t.viewDiffBtn}
                 </button>
 
-                {canOperate && activeJobDetail.type === 'DRY_RUN' && activeJobDetail.status === 'SUCCESS' && (
-                  <button
-                    onClick={() => onDeploy(activeJobDetail.id)}
-                    disabled={
-                      activeJobDetail.logs.length > 0 &&
-                      !activeJobDetail.logs.some(
-                        (l) => l.step.toLowerCase() === 'diff' && !l.message.includes('matches the intended config')
-                      )
-                    }
-                    title={
-                      activeJobDetail.logs.length > 0 &&
-                      !activeJobDetail.logs.some(
-                        (l) => l.step.toLowerCase() === 'diff' && !l.message.includes('matches the intended config')
-                      )
-                        ? 'Все устройства в синхроне — изменения для деплоя отсутствуют'
-                        : 'Применить деплой патча'
-                    }
-                    className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>{t.applyDeployBtn}</span>
-                  </button>
-                )}
+                {canOperate &&
+                  activeJobDetail.type === 'DRY_RUN' &&
+                  activeJobDetail.status === 'SUCCESS' &&
+                  (() => {
+                    const hasChanges =
+                      activeJobDetail.targets.length > 0
+                        ? activeJobDetail.targets.some((tgt) => tgt.has_changes)
+                        : !activeJobDetail.logs.some(
+                            (l) =>
+                              l.step.toLowerCase() === 'diff' &&
+                              l.message.includes('matches the intended config')
+                          );
+                    const isAlreadyDeployed = jobs.some(
+                      (j) =>
+                        j.type === 'DEPLOY' &&
+                        j.parent_job_id === activeJobDetail.id &&
+                        j.status !== 'FAILED'
+                    );
+                    const deployDisabled = !hasChanges || isAlreadyDeployed;
+                    return (
+                      <button
+                        onClick={() => onDeploy(activeJobDetail.id)}
+                        disabled={deployDisabled}
+                        title={
+                          isAlreadyDeployed
+                            ? 'Этот Dry-Run уже развёрнут'
+                            : !hasChanges
+                            ? 'Все устройства в синхроне — изменения для деплоя отсутствуют'
+                            : 'Применить деплой патча'
+                        }
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-zinc-950 font-semibold text-xs font-mono flex items-center space-x-1.5 transition shadow-lg shadow-emerald-500/20 cursor-pointer"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>{isAlreadyDeployed ? 'Уже развёрнут' : t.applyDeployBtn}</span>
+                      </button>
+                    );
+                  })()}
               </div>
             </div>
 

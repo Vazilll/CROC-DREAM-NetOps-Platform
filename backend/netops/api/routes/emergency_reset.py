@@ -59,7 +59,7 @@ def apply_emergency_patch(
         (
             d
             for d in snapshot.inventory.devices
-            if d.hostname == req.device or d.hostname.startswith(req.device)
+            if d.hostname == req.device or d.hostname.split(".")[0] == req.device
         ),
         None,
     )
@@ -70,6 +70,19 @@ def apply_emergency_patch(
         )
 
     assert_device_allowed(device_obj, admin.allowed_system)
+
+    target = toolchain.target_for(device_obj)
+    lines = [
+        line.strip()
+        for line in req.patch.splitlines()
+        if line.strip() and not line.strip().startswith("!")
+    ]
+
+    if not lines:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Patch does not contain any valid configuration statements",
+        )
 
     with container.session_factory() as session:
         from sqlalchemy import select
@@ -104,19 +117,6 @@ def apply_emergency_patch(
                 f"device:{db_device.id}", holder=lock_holder, ttl=600, reason=req.reason
             )
 
-    target = toolchain.target_for(device_obj)
-    lines = [
-        line.strip()
-        for line in req.patch.splitlines()
-        if line.strip() and not line.strip().startswith("!")
-    ]
-
-    if not lines:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Patch does not contain any valid configuration statements",
-        )
-
     if container.settings.network_driver == "offline":
         cfg_path = container.settings.offline_lab_path / f"{device_obj.hostname}.cfg"
         existing = cfg_path.read_text(encoding="utf-8") if cfg_path.exists() else ""
@@ -145,6 +145,8 @@ def apply_emergency_patch(
 
         with _ParamikoConnAdapter(target, timeout=35) as conn:
             res = conn.send_configs(lines)
+            if getattr(res, "failed", False):
+                raise RuntimeError(res.result or "Device rejected configuration commands")
             record_audit(
                 user=admin.username,
                 action="emergency_patch",
@@ -187,10 +189,11 @@ def apply_emergency_patch(
 )
 def soft_reset_fabric(
     container: ContainerDep,
-    _: Admin,
+    admin: Admin,
 ) -> ResetResponse:
     from sqlalchemy import select
 
+    from netops.api.routes.devices import device_allowed
     from netops.enums import DeviceStatus
     from netops.models import Device as DeviceModel
     from netops.services.ai_guard import AiTelemetryGuard
@@ -203,6 +206,8 @@ def soft_reset_fabric(
     errors: list[str] = []
 
     for dev in snapshot.inventory.devices:
+        if not device_allowed(dev, admin.allowed_system):
+            continue
         try:
             AiTelemetryGuard.inject_anomaly(dev.hostname, "clear")
             intent = snapshot.intent_for(dev.hostname)
@@ -238,12 +243,21 @@ def soft_reset_fabric(
             errors.append(f"{dev.hostname}: {exc}")
 
     if aligned_hosts:
+        from netops.services.state import get_state_manager
+
+        state_mgr = get_state_manager()
+        for host in aligned_hosts:
+            state_mgr.release_sync_lock(f"device:{host}")
         with container.session_factory() as session:
             db_devs = session.scalars(
                 select(DeviceModel).where(DeviceModel.hostname.in_(aligned_hosts))
             ).all()
             for db_dev in db_devs:
                 db_dev.status = DeviceStatus.IN_SYNC
+                if db_dev.id is not None:
+                    state_mgr.release_sync_lock(f"device:{db_dev.id}")
+                if getattr(db_dev, "fabric_id", None):
+                    state_mgr.release_sync_lock(f"fabric:{db_dev.fabric_id}")
             session.commit()
 
     msg = f"Soft reset completed on {len(deployed)} nodes."
@@ -305,6 +319,12 @@ def hard_reset_containerlab(
         )
         _stdin, stdout, _stderr = client.exec_command(cmd, timeout=120)
         out = stdout.read().decode("utf-8", errors="replace")
+        err = _stderr.read().decode("utf-8", errors="replace")
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status != 0:
+            raise RuntimeError(
+                f"Remote command exited with status {exit_status}: {(err or out).strip()}"
+            )
 
         return ResetResponse(
             status="ok",

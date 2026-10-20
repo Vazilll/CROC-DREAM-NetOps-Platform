@@ -1,0 +1,26 @@
+{% if intent.bgp %}
+router bgp {{ intent.bgp.asn }}
+  bgp router-id {{ intent.bgp.router_id }}
+{% for neighbor in intent.bgp.neighbors %}
+  neighbor {{ neighbor.peer_ip }}
+    remote-as {{ neighbor.remote_asn }}
+{% if neighbor.description %}
+    description "{{ neighbor.description }}"
+{% endif %}
+{% if neighbor.password %}
+    password ascii-text {{ neighbor.password }}
+{% endif %}
+    enable
+  exit
+{% endfor %}
+  address-family ipv4 unicast
+{% for neighbor in intent.bgp.neighbors %}
+{% for prefix in neighbor.announced_prefixes %}
+    network {{ prefix.network_address }}/{{ prefix.prefixlen }}
+{% endfor %}
+{% endfor %}
+    enable
+  exit
+  enable
+exit
+{% endif %}

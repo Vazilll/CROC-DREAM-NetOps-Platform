@@ -33,7 +33,21 @@ class JinjaConfigRenderer:
         from netops.services.state import get_state_manager
 
         state_mgr = get_state_manager()
-        cache_seed = f"{self._root.resolve()}:{device.platform.value}:{device.model_dump_json()}:{intent.model_dump_json()}"
+        bgp_pw_hash = hashlib.sha256(
+            "|".join(
+                f"{n.peer_ip}:{n.password or ''}"
+                for n in (intent.bgp.neighbors if intent.bgp else ())
+            ).encode("utf-8")
+        ).hexdigest()
+        tpl_mtimes = "|".join(
+            f"{s}:{(self._root / device.platform.value / f'{s}.j2').stat().st_mtime_ns}"
+            for s in SECTIONS
+            if (self._root / device.platform.value / f"{s}.j2").is_file()
+        )
+        cache_seed = (
+            f"{self._root.resolve()}:{device.platform.value}:{tpl_mtimes}:"
+            f"{device.model_dump_json()}:{intent.model_dump_json()}:{bgp_pw_hash}"
+        )
         cache_key = hashlib.sha256(cache_seed.encode("utf-8")).hexdigest()
         cached = state_mgr.get_rendered_template(cache_key)
         if cached is not None:

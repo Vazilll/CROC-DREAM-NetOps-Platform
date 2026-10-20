@@ -95,9 +95,18 @@ def bind_telegram_chat_user(
             if inv_username:
                 user = session.scalar(select(User).where(User.username == inv_username))
         if user is None:
+            now = utcnow()
             user = session.scalar(
                 select(User).where(
-                    (User.verification_code == tok) | (User.token_sha256 == hash_token(tok))
+                    User.is_active.is_(True),
+                    (
+                        (User.verification_code == tok)
+                        & (
+                            User.verification_expires_at.is_(None)
+                            | (User.verification_expires_at >= now)
+                        )
+                    )
+                    | (User.token_sha256 == hash_token(tok)),
                 )
             )
         if user is not None:
@@ -106,11 +115,18 @@ def bind_telegram_chat_user(
             user.verification_code = None
             user.verification_expires_at = None
 
+    if user is None:
+        user = session.scalar(select(User).where(User.telegram_chat_id == str(chat_id)))
+
     owner_user = session.scalar(select(User).where(User.username == "owner"))
-    if user is None and (
-        owner_user is None
-        or not owner_user.telegram_chat_id
-        or owner_user.telegram_chat_id == str(chat_id)
+    if (
+        user is None
+        and (not explicit_token or explicit_token in ("claim_owner", "recover_owner"))
+        and (
+            owner_user is None
+            or not owner_user.telegram_chat_id
+            or owner_user.telegram_chat_id == str(chat_id)
+        )
     ):
         if owner_user is None:
             owner_tok = generate_token()
@@ -127,9 +143,6 @@ def bind_telegram_chat_user(
             session.commit()
             save_user_token("owner", owner_tok, settings)
         user = owner_user
-
-    if user is None:
-        user = session.scalar(select(User).where(User.telegram_chat_id == str(chat_id)))
 
     if user is None:
         target_username = (
@@ -253,7 +266,8 @@ def _authorize_open_registration_chat(
             )
             return False
 
-        chat_ids.append(chat_id)
+        if chat_id not in chat_ids:
+            chat_ids.append(chat_id)
         if settings is not None:
             save_subscriber(settings, chat_id)
         bind_telegram_chat_user(

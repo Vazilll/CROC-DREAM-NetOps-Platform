@@ -131,3 +131,89 @@ def test_public_console_config_endpoint(client: TestClient) -> None:
     body = resp.json()
     assert set(body["role_ports"]) == {"admin", "operator", "viewer"}
     assert body["owner_port"] not in body["role_ports"].values()
+
+
+def test_slide12_extensions(client: TestClient) -> None:
+    from ipaddress import IPv4Address, IPv4Interface, IPv4Network
+
+    from netops.enums import DeviceRole, Platform
+    from netops.intent.models import (
+        AclAction,
+        AclIntent,
+        AclProtocol,
+        AclRule,
+        BgpIntent,
+        BgpNeighborIntent,
+        DeviceIntent,
+        InterfaceIntent,
+        InventoryDevice,
+    )
+    from netops.services.telemetry import load_profile_for_platform
+    from netops.services.telemetry_parsers import parse_linux_audit_logs, parse_sip_sessions
+
+    # 1. Rack & Unit in inventory.yaml
+    snapshot = IntentRepository(INTENT).load()
+    assert all(d.rack and d.unit for d in snapshot.inventory.devices)
+
+    # 2. Eltex ESR full cycle (PlatformProfile + Jinja2 render)
+    esr_profile = load_profile_for_platform(Platform.ELTEX_ESR)
+    assert esr_profile is not None
+    assert esr_profile.vendor == "Eltex"
+    esr_dev = InventoryDevice(
+        hostname="border-esr-1.croc.lab",
+        management_ip=IPv4Address("172.20.20.99"),
+        platform=Platform.ELTEX_ESR,
+        role=DeviceRole.BORDER,
+        auth_profile="esr_auth",
+        rack="RACK-B1",
+        unit=10,
+    )
+    esr_intent = DeviceIntent(
+        hostname="border-esr-1.croc.lab",
+        interfaces=[
+            InterfaceIntent(
+                name="gigabitethernet 1/0/1",
+                description="Uplink",
+                ipv4_address=IPv4Interface("10.20.0.1/30"),
+                acl_in="EDGE-IN",
+            )
+        ],
+        bgp=BgpIntent(
+            asn=65099,
+            router_id=IPv4Address("10.255.0.99"),
+            neighbors=[
+                BgpNeighborIntent(
+                    peer_ip=IPv4Address("10.20.0.2"),
+                    remote_asn=65001,
+                    announced_prefixes=[IPv4Network("10.255.0.99/32")],
+                )
+            ],
+        ),
+        acls=[
+            AclIntent(
+                name="EDGE-IN",
+                rules=[AclRule(sequence=10, action=AclAction.PERMIT, protocol=AclProtocol.IP)],
+            )
+        ],
+    )
+    rendered_esr = JinjaConfigRenderer(TEMPLATES).render(esr_dev, esr_intent)
+    assert "hostname border-esr-1.croc.lab" in rendered_esr
+    assert "router bgp 65099" in rendered_esr
+    assert "ip access-list extended EDGE-IN" in rendered_esr
+
+    # 3. Linux rsyslog/auditd & SIP telephony parsers
+    linux_profile = load_profile_for_platform(Platform.LINUX_SERVER)
+    assert linux_profile is not None
+    assert "audit_log_events" in linux_profile.telemetry
+    assert "sip_active_sessions" in linux_profile.telemetry
+    assert parse_linux_audit_logs("42\n") == 42.0
+    assert parse_sip_sessions("15 active calls\n") == 15.0
+
+    # 4. Regular report endpoint
+    rep = client.get(
+        "/api/v1/drift/regular-report",
+        headers={"Authorization": "Bearer owner-token"},
+    )
+    assert rep.status_code == 200
+    assert "compliance_pct" in rep.json()
+

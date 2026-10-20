@@ -20,6 +20,7 @@ from netops.services.notifier import (
     resolve_telegram_targets,
     save_user_token,
     send_telegram_message,
+    sync_access_registry,
 )
 from netops.services.users import _is_expired
 
@@ -198,7 +199,11 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
     client_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = (request.headers.get("User-Agent") or "Browser")[:250]
 
-    token = saved_tok or (provided_key if key_ok else f"crk_owner_{generate_token()[:24]}")
+    matched_key = next(
+        (c for c in candidates if (saved_tok and c == saved_tok) or hash_token(c) == owner.token_sha256),
+        None,
+    )
+    token = saved_tok or matched_key or f"crk_owner_{generate_token()[:24]}"
     owner.token_sha256 = hash_token(token)
     owner.bound_client_id = client_id
     owner.bound_ip = client_ip
@@ -210,6 +215,7 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
     session.commit()
 
     save_user_token("owner", token, settings)
+    sync_access_registry(session, settings)
 
     return {
         "status": "recovered",

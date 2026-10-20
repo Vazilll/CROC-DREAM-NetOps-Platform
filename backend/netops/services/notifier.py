@@ -213,7 +213,13 @@ def resolve_owner_telegram_targets(settings: Settings) -> list[int | str]:
             info.get("username") == "owner" or info.get("role") == "owner"
         ):
             return [int(cid_str) if cid_str.lstrip("-").isdigit() else cid_str]
-    return resolve_telegram_targets(settings)
+    if settings.telegram_chat_ids:
+        return [
+            int(c) if str(c).strip().lstrip("-").isdigit() else str(c).strip()
+            for c in settings.telegram_chat_ids
+            if str(c).strip()
+        ]
+    return []
 
 
 def send_telegram_message(

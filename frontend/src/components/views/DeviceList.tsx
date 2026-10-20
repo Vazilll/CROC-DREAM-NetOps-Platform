@@ -491,7 +491,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                       <h3 className="text-sm font-semibold text-[var(--text-primary)]">
                         {devices.length ? 'Нет совпадений' : 'Нет устройств'}
                       </h3>
-                      {!devices.length && (
+                      {!devices.length && userRole !== 'viewer' && (
                         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
                           {(userRole === 'admin' || userRole === 'owner') && (
                             <button

@@ -380,7 +380,9 @@ def trigger_telegram_summary(
         git_sha=git_meta["commit_sha"],
     )
     if req and req.custom_note:
-        summary_html += f"\n\n<b>Комментарий оператора:</b> {req.custom_note}"
+        import html
+
+        summary_html += f"\n\n<b>Комментарий оператора:</b> {html.escape(req.custom_note)}"
 
     delivered = send_telegram_message(container.settings, summary_html)
     tg_targets = resolve_telegram_targets(container.settings, discover=False)

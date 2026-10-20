@@ -436,9 +436,14 @@ def build_forecast(
             if time.monotonic() >= cooldown_until:
                 try:
                     probe_timeout = min(settings.forecast_timeout_seconds, 1.5)
-                    result = _remote_forecast(
+                    remote_res = _remote_forecast(
                         settings.forecast_url, probe_timeout, series, horizon
                     )
+                    if not isinstance(remote_res, dict) or not all(
+                        isinstance(remote_res.get(k), list) for k in ("median", "lower", "upper")
+                    ):
+                        raise ValueError("Invalid forecast response schema")
+                    result = remote_res
                     result.setdefault("provider", "Telemetry Forecast")
                     _service_failure_cooldown.pop(settings.forecast_url, None)
                 except Exception as exc:

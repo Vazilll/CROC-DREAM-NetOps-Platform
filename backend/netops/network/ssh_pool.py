@@ -16,6 +16,7 @@ from netops.constants import unset_password_marker
 from netops.enums import Platform
 
 _JUMP_LOCK = threading.Lock()
+_SHARED_JUMP_CLIENTS: dict[tuple[str, int, str], Any] = {}
 _DEAD_ENDPOINTS: dict[tuple[str, int], float] = {}
 _POOL_GUARD = threading.Lock()
 _DEVICE_LOCKS: dict[tuple[str, int], threading.RLock] = {}
@@ -56,7 +57,7 @@ def _close_pooled_session(host: str, port: int) -> None:
     if client is not None:
         with contextlib.suppress(Exception):
             client.close()  # type: ignore[attr-defined]
-    if jump_client is not None:
+    if jump_client is not None and jump_client not in _SHARED_JUMP_CLIENTS.values():
         with contextlib.suppress(Exception):
             jump_client.close()  # type: ignore[attr-defined]
 
@@ -69,7 +70,13 @@ def _check_tcp_endpoint(host: str, port: int, timeout: float = 2.5) -> bool:
     if dead_ts is not None and (now - dead_ts) < 8.0:
         return False
     try:
-        with socket.create_connection((host, port), timeout=timeout):
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            if port == 22:
+                sock.settimeout(min(timeout, 1.5))
+                banner = sock.recv(64)
+                if not banner.startswith(b"SSH-"):
+                    _DEAD_ENDPOINTS[(host, port)] = time.monotonic()
+                    return False
             _DEAD_ENDPOINTS.pop((host, port), None)
             return True
     except OSError:
@@ -119,6 +126,8 @@ def resolve_container_endpoint(
 
 
 def build_candidate_passwords(platform_value: str, password: str) -> list[str]:
+    from netops.constants import fallback_password
+
     candidate_passwords: list[str] = []
     if password and password != unset_password_marker():
         candidate_passwords.append(password)
@@ -130,6 +139,9 @@ def build_candidate_passwords(platform_value: str, password: str) -> list[str]:
         own_default = str(plat_prof.get("default_password") or "") if plat_prof else ""
         if own_default and own_default not in candidate_passwords:
             candidate_passwords.append(own_default)
+    fb = fallback_password()
+    if fb and fb not in candidate_passwords:
+        candidate_passwords.append(fb)
     if not candidate_passwords and password:
         candidate_passwords.append(password)
     return candidate_passwords
@@ -157,22 +169,38 @@ def open_jump_channel(
 
     target_ip, target_port = resolve_container_endpoint(host, dest_host, dest_port)
 
-    if adapter._jump_client is not None:
-        t_existing = adapter._jump_client.get_transport()
-        if t_existing is not None and t_existing.is_active():
-            return t_existing.open_channel(
-                "direct-tcpip", (target_ip, target_port), ("127.0.0.1", 0)
-            )
-        with contextlib.suppress(Exception):
-            adapter._jump_client.close()
-        adapter._jump_client = None
-
     if not host:
         raise TimeoutError("Jump host is not configured")
 
+    jump_key = (host, port, user)
+    use_shared_jump = "PYTEST_CURRENT_TEST" not in os.environ
+
     with _JUMP_LOCK:
+        existing_jump = (
+            _SHARED_JUMP_CLIENTS.get(jump_key) if use_shared_jump else adapter._jump_client
+        )
+        if existing_jump is not None:
+            t_existing = existing_jump.get_transport()
+            if t_existing is not None and t_existing.is_active():
+                with contextlib.suppress(Exception):
+                    chan = t_existing.open_channel(
+                        "direct-tcpip", (target_ip, target_port), ("127.0.0.1", 0)
+                    )
+                    adapter._jump_client = existing_jump
+                    time.sleep(0.08)
+                    return chan
+            with contextlib.suppress(Exception):
+                existing_jump.close()
+            if use_shared_jump:
+                _SHARED_JUMP_CLIENTS.pop(jump_key, None)
+            adapter._jump_client = None
+
         jump = paramiko_mod.SSHClient()
-        jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
+        if os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes"):
+            jump.load_system_host_keys()
+            jump.set_missing_host_key_policy(paramiko_mod.RejectPolicy())
+        else:
+            jump.set_missing_host_key_policy(paramiko_mod.AutoAddPolicy())
         key_path = os.path.expanduser(os.getenv("NETOPS_CLAB_KEY_PATH", "~/.ssh/id_ed25519"))
         key_file = key_path if os.path.isfile(key_path) else None
         jump.connect(
@@ -184,13 +212,14 @@ def open_jump_channel(
             look_for_keys=not bool(jump_pwd),
             allow_agent=not bool(jump_pwd),
             timeout=min(adapter.timeout, 8),
-            banner_timeout=12,
-            auth_timeout=10,
+            banner_timeout=15,
+            auth_timeout=12,
         )
         try:
             transport = jump.get_transport()
             if transport is None:
                 raise TimeoutError("Jump host SSH transport is not active")
+            transport.set_keepalive(25)
             chan = transport.open_channel(
                 "direct-tcpip", (target_ip, target_port), ("127.0.0.1", 0)
             )
@@ -199,7 +228,10 @@ def open_jump_channel(
             with contextlib.suppress(Exception):
                 jump.close()
             raise
+        if use_shared_jump:
+            _SHARED_JUMP_CLIENTS[jump_key] = jump
         adapter._jump_client = jump
+        time.sleep(0.08)
         return chan
 
 
@@ -211,6 +243,7 @@ def connect_with_sock(
     for idx, cand_pw in enumerate(candidate_passwords):
         current_sock = sock if idx == 0 else None
         if idx > 0 and sock is not None:
+            time.sleep(0.35)
             current_sock = adapter._open_jump_channel(
                 paramiko_mod,
                 adapter.proxy_jump or "auto",
@@ -234,10 +267,12 @@ def connect_with_sock(
             return
         except paramiko_mod.ssh_exception.BadAuthenticationType as bad_auth_exc:
             last_err = bad_auth_exc
+            transport = None
             try:
                 transport = adapter.client.get_transport()
                 if transport is None or not transport.is_active():
                     if current_sock is not None:
+                        time.sleep(0.25)
                         current_sock = adapter._open_jump_channel(
                             paramiko_mod,
                             adapter.proxy_jump or "auto",
@@ -247,8 +282,8 @@ def connect_with_sock(
                         transport = paramiko_mod.Transport(current_sock)
                     else:
                         transport = paramiko_mod.Transport((adapter.target.host, adapter.target.port))
-                    transport.start_client(timeout=min(adapter.timeout, 12))
                     adapter.client._transport = transport
+                    transport.start_client(timeout=min(adapter.timeout, 12))
                 transport.auth_interactive(
                     username,
                     lambda title, instructions, prompt_list, pw=cand_pw: [
@@ -257,12 +292,30 @@ def connect_with_sock(
                 )
                 adapter.authenticated_password = cand_pw
                 return
-            except paramiko_mod.ssh_exception.AuthenticationException as interactive_exc:
+            except (
+                paramiko_mod.ssh_exception.AuthenticationException,
+                paramiko_mod.ssh_exception.SSHException,
+                EOFError,
+            ) as interactive_exc:
                 last_err = interactive_exc
                 with contextlib.suppress(Exception):
                     adapter.client.close()
                 continue
-        except paramiko_mod.ssh_exception.AuthenticationException as auth_exc:
+            except Exception:
+                if transport is not None:
+                    with contextlib.suppress(Exception):
+                        transport.close()
+                if current_sock is not None:
+                    with contextlib.suppress(Exception):
+                        current_sock.close()
+                with contextlib.suppress(Exception):
+                    adapter.client.close()
+                raise
+        except (
+            paramiko_mod.ssh_exception.AuthenticationException,
+            paramiko_mod.ssh_exception.SSHException,
+            EOFError,
+        ) as auth_exc:
             last_err = auth_exc
             with contextlib.suppress(Exception):
                 adapter.client.close()
@@ -303,8 +356,9 @@ def establish_fresh_session(adapter: Any) -> None:
             sock = adapter._open_jump_channel(
                 paramiko, adapter.proxy_jump, adapter.target.host, adapter.target.port
             )
-        elif is_unrouted_docker_target and not _check_tcp_endpoint(
-            adapter.target.host, adapter.target.port, timeout=1.2
+        elif is_unrouted_docker_target and (
+            clab_host not in ("127.0.0.1", "localhost", "::1")
+            or not _check_tcp_endpoint(adapter.target.host, adapter.target.port, timeout=1.2)
         ):
             sock = adapter._open_jump_channel(
                 paramiko, "auto", adapter.target.host, adapter.target.port
@@ -316,26 +370,30 @@ def establish_fresh_session(adapter: Any) -> None:
         while adapter.shell.recv_ready():
             _ = adapter.shell.recv(8192)
 
+        sent_paging_init = False
         if adapter.target.platform in (Platform.ARISTA_EOS, Platform.CISCO_IOSXE):
             adapter.shell.send("enable\nterminal length 0\n")
+            sent_paging_init = True
         elif adapter.target.platform == Platform.HUAWEI_VRP:
             adapter.shell.send("screen-length 0 temporary\n")
+            sent_paging_init = True
 
-        init_deadline = time.time() + 4.0
-        init_buf = ""
-        while time.time() < init_deadline:
-            if adapter.shell.recv_ready():
-                init_buf += adapter.shell.recv(8192).decode("utf-8", errors="ignore")
-                time.sleep(0.1)
-            elif ("length 0" in init_buf) and init_buf.rstrip().endswith(("#", ">", "]")):
-                break
-            else:
-                time.sleep(0.15)
+        if sent_paging_init:
+            init_deadline = time.time() + 4.0
+            init_buf = ""
+            while time.time() < init_deadline:
+                if adapter.shell.recv_ready():
+                    init_buf += adapter.shell.recv(8192).decode("utf-8", errors="ignore")
+                    time.sleep(0.1)
+                elif ("length 0" in init_buf) and init_buf.rstrip().endswith(("#", ">", "]")):
+                    break
+                else:
+                    time.sleep(0.15)
     except Exception:
         if adapter.client:
             with contextlib.suppress(Exception):
                 adapter.client.close()
-        if adapter._jump_client:
+        if adapter._jump_client and adapter._jump_client not in _SHARED_JUMP_CLIENTS.values():
             with contextlib.suppress(Exception):
                 adapter._jump_client.close()
         raise

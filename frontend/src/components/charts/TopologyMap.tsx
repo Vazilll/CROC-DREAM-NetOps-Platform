@@ -337,14 +337,16 @@ const TopologyMapComponent: React.FC<Props> = ({
               <span>Паспорт</span>
             </button>
 
-            <button
-              onClick={() => handleDryRun(popoverNode.d.id)}
-              disabled={dryRunRunning}
-              className="flex items-center justify-center gap-1 px-2 py-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-[11px] font-medium transition-all disabled:opacity-50"
-            >
-              <Play className="w-3 h-3" />
-              <span>{dryRunRunning ? 'Запуск...' : 'Dry-run'}</span>
-            </button>
+            {onRunDryRun && (
+              <button
+                onClick={() => handleDryRun(popoverNode.d.id)}
+                disabled={dryRunRunning}
+                className="flex items-center justify-center gap-1 px-2 py-1.5 rounded bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-[11px] font-medium transition-all disabled:opacity-50"
+              >
+                <Play className="w-3 h-3" />
+                <span>{dryRunRunning ? 'Запуск...' : 'Dry-run'}</span>
+              </button>
+            )}
 
             <button
               onClick={() => {

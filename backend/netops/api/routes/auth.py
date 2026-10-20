@@ -27,6 +27,7 @@ def _is_local_owner_request(request: Request) -> bool:
     console_port = (request.headers.get("x-console-port") or "").strip()
     if console_port in _ROLE_LOCKED_PORTS:
         return False
+    saw_loopback_host = False
     for header in ("x-forwarded-host", "host"):
         raw = (request.headers.get(header) or "").strip().lower()
         if not raw:
@@ -35,6 +36,7 @@ def _is_local_owner_request(request: Request) -> bool:
         host = host or raw
         if host not in _LOOPBACK_HOSTS or port in _ROLE_LOCKED_PORTS:
             return False
+        saw_loopback_host = True
     origin = (request.headers.get("origin") or request.headers.get("referer") or "").strip().lower()
     if origin:
         from urllib.parse import urlparse
@@ -44,7 +46,7 @@ def _is_local_owner_request(request: Request) -> bool:
             return False
         if parsed.port and str(parsed.port) in _ROLE_LOCKED_PORTS:
             return False
-    return True
+    return saw_loopback_host
 
 
 class LoginRequest(BaseModel):

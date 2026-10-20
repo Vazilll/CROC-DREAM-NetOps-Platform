@@ -37,6 +37,17 @@ PortNumber = Annotated[int, Field(ge=1, le=65535, description="TCP/UDP port numb
 class IntentModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in type(self).model_fields:
+            val = getattr(self, key)
+            return default if val is None else val
+        return default
+
+    def __getitem__(self, key: str) -> Any:
+        if key in type(self).model_fields:
+            return getattr(self, key)
+        raise KeyError(key) from None
+
 
 class InterfaceMode(StrEnum):
     L3 = "l3"
@@ -244,11 +255,14 @@ class InventoryDevice(IntentModel):
     status: DeviceStatus | None = None
     fabric_id: str = "croc-dc1-pod1"
     site: str | None = None
+    rack: str | None = None
+    unit: int | None = Field(default=None, ge=1, le=60)
 
     @model_validator(mode="before")
     @classmethod
     def _normalize_stand(cls, data: Any) -> Any:
         if isinstance(data, dict):
+            data = dict(data)
             if data.get("site") and not data.get("fabric_id"):
                 data["fabric_id"] = data["site"]
             elif data.get("fabric_id") and not data.get("site"):

@@ -26,6 +26,8 @@ class DeviceCreate(BaseModel):
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] = "MONITORING_ONLY"
     fabric_id: str = "croc-dc1-pod1"
     site: str | None = None
+    rack: str | None = None
+    unit: int | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
 
@@ -66,6 +68,8 @@ class DeviceUpdate(PartialUpdate):
     management_mode: Literal["MONITORING_ONLY", "MANAGED"] | None = None
     fabric_id: str | None = None
     site: str | None = None
+    rack: str | None = None
+    unit: int | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
 
@@ -94,6 +98,8 @@ class DeviceRead(BaseModel):
     management_mode: str = "MONITORING_ONLY"
     fabric_id: str = "croc-dc1-pod1"
     site: str | None = None
+    rack: str | None = None
+    unit: int | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
     oper_status: Literal["UP", "DOWN", "DEGRADED"] = "UP"

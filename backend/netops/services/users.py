@@ -74,14 +74,19 @@ class UserService:
                 else None
             )
         elif cleaned_token.isdigit() and len(cleaned_token) == 6:
-            candidate = self._session.scalar(
-                select(User).where(User.verification_code == cleaned_token)
+            candidates = self._session.scalars(
+                select(User).where(
+                    User.verification_code == cleaned_token,
+                    User.is_active.is_(True),
+                )
+            ).all()
+            user = next(
+                (c for c in candidates if not _is_expired(c.verification_expires_at)),
+                None,
             )
-            user = (
-                candidate
-                if candidate is not None and not _is_expired(candidate.verification_expires_at)
-                else None
-            )
+            if user is not None:
+                user.verification_code = None
+                user.verification_expires_at = None
         else:
             user = self._session.scalar(
                 select(User).where(User.token_sha256 == hash_token(cleaned_token))

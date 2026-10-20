@@ -1,0 +1,14 @@
+{% macro endpoint(value) %}{% if value == "any" %}any{% else %}{{ value.network_address }} {{ value.hostmask }}{% endif %}{% endmacro %}
+{% for acl in intent.acls %}
+ip access-list extended {{ acl.name }}
+{% for rule in acl.rules %}
+  rule {{ rule.sequence }}
+    action {{ rule.action }}
+    protocol {{ rule.protocol }}
+    source {{ endpoint(rule.source) }}
+    destination {{ endpoint(rule.destination) }}
+    enable
+  exit
+{% endfor %}
+exit
+{% endfor %}

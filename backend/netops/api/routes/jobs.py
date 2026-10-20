@@ -34,6 +34,16 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     summary="Холостой прогон: рендер intent, сбор running-config и расчёт диффа",
 )
 def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
+    if user.allowed_system and request.device_ids:
+        from sqlalchemy import select
+
+        from netops.api.routes.devices import assert_device_allowed
+        from netops.models import Device
+
+        for dev in service._session.scalars(
+            select(Device).where(Device.id.in_(request.device_ids))
+        ):
+            assert_device_allowed(dev, user.allowed_system)
     job = service.create_dry_run(
         request.device_ids, request.intent_source, requested_by=user.username
     )
@@ -47,6 +57,13 @@ def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator
     summary="Подтвердить dry-run и применить изменения транзакционно",
 )
 def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
+    if user.allowed_system:
+        from netops.api.routes.devices import assert_device_allowed
+
+        dry_job = service.get(request.job_id)
+        for target in dry_job.targets:
+            if target.device is not None:
+                assert_device_allowed(target.device, user.allowed_system)
     job = service.create_deploy(
         request.job_id, confirmed_by=request.confirmed_by, requested_by=user.username
     )
@@ -99,9 +116,13 @@ async def stream_job_logs(
 ) -> StreamingResponse:
     async def event_generator():
         last_id = 0
+        first_tick = True
         while True:
             if await request.is_disconnected():
                 break
+            if not first_tick:
+                service._session.expire_all()
+            first_tick = False
 
             job = service.get(job_id)
             new_logs = list(service.logs(job_id, after_id=last_id, limit=200))

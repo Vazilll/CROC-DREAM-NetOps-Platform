@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from netops.api.deps import ContainerDep, DeviceServiceDep, Viewer
+from netops.api.routes.devices import assert_device_allowed, device_allowed
 from netops.api.routes.insights_copilot import (
     COPILOT_SYSTEM,
     AiGuardResponse,
@@ -235,11 +236,12 @@ async def device_forecast(
     device_id: int,
     service: DeviceServiceDep,
     container: ContainerDep,
-    _: Viewer,
+    user: Viewer,
     metric: Metric = "uplink_util_pct",
     horizon: Horizon = 72,
 ) -> ForecastRead:
     device = service.get(device_id)
+    assert_device_allowed(device, user.allowed_system)
     return await asyncio.to_thread(
         build_forecast,
         container.settings,
@@ -261,17 +263,18 @@ async def device_forecast_by_hostname(
     hostname: str,
     service: DeviceServiceDep,
     container: ContainerDep,
-    _: Viewer,
+    user: Viewer,
     metric: Metric = "uplink_util_pct",
     horizon: Horizon = 72,
 ) -> ForecastRead:
     dev_obj = (
         service.get(int(hostname))
         if hostname.isdigit()
-        else next((d for d in service.list_devices(limit=500) if d.hostname == hostname), None)
+        else service.get_by_hostname(hostname)
     )
     if dev_obj is None:
         raise HTTPException(status_code=404, detail=f"Device '{hostname}' not found")
+    assert_device_allowed(dev_obj, user.allowed_system)
     return await asyncio.to_thread(
         build_forecast,
         container.settings,
@@ -320,9 +323,9 @@ def _compute_forecast_alerts_sync(
     summary="Devices predicted to cross a metric threshold within the horizon",
 )
 async def forecast_alerts(
-    service: DeviceServiceDep, container: ContainerDep, _: Viewer, horizon: Horizon = 72
+    service: DeviceServiceDep, container: ContainerDep, user: Viewer, horizon: Horizon = 72
 ) -> list[ForecastAlert]:
-    devices = list(service.list_devices(limit=500))
+    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
     return await asyncio.to_thread(
         _compute_forecast_alerts_sync, container.settings, devices, horizon
     )
@@ -347,12 +350,12 @@ class FabricSummaryResponse(BaseModel):
 async def get_fabric_summary(
     service: DeviceServiceDep,
     container: ContainerDep,
-    _: Viewer,
+    user: Viewer,
 ) -> FabricSummaryResponse:
     from netops.enums import DeviceStatus
     from netops.services.ai_guard import AiTelemetryGuard
 
-    devices = list(service.list_devices(limit=500))
+    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
     total = len(devices)
     in_sync = sum(1 for d in devices if d.status == DeviceStatus.IN_SYNC)
     drift = sum(1 for d in devices if d.status == DeviceStatus.DRIFT_DETECTED)
@@ -440,11 +443,11 @@ class HybridSearchHit(BaseModel):
 @router.get("/search", response_model=list[HybridSearchHit], include_in_schema=False)
 async def hybrid_search_endpoint(
     service: DeviceServiceDep,
-    _: Viewer,
+    user: Viewer,
     q: str = Query(default="", max_length=200),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> list[HybridSearchHit]:
-    devices = list(service.list_devices(limit=500))
+    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
     ranked = hybrid_rank_devices(q, devices)
     if q.strip():
         ranked = [r for r in ranked if r.rrf_score > 0]

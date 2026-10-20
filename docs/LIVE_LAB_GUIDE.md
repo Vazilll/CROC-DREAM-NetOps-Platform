@@ -198,15 +198,14 @@ NETOPS_INVENTORY_FILE=inventory.live.yaml
 NETOPS_AUTH_PROFILES='{"lab": {"username": "admin", "password": "admin"}}'
 ```
 
-### Шаг 3: Автоматический кроссплатформенный SSH-адаптер
-В модуль `backend/netops/network/scrapli_driver.py` интегрирован адаптер `_ParamikoConnAdapter`:
+### Шаг 3: Автоматический кроссплатформенный SSH-адаптер и Мультиплексирование Jump-хоста
+В модули `backend/netops/network/scrapli_driver.py` и `backend/netops/network/ssh_pool.py` интегрирован адаптер `_ParamikoConnAdapter`:
 - В Linux с установленным Scrapli используется нативный `scrapli` транспорт.
-- В средах без PTY (например, Windows) или при отсутствии Scrapli адаптер прозрачно переключается на Paramiko, обеспечивая:
-  - Автоматическое отключение пагинации (`terminal length 0` / `screen-length 0 temporary`).
-  - Повышение привилегий (`enable`).
-  - Поддержку сессионных коммитов Arista EOS (`configure session NETOPS_DEPLOY`).
-  - Поддержку двухфазных транзакций Cisco IOS-XE (`commit confirmed`).
-  - Поддержку VRP транзакций Huawei (`system-view` -> `commit`).
+- В средах без PTY или при работе через SSH Bastion/Jump-хост (`NETOPS_CLAB_HOST`) адаптер прозрачно использует пул сессий `_SESSION_POOL` и мультиплексирует `direct-tcpip` каналы через единое SSH-соединение `_SHARED_JUMP_CLIENTS` (исключая переполнение `MaxStartups` на Jump-сервере при параллельном опросе фабрики):
+  - Автоматическая проверка реального `SSH-` баннера в `_check_tcp_endpoint` и маршрутизация внутренних адресов Containerlab (`172.16.0.0/12`) через Jump-туннель.
+  - Каскадный подбор профильных и лабораторных учётных данных (`build_candidate_passwords`) с защитой общих сокетов при переключении на `keyboard-interactive`.
+  - Автоматическое отключение пагинации (`terminal length 0` / `screen-length 0 temporary`) и повышение привилегий (`enable`).
+  - Поддержка сессионных коммитов Arista EOS (`configure session NETOPS_DEPLOY`), двухфазных транзакций Cisco IOS-XE (`commit confirmed`) и транзакций Huawei VRP (`system-view` -> `commit`).
 
 ### Шаг 4: Запуск верификатора связности
 Для проверки подключения ко всем 6 узлам выполните из корня репозитория:

@@ -88,7 +88,10 @@ def _check_acl_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
 
 
 def _check_interface_risk(text: str) -> tuple[RiskLevel | None, list[str], list[str]]:
-    if "shutdown" in text and "no shutdown" not in text and "undo shutdown" not in text:
+    has_standalone_shutdown = any(
+        re.search(r"(?<!no\s)(?<!undo\s)\bshutdown\b", ln) for ln in text.splitlines()
+    )
+    if has_standalone_shutdown:
         return (
             "CRITICAL",
             ["Команда shutdown переводит сетевой интерфейс в состояние down."],
@@ -440,7 +443,7 @@ async def explain_change_with_llm(
             )
             data = json.loads(raw_text)
             raw_content = data["choices"][0]["message"]["content"]
-            match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw_content, re.DOTALL)
+            match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", raw_content, re.DOTALL)
             clean_json = match.group(1) if match else raw_content.strip()
             parsed = json.loads(clean_json)
             raw_level = str(parsed.get("risk_level", "MEDIUM")).upper()

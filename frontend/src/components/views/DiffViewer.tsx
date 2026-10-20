@@ -161,6 +161,7 @@ const PlainCodeFallback: React.FC<{ code: string; label: string; theme: AppTheme
 interface DiffViewerProps {
   jobs: JobSummary[];
   selectedJobId: string | null;
+  targetDeviceId?: number | null;
   userRole?: import('../../api').UserRole;
   locale?: Locale;
   theme?: AppTheme;
@@ -172,6 +173,7 @@ interface DiffViewerProps {
 const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   jobs,
   selectedJobId,
+  targetDeviceId = null,
   userRole = 'viewer',
   locale = 'ru',
   theme = 'dark',
@@ -185,7 +187,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   const [activeViewMode, setActiveViewMode] = useState<'diff' | 'remediation' | 'rollback'>('diff');
   const [viewEngine, setViewEngine] = useState<'monaco' | 'plain'>('monaco');
   const [loading, setLoading] = useState(false);
-  const [prevSelectedJobId, setPrevSelectedJobId] = useState<string | null>(selectedJobId);
+  const [prevJobKey, setPrevJobKey] = useState<string>('');
   const [committingGit, setCommittingGit] = useState(false);
   const [gitCommitNote, setGitCommitNote] = useState('');
 
@@ -194,16 +196,29 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   const [isMobile, setIsMobile] = useState(() => typeof window !== 'undefined' && window.innerWidth < 768);
 
   const diffJobs = useMemo(
-    () => jobs.filter((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY'),
+    () =>
+      jobs.filter(
+        (j) =>
+          j.type === 'DRY_RUN' ||
+          j.type === 'DEPLOY' ||
+          j.type === 'DRIFT_SCAN' ||
+          j.type === 'DRIFT_REMEDIATE'
+      ),
     [jobs]
   );
 
-  if (selectedJobId !== prevSelectedJobId) {
-    setPrevSelectedJobId(selectedJobId);
+  const selectedDiffJob = useMemo(
+    () => (selectedJobId ? diffJobs.find((j) => j.id === selectedJobId) : undefined),
+    [selectedJobId, diffJobs]
+  );
+  const currentJobKey = `${selectedJobId ?? ''}:${selectedDiffJob?.status ?? ''}`;
+
+  if (currentJobKey !== prevJobKey) {
+    setPrevJobKey(currentJobKey);
     setAiAnalysis(null);
     setGitCommitNote('');
-    if (!selectedJobId) setDiffData(null);
-    setLoading(Boolean(selectedJobId));
+    setDiffData(null);
+    setLoading(Boolean(selectedDiffJob));
   }
 
   useEffect(() => {
@@ -213,7 +228,6 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
   }, []);
 
   useEffect(() => {
-    const selectedDiffJob = selectedJobId ? diffJobs.find((j) => j.id === selectedJobId) : undefined;
     if (!selectedDiffJob) {
       const readyJob = diffJobs.find((j) => j.status === 'SUCCESS' || j.status === 'FAILED') || diffJobs[0];
       if (readyJob) {
@@ -232,7 +246,11 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
       .then((data) => {
         if (!active) return;
         setDiffData(data);
-        setSelectedDeviceIndex(0);
+        const matchIdx =
+          targetDeviceId !== null
+            ? data.devices.findIndex((d) => d.device_id === targetDeviceId)
+            : -1;
+        setSelectedDeviceIndex(matchIdx >= 0 ? matchIdx : 0);
         setLoading(false);
       })
       .catch((err) => {
@@ -245,7 +263,7 @@ const DiffViewerComponent: React.FC<DiffViewerProps> = ({
     return () => {
       active = false;
     };
-  }, [selectedJobId, diffJobs, jobs, onSelectJob]);
+  }, [selectedDiffJob, diffJobs, onSelectJob, targetDeviceId]);
 
   const diffEditorOptions = useMemo(
     () => ({

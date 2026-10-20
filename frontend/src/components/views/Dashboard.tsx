@@ -118,23 +118,27 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           {locale === 'en' ? 'No active devices' : 'Нет подключенных устройств'}
         </h1>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
-          <button
-            onClick={() => setAddModalOpen(true)}
-            className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
-          >
-            <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{locale === 'en' ? 'Add Device (SSH)' : 'Добавить узел (SSH)'}</span>
-          </button>
+        {userRole !== 'viewer' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-lg mx-auto">
+            {(userRole === 'admin' || userRole === 'owner') && (
+              <button
+                onClick={() => setAddModalOpen(true)}
+                className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
+              >
+                <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{locale === 'en' ? 'Add Device (SSH)' : 'Добавить узел (SSH)'}</span>
+              </button>
+            )}
 
-          <button
-            onClick={() => onSyncInventory && onSyncInventory()}
-            className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
-          >
-            <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
-            <span>{locale === 'en' ? 'Sync Git SoT' : 'Синхронизировать Git SoT'}</span>
-          </button>
-        </div>
+            <button
+              onClick={() => onSyncInventory && onSyncInventory()}
+              className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
+            >
+              <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>{locale === 'en' ? 'Sync Git SoT' : 'Синхронизировать Git SoT'}</span>
+            </button>
+          </div>
+        )}
 
         <AddDeviceModal
           isOpen={addModalOpen}

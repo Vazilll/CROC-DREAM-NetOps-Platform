@@ -69,14 +69,14 @@
 
 | Подсистема | Статус | Где реализовано |
 |------------|--------|-----------------|
-| **Backend Core (FastAPI + SQLAlchemy 2.0 + Alembic + Celery/Redis)** | ✅ Готово (622 теста проходят, все модули < 500 строк) | [`backend/netops/`](backend/netops) |
+| **Backend Core (FastAPI + SQLAlchemy 2.0 + Alembic + Celery/Redis)** | ✅ Готово (626 тестов проходят, все модули < 500 строк) | [`backend/netops/`](backend/netops) |
 | **Pre-Flight Intent Linter & Pydantic Schema** | ✅ Готово (`inventory.yaml` и `devices/*.yaml` синхронизированы) | [`backend/netops/intent/`](backend/netops/intent) |
 | **Multi-Vendor Jinja2 Templates (6 платформ)** | ✅ Готово (`base`, `interfaces`, `acls`, `bgp`) | [`templates/`](templates) |
 | **Иерархический Diff и Нормализация CLI** | ✅ Готово (`hier_config` + `diff_filters.yaml`) | [`backend/netops/network/`](backend/netops/network) |
-| **Двойной сетевой контур (`ssh_pool.py` + `table_parsers.py` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API, 1 VTY-сессия на узел) | [`ssh_pool.py`](backend/netops/network/ssh_pool.py), [`table_parsers.py`](backend/netops/network/table_parsers.py), [`scrapli_driver.py`](backend/netops/network/scrapli_driver.py) |
+| **Двойной сетевой контур (`ssh_pool.py` + `table_parsers.py` + `OfflineLab`)** | ✅ Готово (переключение на лету в UI и API, 1 VTY-сессия на узел, мультиплексирование `direct-tcpip` через единый SSH Jump-туннель, проверка `SSH-` баннера) | [`ssh_pool.py`](backend/netops/network/ssh_pool.py), [`table_parsers.py`](backend/netops/network/table_parsers.py), [`scrapli_driver.py`](backend/netops/network/scrapli_driver.py) |
 | **Предиктивная аналитика Statistical Forecast + `AI Pre-Flight Guard`** | ✅ Готово (квантили `p10–p90`, ETA пробития SLA, блокировка опасных патчей) | [`forecast.py`](backend/netops/services/forecast.py), [`ai_guard.py`](backend/netops/services/ai_guard.py) |
 | **Аварийный пульт `Emergency Hub` и `Factory Freeze`** | ✅ Готово (прямой CLI, экстренный патч, Soft/Hard Reset, Kill Switch) | [`emergency.py`](backend/netops/api/routes/emergency.py), [`emergency_reset.py`](backend/netops/api/routes/emergency_reset.py) |
-| **4-шаговый визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (Telegram Owner, SSH Probe, матрица паролей, GitHub SoT, `Dark`/`Light`, `RU`/`EN`) | [`system.py`](backend/netops/api/routes/system.py), [`system_git_integrations.py`](backend/netops/api/routes/system_git_integrations.py) |
+| **5-слойный визард «Матрёшка» (`WelcomeModal`)** | ✅ Готово (1. Владелец, 2. Сеть и ИИ, 3. Пароли, 4. Git и Интеграции, 5. Сервер — Live Jump Host & Containerlab Auto-Bootstrap) | [`system.py`](backend/netops/api/routes/system.py), [`system_git_integrations.py`](backend/netops/api/routes/system_git_integrations.py), [`bootstrap_discovery.py`](backend/netops/services/bootstrap_discovery.py) |
 | **Frontend NOC SPA (React 19 + TS Strict, `0 any`)** | ✅ Готово (2D/3D топология, RBAC, изоляция `allowed_system`) | [`frontend/src/`](frontend/src) |
 | **Единый конвейер наблюдаемости и очистки (`retention.py` + `collector.py` + `VictoriaMetrics`)** | ✅ Готово (автоочистка логов/БД перед сбором, gNMI/SNMP/Exporter/SSH) | [`retention.py`](backend/netops/services/retention.py), [`backend/netops/telemetry/`](backend/netops/telemetry) |
 
@@ -90,10 +90,10 @@ CROC-DREAM-NetOps-Platform/
 ├── Dockerfile                 # All-in-One контейнерный образ платформы (docker/entrypoint.sh)
 ├── docker-compose.yml         # Полный микросервисный стек: postgres, redis, api, worker, beat, victoriametrics, prometheus, gnmic, snmp-exporter, node-exporter, grafana, telegram-bot, frontend
 ├── backend/                   # Серверное ядро FastAPI + Celery + Scrapli (см. backend/README.md)
-│   ├── Dockerfile             # Контейнерный образ бэкенда и воркеров
+│   ├── Dockerfile             # Контейнерный образ бэкенда и воркеров (offline-resilient uv sync)
 │   ├── netops/                # Доменные модули (все файлы < 500 строк): api/, services/, pipeline/, network/, intent/, models/, schemas/, telemetry/, worker/
 │   ├── migrations/            # Миграции схемы БД (Alembic)
-│   └── tests/                 # 622 модульных, API и интеграционных теста (pytest)
+│   └── tests/                 # 626 модульных, API и интеграционных тестов (pytest)
 ├── frontend/                  # Клиентский интерфейс NOC на React 19 + TypeScript (см. frontend/README.md)
 │   └── src/
 │       ├── api/               # Строго типизированный HTTP-клиент API

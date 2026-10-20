@@ -49,19 +49,41 @@ COPILOT_SYSTEM = (
 
 
 def extract_copilot_action(
-    text: str, default_device_id: int | None = None
+    text: str,
+    default_device_id: int | None = None,
+    devices: list[Any] | None = None,
 ) -> tuple[str, CopilotAction | None]:
-    """Parse trailing ACTION: type|label|device_id tag from LLM output."""
+    """Parse trailing ACTION: type|label|device_id_or_hostname tag from LLM output."""
     match = re.search(
-        r"(?:^|\n)ACTION:\s*(dry_run|remediate|open_device|scan_drift|open_diff)\s*\|\s*([^|\n]+?)(?:\s*\|\s*(\d+)?)?\s*$",
+        r"(?:^|\n)ACTION:\s*(dry_run|remediate|open_device|scan_drift|open_diff)\s*\|\s*([^|\n]+?)(?:\s*\|\s*([^|\n]+?))?\s*$",
         text.strip(),
         re.MULTILINE,
     )
     if not match:
         return text.strip(), None
 
-    act_type, label, raw_id = match.group(1).strip(), match.group(2).strip(), match.group(3)
-    dev_id = int(raw_id) if raw_id and raw_id.isdigit() else default_device_id
+    act_type, label, raw_target = (
+        match.group(1).strip(),
+        match.group(2).strip(),
+        (match.group(3) or "").strip(),
+    )
+    dev_id = default_device_id
+    if raw_target:
+        if raw_target.isdigit():
+            dev_id = int(raw_target)
+        elif devices:
+            raw_low = raw_target.lower()
+            matched_dev = next(
+                (
+                    d
+                    for d in devices
+                    if str(getattr(d, "hostname", "")).lower() == raw_low
+                    or str(getattr(d, "hostname", "")).lower().split(".")[0] == raw_low
+                ),
+                None,
+            )
+            if matched_dev is not None:
+                dev_id = getattr(matched_dev, "id", default_device_id)
     clean_text = text[: match.start()].rstrip()
     try:
         return clean_text, CopilotAction(type=act_type, label=label, device_id=dev_id)  # type: ignore[arg-type]
@@ -275,6 +297,7 @@ def generate_fallback_action(
 async def copilot_chat(
     data: CopilotRequest, service: DeviceServiceDep, container: ContainerDep, user: Viewer
 ) -> CopilotReply:
+    from netops.api.routes.devices import device_allowed
     from netops.api.routes.insights import (
         _check_rate_limit,
         _compute_forecast_alerts_sync,
@@ -283,7 +306,9 @@ async def copilot_chat(
     from netops.services.ai_guard import AiTelemetryGuard
 
     _check_rate_limit(f"copilot:{user.username}", limit=30, window_seconds=60.0)
-    devices = list(service.list_devices(limit=500))
+    devices = [
+        d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)
+    ]
     alerts = await asyncio.to_thread(
         _compute_forecast_alerts_sync, container.settings, devices, 72
     )
@@ -347,7 +372,9 @@ async def copilot_chat(
     llm_prompt = f"Контекст:\n{context}\n\nВопрос: {data.message}"
     reply = await chat_with_llm(container.settings, COPILOT_SYSTEM, llm_prompt)
     if reply is not None:
-        answer_text, action = extract_copilot_action(reply[0], default_device_id=data.device_id)
+        answer_text, action = extract_copilot_action(
+            reply[0], default_device_id=data.device_id, devices=devices
+        )
         msg_lower = data.message.lower()
         if any(w in msg_lower for w in ["dry-run", "dry_run", "dry run", "префлайт", "холостой"]):
             _, fallback_act = generate_fallback_action(
@@ -397,11 +424,13 @@ class AiGuardResponse(BaseModel):
 @router.get("/ai-guard/check/{device_id}", response_model=AiGuardResponse, summary="Runtime error & anomaly detection via statistical quantile guard")
 @router.get("/insights/ai-guard/check/{device_id}", response_model=AiGuardResponse, include_in_schema=False)
 async def ai_guard_check_device(
-    device_id: int, service: DeviceServiceDep, container: ContainerDep, _: Viewer
+    device_id: int, service: DeviceServiceDep, container: ContainerDep, user: Viewer
 ) -> AiGuardResponse:
+    from netops.api.routes.devices import assert_device_allowed
     from netops.services.ai_guard import AiTelemetryGuard
 
     device = service.get(device_id)
+    assert_device_allowed(device, user.allowed_system)
     guard = AiTelemetryGuard(container.settings)
     verdict = await asyncio.to_thread(guard.verify_execution, device)
     return AiGuardResponse(
@@ -420,9 +449,15 @@ async def ai_guard_check_device(
 
 @router.post("/ai-guard/simulate", summary="Inject simulated operational anomaly (blackhole/storm) for demo (Operator/Admin)")
 @router.post("/insights/ai-guard/simulate", include_in_schema=False)
-async def ai_guard_simulate_anomaly(data: AiGuardSimulateRequest, _: Operator) -> dict[str, str]:
+async def ai_guard_simulate_anomaly(
+    data: AiGuardSimulateRequest, service: DeviceServiceDep, user: Operator
+) -> dict[str, str]:
+    from netops.api.routes.devices import assert_device_allowed
     from netops.services.ai_guard import AiTelemetryGuard
 
+    device = service.get_by_hostname(data.hostname)
+    if device is not None:
+        assert_device_allowed(device, user.allowed_system)
     AiTelemetryGuard.inject_anomaly(data.hostname, data.anomaly_type)
     return {
         "status": "ok",
@@ -435,11 +470,14 @@ async def ai_guard_simulate_anomaly(data: AiGuardSimulateRequest, _: Operator) -
 @router.get("/ai-guard/overview", response_model=list[AiGuardResponse], summary="AI Guard health overview across all network devices")
 @router.get("/insights/ai-guard/overview", response_model=list[AiGuardResponse], include_in_schema=False)
 async def ai_guard_overview(
-    service: DeviceServiceDep, container: ContainerDep, _: Viewer
+    service: DeviceServiceDep, container: ContainerDep, user: Viewer
 ) -> list[AiGuardResponse]:
+    from netops.api.routes.devices import device_allowed
     from netops.services.ai_guard import AiTelemetryGuard
 
-    devices = list(service.list_devices(limit=500))
+    devices = [
+        d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)
+    ]
     guard = AiTelemetryGuard(container.settings)
     verdicts = await asyncio.to_thread(lambda: [guard.verify_execution(d) for d in devices])
     return [

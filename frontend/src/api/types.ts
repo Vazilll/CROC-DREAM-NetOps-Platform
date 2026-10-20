@@ -42,6 +42,8 @@ export interface Device {
   status: DeviceStatus;
   fabric_id?: string | null;
   site?: string | null;
+  rack?: string | null;
+  unit?: number | null;
   management_mode?: 'MONITORING_ONLY' | 'MANAGED';
   proxy_jump?: string | null;
   hardware_specs?: string | null;

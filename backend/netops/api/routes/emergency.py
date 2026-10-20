@@ -274,7 +274,7 @@ def execute_emergency_command(
         (
             d
             for d in snapshot.inventory.devices
-            if d.hostname == req.device or d.hostname.startswith(req.device)
+            if d.hostname == req.device or d.hostname.split(".")[0] == req.device
         ),
         None,
     )

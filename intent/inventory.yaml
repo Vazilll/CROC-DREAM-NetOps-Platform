@@ -7,6 +7,8 @@ devices:
   role: spine
   auth_profile: spine1_auth
   status: IN_SYNC
+  rack: RACK-A1
+  unit: 42
 - id: 2
   hostname: spine-2.croc.lab
   management_ip: 172.20.20.4
@@ -15,6 +17,8 @@ devices:
   role: spine
   auth_profile: spine2_auth
   status: IN_SYNC
+  rack: RACK-A2
+  unit: 42
 - id: 3
   hostname: leaf-1.croc.lab
   management_ip: 172.20.20.2
@@ -23,6 +27,8 @@ devices:
   role: leaf
   auth_profile: leaf1_auth
   status: IN_SYNC
+  rack: RACK-A1
+  unit: 20
 - id: 4
   hostname: leaf-2.croc.lab
   management_ip: 172.20.20.6
@@ -31,3 +37,5 @@ devices:
   role: leaf
   auth_profile: leaf2_auth
   status: IN_SYNC
+  rack: RACK-A2
+  unit: 20

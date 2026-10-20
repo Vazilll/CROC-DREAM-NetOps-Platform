@@ -163,6 +163,11 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
               <span className="text-[11px] font-mono text-zinc-400">
                 Роль: <strong className="text-zinc-200 uppercase">{device?.role}</strong>
               </span>
+              {device?.rack && (
+                <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-300 font-mono border border-cyan-500/20">
+                  {device.rack}{device.unit ? ` • U${device.unit}` : ''}
+                </span>
+              )}
               <span className="text-[10px] px-2 py-0.5 rounded bg-white/[0.04] text-zinc-400 font-mono border border-white/[0.06]">
                 {device?.management_mode || 'MONITORING_ONLY'}
               </span>

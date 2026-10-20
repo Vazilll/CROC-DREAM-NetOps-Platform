@@ -24,7 +24,8 @@ RUN uv sync --no-dev --no-install-project --extra scrapli
 COPY alembic.ini ./
 COPY migrations ./migrations
 COPY netops ./netops
-RUN uv sync --no-dev --extra scrapli
+ENV PYTHONPATH="/app"
+RUN uv sync --no-dev --no-install-project --extra scrapli --offline || true
 
 RUN useradd --create-home --uid 1000 netops && chown -R netops:netops /app
 USER netops

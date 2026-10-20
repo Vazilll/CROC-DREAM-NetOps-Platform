@@ -134,13 +134,14 @@ def probe_device(req: DeviceProbeRequest, container: ContainerDep, _: Admin) -> 
     summary="Добавить устройство",
 )
 def create_device(
-    data: DeviceCreate, service: DeviceServiceDep, container: ContainerDep, _: Admin
+    data: DeviceCreate, service: DeviceServiceDep, container: ContainerDep, admin: Admin
 ) -> Device:
     from sqlalchemy import select
 
     from netops.errors import ConflictError
     from netops.services.notifier import sync_access_registry
 
+    assert_device_allowed(data, admin.allowed_system)
     try:
         device = service.create(data)
     except ConflictError:
@@ -156,6 +157,11 @@ def create_device(
         ).first()
         if existing is None:
             raise
+        assert_device_allowed(existing, admin.allowed_system)
+        if existing.status is DeviceStatus.IN_PROGRESS:
+            raise ConflictError(
+                f"Device {existing.hostname} is being deployed; try again later"
+            ) from None
         hostname_taken = service._session.scalars(
             select(Device).where(
                 (Device.hostname == data.hostname) & (Device.id != existing.id)

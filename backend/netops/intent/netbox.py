@@ -30,17 +30,19 @@ def load_netbox_inventory(
     devices: list[InventoryDevice] = []
     while url:
         page = fetch(url, token)
-        for raw in page["results"]:
+        for raw in page.get("results") or []:
+            if not isinstance(raw, dict):
+                continue
             name = raw.get("name")
-            ip = (raw.get("primary_ip4") or {}).get("address", "").split("/")[0]
-            platform = (raw.get("platform") or {}).get("slug")
-            role = (raw.get("role") or raw.get("device_role") or {}).get("slug")
-            site_slug = (raw.get("site") or {}).get("slug")
-            kwargs: dict[str, Any] = {}
-            if site_slug:
-                kwargs["fabric_id"] = site_slug
-                kwargs["site"] = site_slug
             try:
+                ip = str((raw.get("primary_ip4") or {}).get("address") or "").split("/")[0]
+                platform = (raw.get("platform") or {}).get("slug")
+                role = (raw.get("role") or raw.get("device_role") or {}).get("slug")
+                site_slug = (raw.get("site") or {}).get("slug")
+                kwargs: dict[str, Any] = {}
+                if site_slug:
+                    kwargs["fabric_id"] = site_slug
+                    kwargs["site"] = site_slug
                 devices.append(
                     InventoryDevice(
                         hostname=name,
@@ -51,7 +53,7 @@ def load_netbox_inventory(
                         **kwargs,
                     )
                 )
-            except ValueError as exc:
+            except (ValueError, TypeError, AttributeError) as exc:
                 logger.warning("NetBox device %r skipped: %s", name, exc)
         url = page.get("next")
     return Inventory(devices=devices)

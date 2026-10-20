@@ -422,9 +422,9 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
                   value={patchText}
                   onChange={(e) => setPatchText(e.target.value)}
                   placeholder={
-                    activeDeviceObj.platform === 'huawei_vrp'
+                    activeDeviceObj?.platform === 'huawei_vrp'
                       ? 'interface GE1/0/1\n undo shutdown\n quit'
-                      : activeDeviceObj.platform === 'cisco_iosxe'
+                      : activeDeviceObj?.platform === 'cisco_iosxe'
                       ? 'interface GigabitEthernet2\n no shutdown\n exit'
                       : 'interface Ethernet1\n no shutdown\n exit'
                   }

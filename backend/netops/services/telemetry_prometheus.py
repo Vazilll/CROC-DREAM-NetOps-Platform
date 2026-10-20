@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 import urllib.error
 import urllib.parse
@@ -154,7 +155,11 @@ def query_prometheus_metric(
                 results = data.get("data", {}).get("result", [])
                 if results:
                     values = results[0].get("values", [])
-                    pts = [round(float(v[1]), 2) for v in values if len(v) >= 2]
+                    pts = [
+                        round(val, 2)
+                        for v in values
+                        if len(v) >= 2 and math.isfinite(val := float(v[1]))
+                    ]
                     if len(pts) >= 2:
                         res_pts = pts[-points:]
                         if len(_PROM_QUERY_CACHE) >= 512:

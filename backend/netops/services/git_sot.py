@@ -71,7 +71,12 @@ def _git_auth_cmd_and_env(url: str, github_pat: str | None, repo_path: Path) -> 
     git_prefix = ["git"]
     if pat and clean_url.startswith(("http://", "https://")):
         b64 = base64.b64encode(f"x-access-token:{pat}".encode()).decode("ascii")
-        git_prefix = ["git", "-c", f"http.https://github.com/.extraheader=Authorization: Basic {b64}"]
+        parts = urllib.parse.urlsplit(clean_url)
+        origin = f"{parts.scheme}://{parts.netloc}/" if parts.scheme and parts.netloc else ""
+        cfg_key = f"http.{origin}.extraheader" if origin else "http.extraheader"
+        env["GIT_CONFIG_COUNT"] = "1"
+        env["GIT_CONFIG_KEY_0"] = cfg_key
+        env["GIT_CONFIG_VALUE_0"] = f"Authorization: Basic {b64}"
     return git_prefix, env, clean_url
 
 
@@ -79,8 +84,11 @@ def _scrub_secret(text: str, secret: str | None) -> str:
     if not text:
         return ""
     out = re.sub(r"://[^/@\s]+@", "://***@", text)
+    out = re.sub(r"(?i)(Authorization:\s*(?:Basic|Bearer)\s+)[A-Za-z0-9+/=._-]+", r"\1***", out)
     if secret and secret.strip():
-        out = out.replace(secret.strip(), "***")
+        s = secret.strip()
+        b64 = base64.b64encode(f"x-access-token:{s}".encode()).decode("ascii")
+        out = out.replace(s, "***").replace(b64, "***")
     return out
 
 
@@ -326,9 +334,10 @@ def git_connect_remote(
                 "synced_files": True,
                 "message": f"Git подключён: {clean_url} ({clean_branch}@{commit_short or 'HEAD'})",
             }
-        err_msg = _scrub_secret(
+        scrubbed_lines = _scrub_secret(
             (r_ls.stderr or r_ls.stdout or "Git connection failed").strip(), github_pat
-        ).splitlines()[-1]
+        ).splitlines()
+        err_msg = scrubbed_lines[-1] if scrubbed_lines else "Git connection failed"
         return {
             "connected": False,
             "remote_url": clean_url,

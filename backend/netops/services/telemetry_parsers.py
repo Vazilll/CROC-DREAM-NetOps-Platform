@@ -182,6 +182,31 @@ def parse_linux_network_rate(output: str) -> float | None:
     return 10.0
 
 
+def parse_linux_audit_logs(output: str) -> float | None:
+    """Parse Linux rsyslog / auditd event count from command output."""
+    m = re.search(r"^\s*(\d+)\s*$", output.strip())
+    if m:
+        return float(m.group(1))
+    lines = [line for line in output.splitlines() if line.strip()]
+    return float(len(lines))
+
+
+def parse_sip_sessions(output: str) -> float | None:
+    """Parse active SIP sessions / calls from Asterisk / Kamailio / ss -u sport = :5060."""
+    m = re.search(r"(\d+)\s+active\s+calls?", output, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    m_num = re.search(r"^\s*(\d+)\s*$", output.strip())
+    if m_num:
+        return float(m_num.group(1))
+    lines = [
+        line
+        for line in output.splitlines()
+        if line.strip() and not line.lower().startswith("state")
+    ]
+    return float(len(lines))
+
+
 PARSER_REGISTRY: dict[str, Any] = {
     "parse_cisco_cpu": parse_cisco_cpu,
     "parse_arista_cpu": parse_arista_cpu,
@@ -198,6 +223,8 @@ PARSER_REGISTRY: dict[str, Any] = {
     "parse_linux_disk": parse_linux_disk,
     "parse_linux_load": parse_linux_load,
     "parse_linux_network_rate": parse_linux_network_rate,
+    "parse_linux_audit_logs": parse_linux_audit_logs,
+    "parse_sip_sessions": parse_sip_sessions,
     "max_cisco_link_utilization": max_cisco_link_utilization,
     "max_arista_link_utilization": lambda out: max_percent_column(out, ("Et",)),
     "max_huawei_link_utilization": lambda out: max_percent_column(

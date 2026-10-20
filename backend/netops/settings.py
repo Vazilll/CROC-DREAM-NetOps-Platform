@@ -271,6 +271,9 @@ class Settings(BaseSettings):
                         setattr(self, int_field, int(data[int_field]))
                     except (TypeError, ValueError):
                         pass
+            min_confirm = int((self.post_check_attempts - 1) * self.post_check_interval_seconds * 2)
+            if self.commit_confirm_timeout_seconds < min_confirm:
+                self.commit_confirm_timeout_seconds = max(30, min_confirm)
             if (
                 data.get("max_ping_loss_percent") is not None
                 and "max_ping_loss_percent" not in explicit

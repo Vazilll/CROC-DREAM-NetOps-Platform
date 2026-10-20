@@ -100,5 +100,59 @@ def _as_utc(value: datetime | None) -> datetime | None:
 def remediate(
     request: DriftRemediateRequest, service: JobServiceDep, user: Operator
 ) -> JobAccepted:
+    if user.allowed_system:
+        from netops.api.routes.devices import assert_device_allowed
+        from netops.models import Device
+
+        dev = service._session.get(Device, request.device_id)
+        if dev is not None:
+            assert_device_allowed(dev, user.allowed_system)
     job = service.create_drift_remediation(request.device_id, requested_by=user.username)
     return JobAccepted(job_id=job.id, status=job.status)
+
+
+@router.get(
+    "/regular-report",
+    summary="Регулярный сводный отчёт по состоянию сети, дрейфу и SLA",
+)
+def regular_report(
+    session: SessionDep,
+    principal: Viewer,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+) -> dict[str, object]:
+    from sqlalchemy import select
+
+    from netops.api.routes.devices import device_allowed
+    from netops.enums import DeviceStatus
+    from netops.models import Device
+
+    devices = [
+        d
+        for d in session.scalars(select(Device)).all()
+        if device_allowed(d, principal.allowed_system)
+        and (fabric_id is None or fabric_id in {d.fabric_id, d.site})
+    ]
+    total = len(devices)
+    in_sync = sum(1 for d in devices if d.status == DeviceStatus.IN_SYNC)
+    drifted = sum(1 for d in devices if d.status == DeviceStatus.DRIFT_DETECTED)
+    unreachable = sum(1 for d in devices if d.status == DeviceStatus.UNREACHABLE)
+    compliance_pct = round((in_sync / total) * 100.0, 2) if total > 0 else 100.0
+    return {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "total_devices": total,
+        "in_sync": in_sync,
+        "drift_detected": drifted,
+        "unreachable": unreachable,
+        "compliance_pct": compliance_pct,
+        "devices": [
+            {
+                "hostname": d.hostname,
+                "platform": str(d.platform.value if hasattr(d.platform, "value") else d.platform),
+                "role": str(d.role.value if hasattr(d.role, "value") else d.role),
+                "rack": getattr(d, "rack", None),
+                "unit": getattr(d, "unit", None),
+                "status": str(d.status.value if hasattr(d.status, "value") else d.status),
+            }
+            for d in devices
+        ],
+    }

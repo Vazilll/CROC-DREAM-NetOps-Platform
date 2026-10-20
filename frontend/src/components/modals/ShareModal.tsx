@@ -80,7 +80,10 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   userRole,
   locale = 'ru',
 }) => {
-  const [activeTab, setActiveTab] = useState<'links' | 'integrations'>('links');
+  const isAdmin = userRole === 'admin' || userRole === 'owner';
+  const [activeTab, setActiveTab] = useState<'links' | 'integrations'>(
+    isAdmin ? 'links' : 'integrations'
+  );
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [loading, setLoading] = useState(false);
@@ -276,21 +279,23 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-2 border-b border-[var(--border-subtle)] pb-2.5">
           <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setActiveTab('links')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                activeTab === 'links'
-                  ? 'bg-[var(--text-primary)] text-[var(--bg-main)] border-[var(--text-primary)]'
-                  : 'bg-[var(--bg-elevated)]/40 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
-              }`}
-            >
-              <KeyRound className="w-3.5 h-3.5" />
-              <span>Участники ({users.length})</span>
-            </button>
+            {isAdmin && (
+              <button
+                onClick={() => setActiveTab('links')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border ${
+                  activeTab === 'links'
+                    ? 'bg-[var(--text-primary)] text-[var(--bg-main)] border-[var(--text-primary)]'
+                    : 'bg-[var(--bg-elevated)]/40 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Участники ({users.length})</span>
+              </button>
+            )}
             <button
               onClick={() => setActiveTab('integrations')}
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer border ${
-                activeTab === 'integrations'
+                activeTab === 'integrations' || !isAdmin
                   ? 'bg-[var(--text-primary)] text-[var(--bg-main)] border-[var(--text-primary)]'
                   : 'bg-[var(--bg-elevated)]/40 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
               }`}
@@ -329,7 +334,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           </div>
         )}
 
-        {activeTab === 'links' ? (
+        {activeTab === 'links' && isAdmin ? (
           <div className="space-y-3">
             <PublicConsolesBanner
               consoles={publicConsoles}

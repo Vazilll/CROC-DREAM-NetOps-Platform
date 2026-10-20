@@ -48,13 +48,13 @@ def parse_bgp_table(platform: Platform, output: str) -> dict[str, BgpSessionStat
         if not peer_ip or len(parts) < 4 or "identifier" in line.lower():
             continue
         last = parts[-1]
-        if last.isdigit():
-            bgp_sessions[peer_ip] = BgpSessionState(
-                "Established", prefixes_accepted=int(last)
-            )
-        elif len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
+        if len(parts) >= 2 and parts[-2].isdigit() and parts[-1].isdigit():
             bgp_sessions[peer_ip] = BgpSessionState(
                 "Established", prefixes_accepted=int(parts[-2])
+            )
+        elif last.isdigit():
+            bgp_sessions[peer_ip] = BgpSessionState(
+                "Established", prefixes_accepted=int(last)
             )
         else:
             bgp_sessions[peer_ip] = BgpSessionState(last, prefixes_accepted=0)
@@ -72,8 +72,8 @@ def parse_interface_table(platform: Platform, output: str) -> dict[str, Interfac
                 and parts[0].startswith(("GE", "Loop", "Gigabit", "Eth", "Vb"))
                 and parts[1].lower() != "unassigned"
             ):
-                status = "up" if "up" in parts[2].lower() else "down"
-                proto = "up" if "up" in parts[3].lower() else "down"
+                status = "up" if parts[2].lower().startswith("up") else "down"
+                proto = "up" if parts[3].lower().startswith("up") else "down"
                 interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
         return interfaces
 
@@ -81,23 +81,30 @@ def parse_interface_table(platform: Platform, output: str) -> dict[str, Interfac
         parts = line.split()
         if platform == Platform.CISCO_IOSXE and len(parts) >= 6:
             if parts[0].startswith(("Gigabit", "Loop")):
+                proto = parts[-1].lower()
+                raw_status = " ".join(parts[4:-1]).lower()
+                status = (
+                    "up"
+                    if raw_status == "up"
+                    else ("down" if "down" in raw_status else raw_status)
+                )
                 interfaces[parts[0]] = InterfaceState(
-                    status=parts[4], protocol=parts[5]
+                    status=status, protocol=proto
                 )
         elif len(parts) >= 4 and parts[0].startswith(("Ethernet", "Loop", "Management")):
-            status = "up" if "up" in parts[2].lower() else "down"
-            proto = "up" if "up" in parts[3].lower() else "down"
+            status = "up" if parts[2].lower().startswith("up") else "down"
+            proto = "up" if parts[3].lower().startswith("up") else "down"
             interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
     return interfaces
 
 
 def parse_ping_loss(output: str) -> float:
-    """Parse ping success rate percentage from CLI output into packet loss percentage."""
-    rate_match = re.search(
-        r"(?:Success rate is |packet loss, |transmitted, \d+ received, )(\d+)%",
-        output,
-    )
-    return (100.0 - float(rate_match.group(1))) if rate_match else 0.0
+    """Parse ping success rate or packet loss percentage from CLI output into packet loss percentage."""
+    if rate_match := re.search(r"Success rate is (\d+(?:\.\d+)?)\s*(?:%|percent)", output, re.I):
+        return max(0.0, min(100.0, 100.0 - float(rate_match.group(1))))
+    if loss_match := re.search(r"(\d+(?:\.\d+)?)\s*(?:%|percent)\s*(?:packet\s+)?loss", output, re.I):
+        return max(0.0, min(100.0, float(loss_match.group(1))))
+    return 100.0 if output.strip() else 0.0
 
 
 def collect_device_health_tables(

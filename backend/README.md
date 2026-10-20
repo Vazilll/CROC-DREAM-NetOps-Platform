@@ -19,10 +19,10 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Drift Engine: Celery Beat каждые 15 минут, классификация `IN_SYNC / DRIFT_DETECTED / UNREACHABLE`, устранение дрейфа | `netops/pipeline/pipelines.py`, `netops/services/jobs.py` |
 | Нормализация конфигов по правилам Ани: сравниваются только управляемые секции, служебные строки и хэши паролей отбрасываются | `netops/network/normalization.py`, `netops/network/diff_filters.yaml` |
 | Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
-| Живой SSH-драйвер (`Scrapli` + `Paramiko` fallback) и файловый эмулятор (`OfflineLab`) | `netops/network/scrapli_driver.py`, `netops/network/offline.py` |
+| Живой SSH-драйвер (`Scrapli` + `Paramiko` fallback, мультиплексирование `direct-tcpip` через единый SSH Jump-туннель) и файловый эмулятор (`OfflineLab`) | `netops/network/scrapli_driver.py`, `netops/network/ssh_pool.py`, `netops/network/offline.py` |
 | Предиктивная аналитика временных рядов (Statistical Forecast), `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/forecast.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
 | Аварийный пульт (`Emergency Hub`: прямой CLI, экстренный патч, Soft/Hard Reset, `Factory Freeze`) | `netops/api/routes/emergency.py`, `netops/services/freeze.py` |
-| 4-шаговый визард инициализации «Матрёшка», GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/notifier.py` |
+| 5-слойный визард инициализации «Матрёшка» (вкл. `5. Сервер` — авто-импорт Containerlab по SSH), GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/bootstrap_discovery.py`, `netops/services/notifier.py` |
 | RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами и областями доступа (`allowed_scopes`) | `netops/api/deps.py`, `netops/services/users.py` |
 | Общий docker-compose: бэкенд, фронтенд, PostgreSQL, Redis, миграции, воркер, Beat, Prometheus, Telegram-бот | `../docker-compose.yml` |
 | CI/CD: линтеры и тесты, сборка образа, smoke-тест всего стека, публикация образа в GHCR | `../.github/workflows/ci-cd.yml`, `scripts/smoke_stack.py` |
@@ -36,7 +36,7 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 
 ```
 backend/
-├── Dockerfile                       # Контейнерный образ бэкенда и воркеров (uvicorn / celery)
+├── Dockerfile                       # Контейнерный образ бэкенда и воркеров (uvicorn / celery, offline-resilient)
 ├── pyproject.toml                   # Зависимости проекта и настройки ruff / black / mypy / pytest
 ├── alembic.ini                      # Конфигурация миграций БД
 ├── migrations/                      # Версии схемы базы данных Alembic
@@ -44,7 +44,7 @@ backend/
 │   └── smoke_stack.py               # Сквозной smoke-тест Docker-стека
 ├── tools/
 │   └── Statistical Forecast_server.py            # Микросервер инференса временных рядов Statistical Forecast
-├── tests/                           # 622 модульных и интеграционных теста (unit / integration / api)
+├── tests/                           # 626 модульных и интеграционных тестов (unit / integration / api)
 └── netops/
     ├── main.py                      # Точка входа ASGI (uvicorn netops.main:app)
     ├── settings.py                  # Типизированная конфигурация Pydantic Settings (NETOPS_*) + Runtime Overlay

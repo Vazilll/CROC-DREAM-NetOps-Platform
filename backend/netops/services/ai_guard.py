@@ -65,8 +65,6 @@ class AiTelemetryGuard:
 
     @staticmethod
     def get_injected_anomaly(hostname: str) -> str | None:
-        if hostname in _active_injections:
-            return _active_injections[hostname]
         from netops.services.state import get_state_manager
 
         data = get_state_manager().get_json(f"{_REDIS_INJECTION_PREFIX}{hostname}")
@@ -74,7 +72,7 @@ class AiTelemetryGuard:
             anom: Literal["blackhole", "storm"] = data["anomaly"]
             _active_injections[hostname] = anom
             return anom
-        return None
+        return _active_injections.get(hostname)
 
     def verify_execution(
         self,

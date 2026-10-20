@@ -103,20 +103,29 @@ class JobRunner:
                 recorder.finish()
 
             try:
+                import html
+
                 from netops.services.notifier import send_telegram_message
                 from netops.settings import get_settings
 
                 settings = get_settings()
                 if settings.telegram_bot_token and job.created_by != "scheduler":
                     targets_str = ", ".join(
-                        f"{t.hostname} ({t.status.value})" for t in job.targets
+                        f"{html.escape(str(t.hostname))} ({html.escape(str(t.status.value))})"
+                        for t in job.targets
                     ) or "все узлы"
+                    err_html = (
+                        f"\n<b>Ошибка:</b> <code>{html.escape(str(job.error))}</code>"
+                        if job.error
+                        else ""
+                    )
                     send_telegram_message(
                         settings,
-                        f"<b>[NetOps Pipeline | {job.type.value}]</b> Статус: <b>{job.status.value}</b>\n"
-                        f"<b>Автор:</b> <code>{job.created_by}</code>\n"
+                        f"<b>[NetOps Pipeline | {html.escape(str(job.type.value))}]</b> "
+                        f"Статус: <b>{html.escape(str(job.status.value))}</b>\n"
+                        f"<b>Автор:</b> <code>{html.escape(str(job.created_by))}</code>\n"
                         f"<b>Узлы:</b> <code>{targets_str}</code>"
-                        + (f"\n<b>Ошибка:</b> <code>{job.error}</code>" if job.error else ""),
+                        + err_html,
                     )
             except Exception:
                 pass

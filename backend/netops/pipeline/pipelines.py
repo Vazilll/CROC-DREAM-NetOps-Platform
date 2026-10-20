@@ -152,6 +152,7 @@ class DeployPipeline(_BasePipeline):
                 if not self._deploy_row(executor, row):
                     failed_on = row.hostname
                 self._recorder.progress(index, total)
+        self._session.commit()
         if failed_on is None:
             self._auto_commit_diff_to_git(job)
 
@@ -159,6 +160,19 @@ class DeployPipeline(_BasePipeline):
         device = row.device
         if device is None:
             row.mark(TargetStatus.FAILED, "Device was deleted")
+            return False
+        from netops.services.state import get_state_manager
+
+        state_mgr = get_state_manager()
+        if (
+            (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"))
+            or state_mgr.is_sync_locked(f"device:{device.hostname}")
+            or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"))
+        ):
+            row.mark(
+                TargetStatus.FAILED,
+                "Target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
+            )
             return False
         if row.intended_snapshot is None or row.running_snapshot is None:
             row.mark(TargetStatus.FAILED, "Dry-run results are incomplete; run a new dry-run")
@@ -222,8 +236,9 @@ class DriftScanPipeline(_BasePipeline):
                 continue
             record = self._record(job, plan, checked_at)
             self._session.add(record)
-            device.status = DeviceStatus(record.status.value)
-            device.last_checked_at = checked_at
+            if device.status is not DeviceStatus.IN_PROGRESS:
+                device.status = DeviceStatus(record.status.value)
+                device.last_checked_at = checked_at
             if plan.unreachable:
                 row.mark(TargetStatus.FAILED, plan.error)
             else:
@@ -279,6 +294,7 @@ class DriftRemediationPipeline(_BasePipeline):
                     hostname=device.hostname,
                 )
                 row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+                self._session.commit()
                 return
 
         [(row, plan)] = self._plan(job, pairs)
@@ -289,11 +305,13 @@ class DriftRemediationPipeline(_BasePipeline):
             row.mark(TargetStatus.FAILED, plan.error)
             if plan.unreachable:
                 device.status = DeviceStatus.UNREACHABLE
+            self._session.commit()
             return
         if plan.diff is None or not plan.diff.has_changes:
             row.mark(TargetStatus.SKIPPED, "Device already matches its golden config")
             device.status = DeviceStatus.IN_SYNC
             device.last_checked_at = utcnow()
+            self._session.commit()
             return
         if plan.target is None:
             raise PipelineError(f"{device.hostname}: no management target")

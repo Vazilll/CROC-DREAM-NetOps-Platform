@@ -210,7 +210,7 @@ class StateManager(StateDomainsMixin):
                 from netops.db import build_engine
                 from netops.models.system_state import SystemState
 
-                eng = build_engine(db_url)
+                eng = build_engine(db_url, pool_size=2, max_overflow=3)
                 with contextlib.suppress(Exception):
                     SystemState.__table__.create(bind=eng, checkfirst=True)
                 eng_cache[db_url] = eng
@@ -252,6 +252,8 @@ class StateManager(StateDomainsMixin):
         cache_key = f"netops:db_state:{key}"
         ttl = 86400 if key in self._HOT_REDIS_KEYS else 3600
         self.set_json(cache_key, value, ex=ttl)
+        if key in self._HOT_REDIS_KEYS and self._get_redis() is not None:
+            return True
         engine = self._get_db_engine(database_url)
         if engine is not None:
             try:

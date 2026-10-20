@@ -199,7 +199,8 @@ class DeploymentExecutor:
             from netops.services.state import get_state_manager
 
             state_mgr = get_state_manager()
-            job_id_str = getattr(plan, "job_id", None) or "rollback"
+            job_obj = getattr(self._recorder, "_job", None)
+            job_id_str = str(getattr(job_obj, "id", None) or getattr(plan, "job_id", None) or "rollback")
             holder_id = f"rollback:{job_id_str}"
             reason = "Two-Phase Rollback: target rolled back; locked pending SoT reconciliation"
             if device.id is not None:

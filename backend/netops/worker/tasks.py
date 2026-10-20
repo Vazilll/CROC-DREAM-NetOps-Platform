@@ -17,6 +17,7 @@ from netops.toolchain import build_toolchain
 from netops.worker.celery_app import (
     COLLECT_METRICS_TASK,
     FAIL_STALE_JOBS_TASK,
+    GENERATE_REGULAR_REPORT_TASK,
     PURGE_EXPIRED_RECORDS_TASK,
     REFRESH_COLLECTOR_TARGETS_TASK,
     RUN_JOB_TASK,
@@ -99,3 +100,33 @@ def purge_expired() -> dict[str, int]:
     runtime = get_runtime()
     with runtime.session_factory() as session:
         return purge_expired_records(session)
+
+
+@celery_app.task(name=GENERATE_REGULAR_REPORT_TASK)  # type: ignore[untyped-decorator]
+def generate_regular_report() -> dict[str, object]:
+    from datetime import UTC, datetime
+
+    from sqlalchemy import select
+
+    from netops.enums import DeviceStatus
+    from netops.models import Device
+    from netops.services.state import get_state_manager
+
+    runtime = get_runtime()
+    with runtime.session_factory() as session:
+        devices = session.scalars(select(Device)).all()
+        total = len(devices)
+        in_sync = sum(1 for d in devices if d.status == DeviceStatus.IN_SYNC)
+        drifted = sum(1 for d in devices if d.status == DeviceStatus.DRIFT_DETECTED)
+        unreachable = sum(1 for d in devices if d.status == DeviceStatus.UNREACHABLE)
+        compliance_pct = round((in_sync / total) * 100.0, 2) if total > 0 else 100.0
+        summary = {
+            "generated_at": datetime.now(UTC).isoformat(),
+            "total_devices": total,
+            "in_sync": in_sync,
+            "drift_detected": drifted,
+            "unreachable": unreachable,
+            "compliance_pct": compliance_pct,
+        }
+        get_state_manager().save_state("regular_report", summary)
+        return summary

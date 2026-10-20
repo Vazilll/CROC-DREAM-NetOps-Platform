@@ -15,7 +15,15 @@ from pydantic import BaseModel
 from sqlalchemy import func, inspect, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from netops.api.deps import ContainerDep, Operator, Owner, SessionDep, Viewer
+from netops.api.deps import (
+    ContainerDep,
+    DeviceServiceDep,
+    Operator,
+    Owner,
+    SessionDep,
+    Viewer,
+)
+from netops.api.routes.devices import assert_device_allowed
 from netops.api.routes.system_git_integrations import (
     GitCommitDiffRequest,
     GitSyncRequest,
@@ -289,8 +297,49 @@ def lint_intent(
     )
 
 
+def _enforce_stand_scope(user: ApiPrincipal, stand: str | None) -> str | None:
+    allowed_sys = getattr(user, "allowed_system", None)
+    if user.role == UserRole.OWNER or not allowed_sys or allowed_sys in ("*", "all"):
+        return stand
+    tokens = [
+        t.strip().lower().removeprefix("fabric:").removeprefix("site:")
+        for t in allowed_sys.split(",")
+        if t.strip()
+    ]
+    if not tokens or "*" in tokens or "all" in tokens:
+        return stand
+    if stand:
+        if stand.strip().lower() not in tokens:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Нет прав на управление стендом '{stand}'",
+            )
+        return stand
+    if len(tokens) == 1:
+        return tokens[0]
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail="Необходимо указать разрешённый стенд (fabric_id/site)",
+    )
+
+
 @api_router.post("/system/chaos", tags=["system"], summary="Simulate network incident")
-def inject_chaos(req: ChaosRequest, container: ContainerDep, _: Operator) -> dict[str, str]:
+def inject_chaos(
+    req: ChaosRequest,
+    container: ContainerDep,
+    service: DeviceServiceDep,
+    user: Operator,
+) -> dict[str, str]:
+    allowed_sys = getattr(user, "allowed_system", None)
+    if req.target_hostname:
+        dev = service.get_by_hostname(req.target_hostname)
+        if dev is not None:
+            assert_device_allowed(dev, allowed_sys)
+    elif user.role != UserRole.OWNER and allowed_sys and allowed_sys not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Операторам с ограниченным контуром необходимо указать конкретный target_hostname",
+        )
     return execute_chaos_scenario(
         req.scenario,
         container,
@@ -322,7 +371,7 @@ def get_freeze_status(
 )
 @api_router.post("/emergency/freeze", tags=["emergency"], include_in_schema=False)
 def toggle_freeze(req: FreezeRequest, user: Operator) -> dict[str, Any]:
-    stand = req.fabric_id or req.site
+    stand = _enforce_stand_scope(user, req.fabric_id or req.site)
     return set_factory_freeze(req.frozen, req.reason, user.username, fabric_id=stand)
 
 
@@ -337,7 +386,7 @@ def unfreeze(
     fabric_id: Annotated[str | None, Query(description="Идентификатор стенда/фабрики")] = None,
     site: Annotated[str | None, Query(description="Идентификатор площадки/стенду")] = None,
 ) -> dict[str, Any]:
-    stand = fabric_id or site
+    stand = _enforce_stand_scope(user, fabric_id or site)
     return set_factory_freeze(False, "Заморозка снята оператором", user.username, fabric_id=stand)
 
 

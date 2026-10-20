@@ -45,6 +45,8 @@ commands:
   hostname_filter: hostname
   interfaces_brief: ip -br addr show
   lldp_neighbors: lldpctl
+  audit_logs: "tail -n 50 /var/log/audit/audit.log /var/log/syslog 2>/dev/null || journalctl -n 50 --no-pager"
+  sip_status: "ss -u -a sport = :5060 2>/dev/null || true"
 
 # ==============================================================================
 # БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)
@@ -88,6 +90,12 @@ telemetry:
   load_1m:
     command: cat /proc/loadavg
     parser: parse_linux_load
+  audit_log_events:
+    command: "grep -h -E 'type=(USER_AUTH|SYSCALL|AVC)|sshd|sudo' /var/log/audit/audit.log /var/log/auth.log /var/log/syslog 2>/dev/null | wc -l"
+    parser: parse_linux_audit_logs
+  sip_active_sessions:
+    command: "ss -u -H sport = :5060 2>/dev/null | wc -l"
+    parser: parse_sip_sessions
 
 # ==============================================================================
 # БЛОК 5: АВАРИЙНОЕ УПРАВЛЕНИЕ (EMERGENCY HUB)

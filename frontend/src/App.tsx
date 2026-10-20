@@ -227,10 +227,10 @@ export function App() {
     }
     setSelectedJobId((current) => {
       const currentJob = jobs.find((j) => j.id === current);
-      if (currentJob && (currentJob.type === 'DRY_RUN' || currentJob.type === 'DEPLOY')) {
+      if (currentJob) {
         return current;
       }
-      const diffJob = jobs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
+      const diffJob = jobs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY') || jobs[0];
       return diffJob?.id ?? current;
     });
     setActiveTab('diff');
@@ -253,10 +253,15 @@ export function App() {
     setCopilotRequest({ text, n: Date.now() });
   }, []);
 
+  const toastTimerRef = useRef<number | null>(null);
   const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
     setToast({ message, type });
-    setTimeout(() => {
+    toastTimerRef.current = window.setTimeout(() => {
       setToast(null);
+      toastTimerRef.current = null;
     }, 4000);
   }, []);
 
@@ -673,6 +678,7 @@ export function App() {
               <DiffViewer
                 jobs={jobs}
                 selectedJobId={selectedJobId}
+                targetDeviceId={deviceId}
                 userRole={userRole}
                 onSelectJob={handleSelectJob}
                 onDeploy={handleDeploy}

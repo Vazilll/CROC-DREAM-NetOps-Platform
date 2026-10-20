@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import pytest
 
@@ -229,5 +230,128 @@ def test_paramiko_adapter_reuses_pooled_session_and_skips_hidden_jump(
     assert connect_calls == 1
     assert s1 is s2
     scrapli_driver._SESSION_POOL.clear()
+
+
+def test_parse_ping_loss_and_cisco_interface_table() -> None:
+    from netops.network.table_parsers import parse_interface_table, parse_ping_loss
+
+    assert parse_ping_loss("5 packets transmitted, 5 received, 0% packet loss, time 4ms") == 0.0
+    assert parse_ping_loss("5 packets transmitted, 0 received, 100% packet loss, time 4000ms") == 100.0
+    assert parse_ping_loss("Success rate is 100 percent (5/5)") == 0.0
+    assert parse_ping_loss("Success rate is 80% (4/5)") == 20.0
+
+    cisco_out = (
+        "Interface              IP-Address      OK? Method Status                Protocol\n"
+        "GigabitEthernet1       10.0.0.1        YES NVRAM  up                    up\n"
+        "GigabitEthernet2       10.0.0.2        YES manual administratively down down\n"
+    )
+    ifaces = parse_interface_table(Platform.CISCO_IOSXE, cisco_out)
+    assert ifaces["GigabitEthernet1"].status == "up"
+    assert ifaces["GigabitEthernet1"].protocol == "up"
+    assert ifaces["GigabitEthernet2"].status == "down"
+    assert ifaces["GigabitEthernet2"].protocol == "down"
+
+
+def test_block2_services_regressions(tmp_path: Path) -> None:
+    from netops.intent.models import TelemetryMetricSpec
+    from netops.services.git_sot import _git_auth_cmd_and_env, _scrub_secret
+    from netops.services.llm import _check_interface_risk
+
+    # Mixed 'no shutdown' and 'shutdown' on separate lines must still flag CRITICAL
+    lvl, pts, _ = _check_interface_risk("interface Gi1\n no shutdown\ninterface Gi2\n shutdown")
+    assert lvl == "CRITICAL"
+    assert pts
+
+    # Only 'no shutdown' should not flag CRITICAL
+    lvl_safe, _, _ = _check_interface_risk("interface Gi1\n no shutdown")
+    assert lvl_safe is None
+
+    # Git auth env uses GIT_CONFIG_* instead of command-line -c args
+    prefix, env, clean = _git_auth_cmd_and_env(
+        "https://gitlab.example.com/org/repo.git", "secret_pat_123", tmp_path
+    )
+    assert prefix == ["git"]
+    assert env["GIT_CONFIG_COUNT"] == "1"
+    assert env["GIT_CONFIG_KEY_0"] == "http.https://gitlab.example.com/.extraheader"
+    assert "Authorization: Basic " in env["GIT_CONFIG_VALUE_0"]
+    assert clean == "https://gitlab.example.com/org/repo.git"
+
+    scrubbed = _scrub_secret(f"Header {env['GIT_CONFIG_VALUE_0']} failed", "secret_pat_123")
+    assert "secret_pat_123" not in scrubbed
+    assert "***" in scrubbed
+
+    # IntentModel subclasses support .get() and []
+    spec = TelemetryMetricSpec(command="show cpu", parser="parse_cisco_cpu")
+    assert spec.get("command") == "show cpu"
+    assert spec["parser"] == "parse_cisco_cpu"
+    assert spec.get("nonexistent", "fallback") == "fallback"
+
+
+def test_block3_and_block4_regressions(tmp_path: Path) -> None:
+    from netops.enums import DeviceRole, Platform
+    from netops.intent.models import BgpIntent, BgpNeighborIntent, DeviceIntent, InventoryDevice
+    from netops.intent.netbox import load_netbox_inventory
+    from netops.network.rendering import JinjaConfigRenderer
+
+    # 1. InventoryDevice._normalize_stand does not mutate caller's dict in place
+    raw_input = {"hostname": "spine-1.croc.lab", "management_ip": "10.0.0.1", "platform": "cisco_iosxe", "role": "spine", "auth_profile": "lab", "site": "dc1"}
+    dev = InventoryDevice.model_validate(raw_input)
+    assert dev.fabric_id == "dc1"
+    assert "fabric_id" not in raw_input
+
+    # 2. JinjaConfigRenderer invalidates cache when BGP neighbor password or template file changes
+    tpl_dir = tmp_path / "templates" / "cisco_iosxe"
+    tpl_dir.mkdir(parents=True)
+    bgp_j2 = tpl_dir / "bgp.j2"
+    bgp_j2.write_text(
+        "router bgp {{ intent.bgp.asn }}\n"
+        "{% for n in intent.bgp.neighbors %}"
+        " neighbor {{ n.peer_ip }} password {{ n.password or 'NONE' }}\n"
+        "{% endfor %}",
+        encoding="utf-8",
+    )
+    renderer = JinjaConfigRenderer(tmp_path / "templates")
+    intent1 = DeviceIntent(
+        hostname="spine-1.croc.lab",
+        bgp=BgpIntent(
+            asn=65001,
+            router_id="10.0.0.1",
+            neighbors=[BgpNeighborIntent(peer_ip="10.0.0.2", remote_asn=65002, password="passA")],
+        ),
+    )
+    intent2 = DeviceIntent(
+        hostname="spine-1.croc.lab",
+        bgp=BgpIntent(
+            asn=65001,
+            router_id="10.0.0.1",
+            neighbors=[BgpNeighborIntent(peer_ip="10.0.0.2", remote_asn=65002, password="passB")],
+        ),
+    )
+    out1 = renderer.render(dev, intent1)
+    out2 = renderer.render(dev, intent2)
+    assert "password passA" in out1
+    assert "password passB" in out2
+
+    # 3. NetBox loader skips malformed non-dict / None fields without crashing
+    def fake_fetch(_url: str, _token: str) -> dict:
+        return {
+            "results": [
+                {"name": "bad-dev-1", "primary_ip4": {"address": None}, "platform": None},
+                {
+                    "name": "good-dev.croc.lab",
+                    "primary_ip4": {"address": "10.0.0.99/24"},
+                    "platform": {"slug": "arista_eos"},
+                    "role": {"slug": "leaf"},
+                    "site": {"slug": "dc1"},
+                },
+            ],
+            "next": None,
+        }
+
+    inv = load_netbox_inventory("http://netbox.local", "tok", fetch=fake_fetch)
+    assert len(inv.devices) == 1
+    assert inv.devices[0].hostname == "good-dev.croc.lab"
+    assert inv.devices[0].platform == Platform.ARISTA_EOS
+    assert inv.devices[0].role == DeviceRole.LEAF
 
 

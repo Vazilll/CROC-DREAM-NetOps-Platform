@@ -71,7 +71,8 @@ class StateDomainsMixin:
                 if holder is not None and data.get("holder") != holder:
                     return False
             except Exception:
-                pass
+                if holder is not None:
+                    return False
             return bool(client.delete(key))
         except Exception as exc:
             self._handle_redis_error(exc)
@@ -84,8 +85,9 @@ class StateDomainsMixin:
         if client:
             redis_res = self._release_redis_lock(client, key, holder)
             if redis_res is not None:
-                with self._lock:
-                    self._local_locks.pop(target, None)
+                if redis_res:
+                    with self._lock:
+                        self._local_locks.pop(target, None)
                 return redis_res
         with self._lock:
             existing = self._local_locks.get(target)

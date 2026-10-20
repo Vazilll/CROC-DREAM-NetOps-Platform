@@ -188,14 +188,25 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             except Exception:
                 pass
         discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
-        ssh.close()
-    except Exception as exc:
+    except paramiko.AuthenticationException as exc:
         if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный пароль SSH: сервер отклонил аутентификацию",
             ) from exc
         discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
+    except Exception as exc:
+        if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"Ошибка подключения или выполнения команд SSH: {exc}",
+            ) from exc
+        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
+    finally:
+        try:
+            ssh.close()
+        except Exception:
+            pass
 
     existing_pws: list[str] = []
     try:

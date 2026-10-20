@@ -23,6 +23,8 @@ _INVENTORY_FIELDS = (
     "auth_profile",
     "fabric_id",
     "site",
+    "rack",
+    "unit",
 )
 
 
@@ -84,6 +86,9 @@ class DeviceService:
         ).first()
         self._enrich_device(device, latest_drift)
         return device
+
+    def get_by_hostname(self, hostname: str) -> Device | None:
+        return self._session.scalar(select(Device).where(Device.hostname == hostname))
 
     def _enrich_device(self, device: Device, latest_drift: DriftRecord | None = None) -> Device:
         role_str = str(device.role.value if hasattr(device.role, "value") else device.role)
@@ -176,6 +181,7 @@ class DeviceService:
         result = InventorySyncResult()
         for spec in inventory.devices:
             values = _column_values(spec.model_dump(include={"hostname", *_INVENTORY_FIELDS}))
+            values.setdefault("management_mode", "MANAGED")
             device = existing.get(spec.hostname)
             if device is None:
                 self._session.add(Device(**values))
@@ -186,6 +192,9 @@ class DeviceService:
                 if getattr(device, field) != values[field]:
                     setattr(device, field, values[field])
                     changed = True
+            if getattr(device, "management_mode", None) != "MANAGED":
+                device.management_mode = "MANAGED"
+                changed = True
             (result.updated if changed else result.unchanged).append(spec.hostname)
         self._commit("Inventory")
         return result

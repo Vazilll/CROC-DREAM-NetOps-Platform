@@ -340,6 +340,9 @@ def device_samples(
             samples.append(Sample(metrics.DEVICE_REACHABLE, 0.0, labels))
             continue
 
+        if device.status == DeviceStatus.UNREACHABLE:
+            device.status = DeviceStatus.IN_SYNC
+            status_changed = True
         samples.append(Sample(metrics.DEVICE_REACHABLE, 1.0, labels))
         if _is_server_device(device):
             samples.extend(_emit_server_samples(health, labels, device.hostname))
