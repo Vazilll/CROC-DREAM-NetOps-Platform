@@ -424,3 +424,17 @@ def test_telemetry_api_ports_endpoint(session: Session) -> None:
     assert data_srv["resolved_ports"]["ssh"] == 22
     assert data_srv["resolved_ports"]["snmp"] == 161
     assert data_srv["resolved_ports"]["exporter"] == 9100
+
+
+def test_huawei_bgp_peer_prefrcv_not_remote_as() -> None:
+    """Регрессия: PrefRcv берётся из последней колонки, а не из номера AS."""
+    from netops.network.table_parsers import parse_bgp_table
+
+    out = (
+        "  Peer            V          AS  MsgRcvd  MsgSent  OutQ  Up/Down       State  PrefRcv\n"
+        "  10.10.0.0       4       65000       38       43     0 00:28:48 Established        2\n"
+        "  10.10.0.4       4       65000       40       42     0 00:28:48 Active\n"
+    )
+    res = parse_bgp_table(Platform.HUAWEI_VRP, out)
+    assert res["10.10.0.0"].prefixes_accepted == 2
+    assert res["10.10.0.4"].prefixes_accepted == 0
