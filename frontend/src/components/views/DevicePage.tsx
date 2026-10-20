@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type {
+  CollectorDevicePlan,
   DeviceDetail,
   DeviceHardwareSpecs,
   Forecast,
@@ -161,6 +162,12 @@ export const DevicePage: React.FC<Props> = ({
   const [copilotInput, setCopilotInput] = useState('');
   const [copilotLoading, setCopilotLoading] = useState(false);
 
+  // Live Collector & Telemetry Summary for Overview
+  const [collectorPlan, setCollectorPlan] = useState<CollectorDevicePlan | null>(null);
+  const [liveMetrics, setLiveMetrics] = useState<
+    Record<string, { current: number; max: number; unit: string; provider: string }>
+  >({});
+
   const fetchDevice = useCallback(() => {
     api.getDevice(deviceId)
       .then((d) => setDevice(d))
@@ -171,7 +178,34 @@ export const DevicePage: React.FC<Props> = ({
     let active = true;
     api.getDevice(deviceId)
       .then((d) => {
-        if (active) setDevice(d);
+        if (!active) return;
+        setDevice(d);
+        api.getCollectorPlan()
+          .then((plan) => {
+            if (active && plan.devices?.[d.hostname]) {
+              setCollectorPlan(plan.devices[d.hostname]);
+            }
+          })
+          .catch(() => {});
+        Promise.all(
+          METRICS.map((m) =>
+            api.getForecast(deviceId, m.id, 12)
+              .then((f) => [m.id, f] as const)
+              .catch(() => null)
+          )
+        ).then((results) => {
+          if (!active) return;
+          const next: Record<string, { current: number; max: number; unit: string; provider: string }> = {};
+          for (const item of results) {
+            if (!item) continue;
+            const [id, f] = item;
+            const hist = f.history || [];
+            const current = hist.length > 0 ? hist[hist.length - 1] : 0;
+            const max = hist.length > 0 ? Math.max(...hist) : current;
+            next[id] = { current, max, unit: f.unit || '%', provider: f.provider || 'prometheus' };
+          }
+          setLiveMetrics(next);
+        });
       })
       .catch((e) => {
         if (active) setError(e.message);
@@ -522,14 +556,21 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
           {/* Specs Bento Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
-                <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                <span>{isServer ? 'Вычислительные ядра' : 'Control Plane / ASIC'}</span>
+              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <Cpu className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>{isServer ? 'Вычислительные ядра' : 'Control Plane / ASIC'}</span>
+                </div>
+                {liveMetrics.cpu_pct !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 font-mono text-[10px] font-semibold">
+                    CPU {liveMetrics.cpu_pct.current.toFixed(1)}%
+                  </span>
+                )}
               </div>
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.cpu_cores ? `${specs.cpu_cores} vCPU` : '—'}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">
+              <div className="text-[11px] text-zinc-500 mt-0.5 truncate" title={specs?.os_version || ''}>
                 {specs?.os_version ||
                   (device.status === 'UNREACHABLE'
                     ? 'Нет данных (стенд выключен)'
@@ -538,16 +579,25 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
-                <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Оперативная память</span>
+              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
+                  <span>Оперативная память</span>
+                </div>
+                {liveMetrics.memory_pct !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-300 font-mono text-[10px] font-semibold">
+                    RAM {liveMetrics.memory_pct.current.toFixed(1)}%
+                  </span>
+                )}
               </div>
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.ram_gb ? `${specs.ram_gb} GB RAM` : '—'}
               </div>
               <div className="text-[11px] text-zinc-500 mt-0.5">
                 {specs?.ram_gb
-                  ? 'RAM (по SSH опросу)'
+                  ? liveMetrics.memory_pct
+                    ? `Занято ~${((Number(specs.ram_gb) * liveMetrics.memory_pct.current) / 100).toFixed(2)} GB (SSH CLI)`
+                    : 'RAM (по SSH опросу)'
                   : locale === 'en'
                   ? 'No telemetry data'
                   : 'Нет данных (телеметрия не снята)'}
@@ -555,22 +605,29 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
-                <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                <span>{isServer ? 'Накопитель' : 'BGP Автономная система (Git SoT)'}</span>
+              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>{isServer ? 'Накопитель' : 'BGP Автономная система (Git SoT)'}</span>
+                </div>
+                {!isServer && device.intent?.bgp?.evpn && (
+                  <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-mono text-[10px] font-semibold">
+                    EVPN
+                  </span>
+                )}
               </div>
               <div className="text-lg font-bold text-white font-mono">
-                {specs?.disk_gb
-                  ? `${specs.disk_gb} GB`
-                  : device.intent?.bgp?.asn
+                {!isServer && device.intent?.bgp?.asn
                   ? `AS ${device.intent.bgp.asn}`
+                  : specs?.disk_gb
+                  ? `${specs.disk_gb} GB`
                   : '—'}
               </div>
               <div className="text-[11px] text-zinc-500 mt-0.5">
-                {specs?.disk_gb
+                {!isServer && device.intent?.bgp?.neighbors
+                  ? `${device.intent.bgp.neighbors.length} eBGP пиров${specs?.disk_gb ? ` • Flash ${specs.disk_gb} GB` : ' (из YAML Intent)'}`
+                  : specs?.disk_gb
                   ? 'Disk'
-                  : device.intent?.bgp?.neighbors
-                  ? `${device.intent.bgp.neighbors.length} eBGP пиров (из YAML Intent)`
                   : locale === 'en'
                   ? 'No data'
                   : 'Нет данных'}
@@ -578,14 +635,93 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
             </div>
 
             <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08]">
-              <div className="flex items-center gap-1.5 text-zinc-400 text-xs mb-1">
-                <Radio className="w-3.5 h-3.5 text-amber-400" />
-                <span>Сетевые порты (Git SoT)</span>
+              <div className="flex items-center justify-between gap-1.5 text-zinc-400 text-xs mb-1">
+                <div className="flex items-center gap-1.5">
+                  <Radio className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Сетевые порты и трафик</span>
+                </div>
+                {liveMetrics.uplink_util_pct !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-mono text-[10px] font-semibold">
+                    Uplink {liveMetrics.uplink_util_pct.current.toFixed(1)}%
+                  </span>
+                )}
               </div>
               <div className="text-lg font-bold text-white font-mono">
                 {specs?.interfaces ? `${specs.interfaces.length}` : `${device.intent?.interfaces.length ?? 0}`}
               </div>
-              <div className="text-[11px] text-zinc-500 mt-0.5">{locale === 'en' ? 'Per Git intent' : 'По декларативному Git-intent'}</div>
+              <div className="text-[11px] text-zinc-500 mt-0.5">
+                {liveMetrics.load_1m !== undefined
+                  ? `Load 1m: ${liveMetrics.load_1m.current.toFixed(2)} • Git SoT`
+                  : locale === 'en'
+                  ? 'Per Git intent'
+                  : 'По декларативному Git-intent'}
+              </div>
+            </div>
+          </div>
+
+          {/* Live Telemetry & Protocol Pipeline */}
+          <div className="p-4 rounded-xl bg-[#0c0e14] border border-white/[0.08] space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-xs font-semibold text-white uppercase tracking-wider">
+                  Live-телеметрия и конвейер сбора метрик
+                </span>
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                  Протокол: {(collectorPlan?.protocol || 'ssh_cli').toUpperCase()} ({device.management_ip}:{collectorPlan?.port ?? device.management_port})
+                </span>
+                <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-white/[0.04] text-zinc-400">
+                  Каскад: {isServer ? 'Node Exporter:9100 → SNMP:161 → SSH_CLI' : 'gNMI:6030 → SNMP:161 → SSH_CLI'}
+                </span>
+              </div>
+              <button
+                onClick={() => setTab('Прогноз и What-If')}
+                className="text-xs text-cyan-400 hover:text-cyan-300 font-medium flex items-center gap-1 cursor-pointer"
+              >
+                <span>Графики Хольта-Уинтерса и What-If</span>
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1">
+              {METRICS.map((m) => {
+                const item = liveMetrics[m.id];
+                const val = item ? item.current : null;
+                const pct =
+                  val === null
+                    ? 0
+                    : m.id === 'load_1m'
+                    ? Math.min(100, val * 25)
+                    : Math.min(100, Math.max(0, val));
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setForecastMetric(m.id);
+                      setTab('Прогноз и What-If');
+                    }}
+                    className="p-2.5 rounded-lg bg-white/[0.02] hover:bg-white/[0.05] border border-white/[0.06] text-left transition-colors cursor-pointer"
+                  >
+                    <div className="flex items-center justify-between text-[11px] text-zinc-400 mb-1">
+                      <span>{m.label}</span>
+                      <span className="font-mono font-bold text-white">
+                        {val !== null ? `${val.toFixed(1)}${m.id === 'load_1m' ? '' : '%'}` : '…'}
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 rounded-full bg-white/[0.06] overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${
+                          pct > 80 ? 'bg-rose-500' : pct > 60 ? 'bg-amber-400' : 'bg-cyan-400'
+                        }`}
+                        style={{ width: `${Math.max(4, pct)}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-zinc-500 mt-1 font-mono">
+                      {item ? `Пик: ${item.max.toFixed(1)}${m.id === 'load_1m' ? '' : '%'} • ${item.provider}` : 'Загрузка серии…'}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -607,6 +743,11 @@ ${(device.intent?.interfaces || []).map((i) => `  - \`${i.name}\`: IP ${i.ipv4_a
                 )}
               </Field>
               <Field label="Профиль доступа">{device.auth_profile}</Field>
+              <Field label="Протокол телеметрии">
+                <span className="text-emerald-400 font-semibold">
+                  {collectorPlan?.protocol ? collectorPlan.protocol.toUpperCase() : 'SSH_CLI'} (Port {collectorPlan?.port ?? device.management_port})
+                </span>
+              </Field>
               <Field label="Последняя проверка">
                 {device.last_checked_at ? new Date(device.last_checked_at).toLocaleString('ru-RU') : '—'}
               </Field>

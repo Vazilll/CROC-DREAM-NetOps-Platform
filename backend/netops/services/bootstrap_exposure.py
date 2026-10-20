@@ -196,13 +196,34 @@ def ensure_public_role_tunnels_async(settings: Any, base_web_port: int | None = 
                 ).start()
 
             bound_primary: int | None = None
-            for candidate_port in (base_web_port + int(off) for off in const("tunnel.public_port_offsets")):
+            candidate_ports = [
+                base_web_port + int(off) for off in const("tunnel.public_port_offsets")
+            ]
+            for attempt in range(2):
+                for candidate_port in candidate_ports:
+                    try:
+                        transport.request_port_forward("", candidate_port, handler=_dispatch_reverse)
+                        if bound_primary is None:
+                            bound_primary = candidate_port
+                    except Exception as exc:
+                        logger.debug("Reverse port forward %s skipped: %s", candidate_port, exc)
+                if bound_primary is not None or attempt == 1:
+                    break
+                # Stale sshd-session from a previous container restart may still hold 5174..5176
                 try:
-                    transport.request_port_forward("", candidate_port, handler=_dispatch_reverse)
-                    if bound_primary is None:
-                        bound_primary = candidate_port
-                except Exception as exc:
-                    logger.debug("Reverse port forward %s skipped: %s", candidate_port, exc)
+                    import time
+
+                    ports_regex = "|".join(f":{p}\\b" for p in candidate_ports)
+                    kill_cmd = (
+                        f"pids=$(ss -tlnp 2>/dev/null | grep -E '{ports_regex}' "
+                        r"| sed -n 's/.*pid=\([0-9]*\).*/\1/p' | sort -u); "
+                        'for p in $pids; do [ "$p" != "$$" ] && kill -9 "$p" 2>/dev/null || true; done'
+                    )
+                    _, stdout, _ = ssh.exec_command(kill_cmd, timeout=3.0)
+                    stdout.read()
+                    time.sleep(0.5)
+                except Exception:
+                    pass
 
             if bound_primary is not None:
                 _ACTIVE_PUBLIC_PORT = bound_primary

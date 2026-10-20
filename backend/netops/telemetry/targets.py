@@ -69,7 +69,7 @@ def _make_ssh_trigger_sender(device: Device, toolchain: Toolchain) -> Callable[[
         target = toolchain.target_for(InventoryDevice.model_validate(device))
 
         def _send(cmd: str) -> str:
-            with _ParamikoConnAdapter(target, timeout_ops=4.0) as conn:
+            with _ParamikoConnAdapter(target, timeout=6) as conn:
                 return str(conn.send_command(cmd).result or "")
 
         return _send
