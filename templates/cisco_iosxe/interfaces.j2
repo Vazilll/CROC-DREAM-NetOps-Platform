@@ -4,7 +4,6 @@
 interface Loopback0
  description Router-ID
  ip address {{ intent.bgp.router_id }} 255.255.255.255
- ip ospf 1 area 0
 {% endif %}
 {% for iface in intent.interfaces %}
 interface {{ iface.name }}
