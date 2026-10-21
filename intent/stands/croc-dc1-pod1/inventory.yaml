@@ -55,3 +55,11 @@ devices:
   auth_profile: spine3_auth
   fabric_id: croc-dc1-pod1
   site: croc-dc1-pod1
+- hostname: srv-rocky-1.croc.lab
+  management_ip: 5.228.243.54
+  management_port: 221
+  platform: linux_server
+  role: server
+  auth_profile: srvrocky1_auth
+  fabric_id: croc-dc1-pod1
+  site: croc-dc1-pod1

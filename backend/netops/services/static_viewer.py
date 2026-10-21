@@ -93,15 +93,18 @@ class StaticViewerService:
             token = state_data.get("token") if state_data else None
             enabled = bool(state_data.get("enabled", True)) if state_data else True
 
-            # If user exists and matches stored token hash, reuse it
+            # If user exists and matches stored token hash, reuse it (always eternal: expires_at=None)
             if user is not None and token and user.token_sha256 == hash_token(token):
+                if user.expires_at is not None:
+                    user.expires_at = None
+                    session.commit()
                 return cls._format_viewer_response(
                     user, token, base_url, settings, utcnow().isoformat()
                 )
 
-            # Otherwise initialize a brand new token and user record
-            raw_tok = generate_token()
-            token = f"crk_viewer_{raw_tok.removeprefix('crk_')}"
+            # Use the deterministic eternal token from constants.yaml so QR codes never break across DB resets
+            eternal_tok = str(const("console.static_viewer_token")).strip()
+            token = eternal_tok if eternal_tok.startswith("crk_viewer_") else f"crk_viewer_{eternal_tok}"
             token_hash = hash_token(token)
             now = utcnow()
 

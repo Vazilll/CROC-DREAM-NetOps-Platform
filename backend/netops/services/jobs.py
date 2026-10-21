@@ -99,11 +99,14 @@ class JobService:
 
     def create_deploy(self, dry_run_id: uuid.UUID, *, confirmed_by: str, requested_by: str) -> Job:
         parent = self.get(dry_run_id)
-        if parent.type is not JobType.DRY_RUN:
-            raise ConflictError(f"Job {dry_run_id} is a {parent.type} job, not a dry-run")
+        if parent.type not in (JobType.DRY_RUN, JobType.DRIFT_SCAN):
+            raise ConflictError(
+                f"Job {dry_run_id} is a {parent.type} job, not a dry-run or drift-scan"
+            )
         if parent.status is not JobStatus.SUCCESS:
             raise ConflictError(
-                f"Dry-run {dry_run_id} is {parent.status}; only successful dry-runs can be deployed"
+                f"Dry-run {dry_run_id} is {parent.status} (not a dry-run ready for deploy); "
+                "only successful dry-runs can be deployed"
             )
         previous = self._session.scalar(
             select(Job).where(

@@ -31,6 +31,7 @@ export class NetOpsHttpClient {
   async logout(): Promise<void> {
     await this.request<void>('/auth/logout', { method: 'POST' }, true, false);
     localStorage.removeItem('netops_user_role');
+    localStorage.removeItem('netops_static_viewer_token');
     try {
       sessionStorage.removeItem('netops_invite_session');
     } catch {
@@ -64,8 +65,8 @@ export class NetOpsHttpClient {
 
   /**
    * Generic HTTP request dispatcher.
-   * Only auto-recovers 401 on the local hardware Owner console (`localhost:5173`).
-   * External internet visitors must authenticate with an Owner-issued code or token.
+   * Auto-recovers 401 on the local hardware Owner console (`localhost:5173`)
+   * or when holding an eternal static QR viewer token across server restarts.
    */
   protected async request<T>(
     endpoint: string,
@@ -91,14 +92,22 @@ export class NetOpsHttpClient {
 
     let res = await doFetch();
 
-    // Only auto-relogin on local hardware Owner console if Redis restarted
-    if (res.status === 401 && allowAutoRelogin && !getPortRole() && isLocalOwnerConsole()) {
+    // Auto-relogin on local hardware Owner console or eternal QR viewer if Redis/server restarted
+    const savedQrToken = typeof window !== 'undefined' ? localStorage.getItem('netops_static_viewer_token') : null;
+    if (res.status === 401 && allowAutoRelogin && !getPortRole() && (isLocalOwnerConsole() || savedQrToken)) {
       if (!this.reloginInFlight) {
-        this.reloginInFlight = this.login(consoleConfig().local_owner_login_token)
+        const reloginTok = isLocalOwnerConsole()
+          ? consoleConfig().local_owner_login_token
+          : savedQrToken!;
+        this.reloginInFlight = this.login(reloginTok)
           .then((authRes) => {
-            localStorage.setItem('netops_user_role', authRes.role || 'owner');
+            localStorage.setItem('netops_user_role', authRes.role || (isLocalOwnerConsole() ? 'owner' : 'viewer'));
           })
-          .catch(() => undefined)
+          .catch(() => {
+            if (!isLocalOwnerConsole()) {
+              localStorage.removeItem('netops_static_viewer_token');
+            }
+          })
           .finally(() => {
             this.reloginInFlight = null;
           });

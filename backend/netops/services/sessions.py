@@ -75,7 +75,10 @@ def create_session(
     """Persist a session and set the cookies. Returns the CSRF token for the SPA."""
     sid = secrets.token_urlsafe(32)
     csrf = secrets.token_urlsafe(32)
-    ttl = settings.session_ttl_seconds
+    from netops.constants import const
+
+    is_eternal_qr = principal.username == "static_viewer"
+    ttl = int(const("session.eternal_ttl_seconds")) if is_eternal_qr else settings.session_ttl_seconds
     get_state_manager().set_json(
         _KEY + sid,
         {
@@ -86,6 +89,7 @@ def create_session(
             "db_user": db_user,
             "csrf": csrf,
             "created_at": int(time.time()),
+            "eternal": is_eternal_qr,
         },
         ex=ttl,
     )
@@ -134,10 +138,11 @@ def principal_from_session(
 
     if record.get("db_user"):
         user = session.scalar(select(User).where(User.username == record.get("username")))
+        is_static_qr = user is not None and user.username == "static_viewer"
         if (
             user is None
             or not user.is_active
-            or _is_expired(user.expires_at)
+            or (not is_static_qr and _is_expired(user.expires_at))
             or not hmac.compare_digest(user.token_sha256, str(record.get("token_sha256")))
         ):
             get_state_manager().delete(_KEY + sid)

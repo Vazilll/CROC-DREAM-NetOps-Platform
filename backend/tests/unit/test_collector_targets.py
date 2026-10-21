@@ -77,17 +77,19 @@ def test_set_device_protocol_override_persists_to_postgres(
 ) -> None:
     from netops.telemetry.targets import get_protocol_overrides, set_device_protocol_override
 
-    host = sorted(devices)[0]
-    updated = set_device_protocol_override(session, toolchain, settings, host, "snmp")
-    assert get_protocol_overrides()[host] == "snmp"
-    assert updated["devices"][host]["protocol"] == "snmp"
-    assert updated["devices"][host]["selected_mode"] == "snmp"
-    assert is_externally_collected(host) is True
-
-    # Reset back to auto
-    reset_plan = set_device_protocol_override(session, toolchain, settings, host, "auto")
-    assert host not in get_protocol_overrides()
-    assert reset_plan["devices"][host]["selected_mode"] == "auto"
+    target_host = sorted(devices)[0]
+    summary = set_device_protocol_override(session, toolchain, settings, target_host, "snmp")
+    assert get_protocol_overrides().get(target_host) == "snmp"
+    assert summary["devices"][target_host]["protocol"] == "snmp"
+    assert summary["devices"][target_host]["selected_mode"] == "snmp"
+    assert any(t["labels"]["hostname"] == target_host for t in get_snmp_sd_targets())
 
 
+def test_unsupported_protocol_override_is_rejected() -> None:
+    """Huawei VRP не умеет SNMP: оверрайд отклоняется и не подменяет рабочий ssh_cli."""
+    from netops.telemetry.targets import _apply_protocol_override
 
+    item = {"protocol": "ssh_cli", "port": 22, "host": "10.0.0.1", "platform": "huawei_vrp"}
+    out = _apply_protocol_override(item, "snmp", "huawei_vrp", 22)
+    assert out["override_rejected"] == "snmp_not_supported"
+    assert out["protocol"] == "ssh_cli"

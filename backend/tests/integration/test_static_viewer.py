@@ -302,3 +302,49 @@ def test_static_viewer_account_protected_from_crud(
     # Admin attempts POST /users/{id}/unbind
     unbind_res = client.post(f"/api/v1/users/{sv_id}/unbind", headers=ADMIN_HEADERS)
     assert unbind_res.status_code == 409, unbind_res.text
+
+
+def test_static_viewer_strictly_eternal_and_cold_start(
+    client: TestClient, session_factory: Session
+) -> None:
+    from datetime import timedelta
+
+    from netops.constants import const
+    from netops.db import utcnow
+    from netops.models import SystemState
+
+    eternal_token = str(const("console.static_viewer_token"))
+    eternal_ttl = int(const("session.eternal_ttl_seconds"))
+
+    # Simulate cold start / DB reset: remove static_viewer from User and SystemState
+    with session_factory() as sess:
+        existing_u = sess.scalar(select(User).where(User.username == "static_viewer"))
+        if existing_u is not None:
+            sess.delete(existing_u)
+        existing_st = sess.get(SystemState, "static_viewer")
+        if existing_st is not None:
+            sess.delete(existing_st)
+        sess.commit()
+
+    # Scanning QR code on cold start BEFORE any admin opens ShareModal must auto-initialize and succeed
+    viewer = TestClient(client.app)
+    cold_login = viewer.post("/api/v1/auth/login", json={"token": eternal_token})
+    assert cold_login.status_code == 200, cold_login.text
+    assert cold_login.json()["username"] == "static_viewer"
+    set_cookie_hdr = cold_login.headers.get("set-cookie", "")
+    assert f"Max-Age={eternal_ttl}" in set_cookie_hdr
+
+    # Even if expires_at is corrupted in DB to the past, session and login never expire
+    with session_factory() as sess:
+        u = sess.scalar(select(User).where(User.username == "static_viewer"))
+        assert u is not None
+        u.expires_at = utcnow() - timedelta(days=365)
+        sess.commit()
+
+    assert viewer.get("/api/v1/auth/me").status_code == 200
+    relogin = viewer.post("/api/v1/auth/login", json={"token": eternal_token})
+    assert relogin.status_code == 200
+    with session_factory() as sess:
+        u = sess.scalar(select(User).where(User.username == "static_viewer"))
+        assert u is not None and u.expires_at is None
+

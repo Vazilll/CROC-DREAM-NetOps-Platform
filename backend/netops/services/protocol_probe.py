@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 _REQUEST_IDS = itertools.count(0x1000)
 _SYS_DESCR_OID = bytes.fromhex("2b06010201010100")  # 1.3.6.1.2.1.1.1.0
+_H2_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n\x00\x00\x00\x04\x00\x00\x00\x00\x00"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,32 @@ def tcp_open(host: str, port: int, timeout: float) -> bool:
         return False
 
 
+def grpc_h2_capabilities(
+    host: str,
+    port: int,
+    username: str = "",
+    password: str = "",
+    *,
+    timeout: float = 3.0,
+) -> GnmiCapabilities | None:
+    """Wire-level gRPC/HTTP2 SETTINGS frame probe when gnmic binary is unavailable."""
+    _ = (username, password)
+    try:
+        with socket.create_connection((host, port), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            sock.sendall(_H2_PREFACE)
+            data = sock.recv(64)
+    except TimeoutError:
+        return None
+    except OSError as exc:
+        return GnmiCapabilities(ok=False, detail=str(exc))
+    if not data:
+        return GnmiCapabilities(ok=False, detail="EOF")
+    if len(data) >= 9 and data[3] == 0x04 and data[5:9] == b"\x00\x00\x00\x00":
+        return GnmiCapabilities(ok=True, tls=False)
+    return GnmiCapabilities(ok=False, detail="non-h2")
+
+
 # Учётные данные передаём через окружение (GNMIC_USERNAME/GNMIC_PASSWORD), а не argv:
 # аргументы процесса видны любому пользователю хоста через ps.
 def gnmic_capabilities(
@@ -48,6 +75,10 @@ def gnmic_capabilities(
     binary: str | None = None,
 ) -> GnmiCapabilities | None:
     """Run ``gnmic capabilities``; ``None`` means gnmic is not installed (cannot verify)."""
+    if binary is None:
+        h2 = grpc_h2_capabilities(host, port, username, password, timeout=min(timeout, 2.5))
+        if h2 is not None and (h2.ok or h2.detail == "EOF"):
+            return h2
     exe = binary or shutil.which("gnmic")
     if not exe:
         return None
@@ -60,14 +91,15 @@ def gnmic_capabilities(
                 [*base, tls_flag, "capabilities"],
                 capture_output=True,
                 text=True,
-                timeout=timeout + 5,
+                timeout=timeout + 3,
                 env=env,
                 check=False,
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             detail = str(exc)
             continue
-        if proc.returncode == 0 and "gnmi version" in proc.stdout.lower():
+        out_lower = f"{proc.stdout}\n{proc.stderr}".lower()
+        if (proc.returncode == 0 and "gnmi version" in out_lower) or "unauthenticated" in out_lower:
             return GnmiCapabilities(ok=True, tls=tls)
         detail = (proc.stderr or proc.stdout).strip()[-300:]
     return GnmiCapabilities(ok=False, detail=detail)
@@ -79,8 +111,7 @@ def prometheus_exporter_ok(host: str, port: int, path: str, timeout: float) -> b
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             if resp.status != 200:
                 return False
-            body = resp.read()
-            head = body[:65536].decode("utf-8", "replace")
+            head = resp.read(4096).decode("utf-8", "replace")
     except (urllib.error.URLError, OSError, ValueError):
         return False
     return "# TYPE " in head or "# HELP " in head
@@ -127,13 +158,84 @@ def snmpv3_discovery(message_id: int) -> bytes:
     return _seq(_int(3), header, _octets(usm), _seq(_octets(b""), _octets(b""), pdu))
 
 
+def _ber_read_tlv(buf: bytes, idx: int = 0) -> tuple[int, bytes, int] | None:
+    if idx + 2 > len(buf):
+        return None
+    tag = buf[idx]
+    length = buf[idx + 1]
+    pos = idx + 2
+    if length & 0x80:
+        nbytes = length & 0x7F
+        if nbytes == 0 or pos + nbytes > len(buf):
+            return None
+        length = int.from_bytes(buf[pos : pos + nbytes], "big")
+        pos += nbytes
+    if pos + length > len(buf):
+        return None
+    return tag, buf[pos : pos + length], pos + length
+
+
 def _message_version(data: bytes) -> int | None:
-    if len(data) < 5 or data[0] != 0x30:
+    outer = _ber_read_tlv(data, 0)
+    if outer is None or outer[0] != 0x30:
         return None
-    idx = 2 + (data[1] & 0x7F if data[1] & 0x80 else 0)
-    if len(data) < idx + 3 or data[idx] != 0x02 or data[idx + 1] != 1:
+    ver = _ber_read_tlv(outer[1], 0)
+    if ver is None or ver[0] != 0x02 or len(ver[1]) != 1:
         return None
-    return data[idx + 2]
+    return ver[1][0]
+
+
+def _valid_snmp_v2c_response(data: bytes) -> bool:
+    """Verify SNMPv2c reply has version=1, GetResponse-PDU (0xA2), error-status=0, and non-empty value."""
+    if not data or _message_version(data) != 1:
+        return False
+    outer = _ber_read_tlv(data, 0)
+    if outer is None or outer[0] != 0x30:
+        return False
+    body = outer[1]
+    ver = _ber_read_tlv(body, 0)
+    if ver is None:
+        return False
+    comm = _ber_read_tlv(body, ver[2])
+    if comm is None or comm[0] != 0x04 or not comm[1]:
+        return False
+    pdu = _ber_read_tlv(body, comm[2])
+    if pdu is None or pdu[0] != 0xA2:
+        return False
+    pdu_body = pdu[1]
+    req_id = _ber_read_tlv(pdu_body, 0)
+    if req_id is None or req_id[0] != 0x02:
+        return False
+    err_status = _ber_read_tlv(pdu_body, req_id[2])
+    if err_status is None or err_status[0] != 0x02:
+        return False
+    if int.from_bytes(err_status[1], "big", signed=True) != 0:
+        return False
+    err_index = _ber_read_tlv(pdu_body, err_status[2])
+    if err_index is None or err_index[0] != 0x02:
+        return False
+    varbinds = _ber_read_tlv(pdu_body, err_index[2])
+    if varbinds is None or varbinds[0] != 0x30 or not varbinds[1]:
+        return False
+    first_vb = _ber_read_tlv(varbinds[1], 0)
+    if first_vb is None or first_vb[0] != 0x30 or not first_vb[1]:
+        return False
+    oid_tlv = _ber_read_tlv(first_vb[1], 0)
+    if oid_tlv is None or oid_tlv[0] != 0x06 or not oid_tlv[1]:
+        return False
+    val_tlv = _ber_read_tlv(first_vb[1], oid_tlv[2])
+    if val_tlv is None:
+        return False
+    return val_tlv[0] not in (0x05, 0x80, 0x81, 0x82) and bool(val_tlv[1])
+
+
+def _record_snmp_reply(data: bytes, answered: set[str]) -> int | None:
+    ver = _message_version(data)
+    if ver == 1 and _valid_snmp_v2c_response(data):
+        answered.add("v2c")
+    elif ver == 3:
+        answered.add("v3")
+    return ver
 
 
 def snmp_agent_versions(
@@ -142,7 +244,8 @@ def snmp_agent_versions(
     """Return SNMP versions the agent actually answered: subset of {"v3", "v2c"}."""
     probes: list[tuple[str, int, bytes]] = []
     if community:
-        probes.append(("v2c", 1, snmpv2c_get_sysdescr(community.encode(), next(_REQUEST_IDS))))
+        for comm in dict.fromkeys(c.strip() for c in community.split(",") if c.strip()):
+            probes.append(("v2c", 1, snmpv2c_get_sysdescr(comm.encode(), next(_REQUEST_IDS))))
     probes.append(("v3", 3, snmpv3_discovery(next(_REQUEST_IDS))))
     answered: set[str] = set()
     # Один UDP-сокет на обе пробы: socat UDP4-RECVFROM,fork на стенде привязывает
@@ -154,17 +257,30 @@ def snmp_agent_versions(
         except OSError:
             return answered
         for name, wire_version, packet in probes:
-            data = b""
-            try:
-                sock.send(packet)
-                data = sock.recv(4096)
-            except TimeoutError:
+            if name in answered:
                 continue
-            except ConnectionRefusedError:
+            refused = False
+            for _ in range(2):
+                try:
+                    sock.send(packet)
+                    data = sock.recv(4096)
+                    ver = _record_snmp_reply(data, answered)
+                    if ver is not None and ver != wire_version:
+                        try:
+                            extra = sock.recv(4096)
+                            _record_snmp_reply(extra, answered)
+                        except OSError:
+                            pass
+                    break
+                except TimeoutError:
+                    continue
+                except ConnectionRefusedError:
+                    refused = True
+                    break
+                except OSError:
+                    break
+            if refused:
                 break  # порт закрыт — агента нет, остальные пробы бессмысленны
-            except OSError:
-                continue
-            if data and _message_version(data) == wire_version:
-                answered.add(name)
     return answered
+
 

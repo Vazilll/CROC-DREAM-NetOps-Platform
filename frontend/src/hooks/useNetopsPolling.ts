@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { allConsolePorts, api, getErrorMessage, isLocalOwnerConsole } from '../api';
-import type { Device, JobSummary, UserRole } from '../api';
+import type { Device, JobSummary, StandRead, UserRole } from '../api';
 
 function areDevicesEqual(a: Device[], b: Device[]): boolean {
   if (a === b) return true;
@@ -17,6 +17,8 @@ function areDevicesEqual(a: Device[], b: Device[]): boolean {
       da.platform !== db.platform ||
       da.role !== db.role ||
       da.management_ip !== db.management_ip ||
+      da.fabric_id !== db.fabric_id ||
+      da.site !== db.site ||
       da.last_checked_at !== db.last_checked_at ||
       da.updated_at !== db.updated_at ||
       da.sparkline?.length !== db.sparkline?.length ||
@@ -47,6 +49,13 @@ function areJobsEqual(a: JobSummary[], b: JobSummary[]): boolean {
   return true;
 }
 
+function alignDevicesWithStands(list: Device[], stands: StandRead[]): Device[] {
+  if (list.length === 0 || stands.length !== 1) return list;
+  const slug = stands[0].slug;
+  if (!slug || list.some((d) => d.fabric_id === slug || d.site === slug)) return list;
+  return list.map((d) => ({ ...d, site: slug }));
+}
+
 interface UseNetopsPollingParams {
   isDedicatedRolePort: boolean;
   userRole: UserRole;
@@ -56,6 +65,8 @@ interface UseNetopsPollingParams {
   setWelcomeModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setAccessCodeModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  activeStand?: string;
+  setActiveStand?: React.Dispatch<React.SetStateAction<string>>;
 }
 
 export function useNetopsPolling({
@@ -67,8 +78,12 @@ export function useNetopsPolling({
   setWelcomeModalOpen,
   setAccessCodeModalOpen,
   showToast,
+  activeStand,
+  setActiveStand,
 }: UseNetopsPollingParams) {
   const [devices, setDevices] = useState<Device[]>([]);
+  const [stands, setStands] = useState<StandRead[]>([]);
+  const [activeStandSlug, setActiveStandSlug] = useState<string>(activeStand || 'all');
   const [jobs, setJobs] = useState<JobSummary[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [apiHealthy, setApiHealthy] = useState<boolean>(true);
@@ -76,10 +91,30 @@ export function useNetopsPolling({
   const authFailedRef = useRef<boolean>(false);
   const devicesInFlightRef = useRef<boolean>(false);
   const jobsInFlightRef = useRef<boolean>(false);
+  const standsRef = useRef<StandRead[]>([]);
 
   const clearAuthFailed = useCallback(() => {
     authFailedRef.current = false;
   }, []);
+
+  useEffect(() => {
+    if (activeStand && activeStand !== activeStandSlug) {
+      setActiveStandSlug(activeStand);
+    }
+  }, [activeStand, activeStandSlug]);
+
+  useEffect(() => {
+    if (devices.length === 0 || activeStandSlug === 'all') return;
+    const matched = devices.filter(
+      (d) => d.fabric_id === activeStandSlug || d.site === activeStandSlug
+    );
+    if (matched.length === 0) {
+      const fabrics = Array.from(new Set(devices.map((d) => d.fabric_id).filter(Boolean)));
+      const fallbackSlug = fabrics.length === 1 && fabrics[0] ? fabrics[0] : 'all';
+      setActiveStandSlug(fallbackSlug);
+      setActiveStand?.(fallbackSlug);
+    }
+  }, [devices, activeStandSlug, setActiveStand]);
 
   useEffect(() => {
     if (isDedicatedRolePort) return;
@@ -105,13 +140,49 @@ export function useNetopsPolling({
     return msg.includes('401') || msg.includes('учетные данные') || msg.includes('unauthorized');
   };
 
-  const fetchDevices = useCallback(async () => {
+  const applyDevicesAndStands = useCallback(
+    (data: Device[] | unknown, standData: StandRead[] | null) => {
+      if (Array.isArray(standData) && standData.length > 0) {
+        standsRef.current = standData;
+        setStands(standData);
+      }
+      if (Array.isArray(data)) {
+        const aligned = alignDevicesWithStands(data, standsRef.current);
+        setDevices((prev) => {
+          if (aligned.length === 0 && prev.length > 0) return prev;
+          return areDevicesEqual(prev, aligned) ? prev : aligned;
+        });
+      }
+    },
+    []
+  );
+
+  const applyJobsList = useCallback((data: JobSummary[] | unknown) => {
+    if (!Array.isArray(data)) return;
+    setJobs((prev) => {
+      if (data.length === 0 && prev.length > 0) return prev;
+      return areJobsEqual(prev, data) ? prev : data;
+    });
+    setSelectedJobId((current) => {
+      if (current && data.some((j) => j.id === current)) return current;
+      const diffJob = data.find(
+        (j) => j.type === 'DRY_RUN' || j.type === 'DRIFT_SCAN' || j.type === 'DEPLOY'
+      );
+      return diffJob?.id ?? data[0]?.id ?? current;
+    });
+  }, []);
+
+  const fetchDevices = useCallback(async (forceStands = false) => {
     if (devicesInFlightRef.current) return;
     devicesInFlightRef.current = true;
     try {
-      const data = await api.getDevices();
+      const needStands = forceStands || standsRef.current.length === 0;
+      const [data, standData] = await Promise.all([
+        api.getDevices(),
+        needStands ? api.getStands().catch(() => null) : Promise.resolve(null),
+      ]);
       authFailedRef.current = false;
-      setDevices((prev) => (areDevicesEqual(prev, data) ? prev : data));
+      applyDevicesAndStands(data, standData);
       setApiHealthy((prev) => (prev ? prev : true));
     } catch (err: unknown) {
       if (isAuthError(err)) {
@@ -123,13 +194,12 @@ export function useNetopsPolling({
           setAccessCodeModalOpen(true);
         }
       } else {
-        console.error('Failed to load devices', err);
         setApiHealthy(false);
       }
     } finally {
       devicesInFlightRef.current = false;
     }
-  }, [setWelcomeModalOpen, setAccessCodeModalOpen]);
+  }, [applyDevicesAndStands, setWelcomeModalOpen, setAccessCodeModalOpen]);
 
   const fetchJobs = useCallback(async () => {
     if (jobsInFlightRef.current) return;
@@ -137,27 +207,20 @@ export function useNetopsPolling({
     try {
       const data = await api.getJobs();
       authFailedRef.current = false;
-      setJobs((prev) => (areJobsEqual(prev, data) ? prev : data));
-      setSelectedJobId((current) => {
-        if (current && data.some((j) => j.id === current)) return current;
-        const diffJob = data.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
-        return diffJob?.id ?? data[0]?.id ?? null;
-      });
+      applyJobsList(data);
     } catch (err: unknown) {
       if (isAuthError(err)) {
         authFailedRef.current = true;
-      } else {
-        console.error('Failed to load jobs', err);
       }
     } finally {
       jobsInFlightRef.current = false;
     }
-  }, []);
+  }, [applyJobsList]);
 
   const refreshAll = useCallback(async () => {
     setLoading(true);
     try {
-      await Promise.all([fetchDevices(), fetchJobs()]);
+      await Promise.all([fetchDevices(true), fetchJobs()]);
     } finally {
       setLoading(false);
     }
@@ -199,16 +262,15 @@ export function useNetopsPolling({
           }
         }
 
-        const [devs, jbs] = await Promise.all([api.getDevices(), api.getJobs()]);
+        const [devs, jbs, standList] = await Promise.all([
+          api.getDevices(),
+          api.getJobs(),
+          api.getStands().catch(() => null),
+        ]);
         if (!active) return;
         authFailedRef.current = false;
-        setDevices((prev) => (areDevicesEqual(prev, devs) ? prev : devs));
-        setJobs((prev) => (areJobsEqual(prev, jbs) ? prev : jbs));
-        setSelectedJobId((current) => {
-          if (current && jbs.some((j) => j.id === current)) return current;
-          const diffJob = jbs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
-          return diffJob?.id ?? jbs[0]?.id ?? null;
-        });
+        applyDevicesAndStands(devs, standList);
+        applyJobsList(jbs);
         setApiHealthy(true);
       } catch (err: unknown) {
         if (!active) return;
@@ -256,13 +318,11 @@ export function useNetopsPolling({
     window.addEventListener('focus', onFocusOrVisible);
     document.addEventListener('visibilitychange', onFocusOrVisible);
 
-    // Idle: 10-15с (база 12.5с ±20% jitter против синхронных волн от 100+ клиентов);
-    // активный job: быстрый тик. Перекрытие запросов исключено in-flight guard в fetch*.
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
-      const base = hasActiveJob ? 1500 : 12500;
-      const delay = base * (0.8 + Math.random() * 0.4);
+      const base = hasActiveJob ? 1500 : 20000;
+      const delay = base * (0.85 + Math.random() * 0.3);
       timer = setTimeout(async () => {
         if (stopped) return;
         if (document.visibilityState !== 'hidden' && canPoll()) {
@@ -301,7 +361,7 @@ export function useNetopsPolling({
     async (jobId: string) => {
       try {
         const targetJob = jobs.find((j) => j.id === jobId);
-        if (targetJob && targetJob.type !== 'DRY_RUN') {
+        if (targetJob && targetJob.type !== 'DRY_RUN' && targetJob.type !== 'DRIFT_SCAN') {
           showToast('Синхронизация с эталонным конфигом (Remediation / Deploy)...', 'info');
           const diff = await api.getJobDiff(jobId);
           const changed = diff.devices.filter((d) => Boolean(d.remediation_patch?.trim()));
@@ -412,6 +472,7 @@ export function useNetopsPolling({
     async (id: number, returnToList = false) => {
       try {
         await api.deleteDevice(id);
+        setDevices((prev) => prev.filter((d) => d.id !== id));
         showToast(locale === 'en' ? 'Device deleted successfully' : 'Устройство успешно удалено', 'success');
         await Promise.all([fetchDevices(), fetchJobs()]);
         if (returnToList) {
@@ -426,6 +487,10 @@ export function useNetopsPolling({
 
   return {
     devices,
+    stands,
+    setStands,
+    activeStandSlug,
+    setActiveStandSlug,
     jobs,
     selectedJobId,
     setSelectedJobId,
@@ -444,3 +509,4 @@ export function useNetopsPolling({
     handleDeleteDevice,
   };
 }
+

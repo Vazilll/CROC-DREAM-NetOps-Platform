@@ -127,7 +127,7 @@ export const ShareStaticViewer: React.FC<ShareStaticViewerProps> = ({
           <div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold font-mono tracking-wide text-[var(--text-primary)] uppercase">
-                QR-доступ (Viewer)
+                Вечный QR-доступ (Viewer)
               </span>
               <span
                 className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
@@ -136,7 +136,7 @@ export const ShareStaticViewer: React.FC<ShareStaticViewerProps> = ({
                     : 'bg-zinc-500/10 border-zinc-500/30 text-zinc-400'
                 }`}
               >
-                {status?.enabled ? 'Live' : 'Выкл'}
+                {status?.enabled ? '∞ Вечный · Live' : 'Выкл'}
               </span>
             </div>
           </div>
@@ -189,7 +189,7 @@ export const ShareStaticViewer: React.FC<ShareStaticViewerProps> = ({
         <div className="flex-1 min-w-0 w-full space-y-2.5">
           <div>
             <label className="text-[10px] font-mono text-[var(--text-secondary)] uppercase tracking-wider block mb-1">
-              Ссылка для наблюдателей
+              Вечная ссылка для наблюдателей (без истечения срока)
             </label>
             <div className="flex items-center gap-1.5">
               <input
@@ -222,6 +222,9 @@ export const ShareStaticViewer: React.FC<ShareStaticViewerProps> = ({
               </span>
               <span className="px-1.5 py-0.5 rounded bg-[var(--bg-main)] border border-[var(--border-subtle)] text-emerald-400">
                 Устройства: Без лимита
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                Срок: ∞ Вечный
               </span>
             </div>
 

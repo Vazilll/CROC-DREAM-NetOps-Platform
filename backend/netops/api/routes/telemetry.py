@@ -8,6 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
 from pydantic import BaseModel
 
 from netops.api.deps import ContainerDep, DeviceServiceDep, Operator, SessionDep, Viewer
+from netops.errors import NetOpsError
 from netops.services.telemetry import (
     METRICS,
     STEP_SECONDS,
@@ -217,6 +218,13 @@ def trigger_telemetry_collection(
     }
 
 
+class ValidationError(NetOpsError):
+    def __init__(self, detail: str, status_code: int = 400) -> None:
+        super().__init__(detail)
+        self.detail = detail
+        self.status_code = status_code
+
+
 class CollectorOverrideRequest(BaseModel):
     protocol: str
 
@@ -248,15 +256,14 @@ def get_collector_plan(service: DeviceServiceDep, user: Viewer) -> dict[str, Any
         plat = str(getattr(d.platform, "value", d.platform))
         ports = resolve_device_ports(str(d.management_ip), management_port=d.management_port, platform=plat)
         override = overrides.get(d.hostname)
-        active_proto = override if (override and override != "auto") else "ssh_cli"
-        devices_map[d.hostname] = {
-            "protocol": active_proto,
+        base_entry: dict[str, Any] = {
+            "protocol": "ssh_cli",
             "selected_mode": override or "auto",
-            "port": ports.get(active_proto if active_proto != "prometheus_exporter" else "exporter", d.management_port),
+            "port": ports.get("ssh", d.management_port),
             "host": str(d.management_ip),
             "platform": plat,
             "fabric_id": d.fabric_id or "default",
-            "verified_by": f"manual_override:{override}" if override else "ssh_cli_profile",
+            "verified_by": "ssh_cli_profile",
             "supported_protocols": {
                 "gnmi": {"supported": False, "port": ports.get("gnmi", 6030), "verified_by": None},
                 "snmp": {"supported": False, "port": ports.get("snmp", 161), "verified_by": None},
@@ -264,6 +271,9 @@ def get_collector_plan(service: DeviceServiceDep, user: Viewer) -> dict[str, Any
                 "ssh_cli": {"supported": True, "port": ports.get("ssh", d.management_port), "verified_by": "ssh_cli_profile"},
             },
         }
+        devices_map[d.hostname] = targets._apply_protocol_override(
+            base_entry, override, plat, d.management_port
+        )
     return {"refreshed_at": None, "protocols": {}, "devices": devices_map, "overrides": overrides}
 
 
@@ -279,14 +289,26 @@ def set_collector_protocol(
     _: Operator,
 ) -> dict[str, Any]:
     allowed = {"auto", "gnmi", "snmp", "prometheus_exporter", "node_exporter", "ssh_cli"}
-    proto = body.protocol.strip().lower()
-    if proto not in allowed:
+    raw_proto = body.protocol.strip().lower()
+    if raw_proto not in allowed:
         raise HTTPException(
             status_code=400,
             detail=f"Unsupported protocol '{body.protocol}'. Allowed: {sorted(allowed)}",
         )
+    proto = "prometheus_exporter" if raw_proto == "node_exporter" else raw_proto
+    toolchain = build_toolchain(container.settings)
+    if proto not in ("auto", "ssh_cli"):
+        matrix = targets.build_collector_matrix(session, toolchain, container.settings)
+        dev_entry = (matrix.get("devices") or {}).get(hostname) or matrix.get(hostname) or {}
+        supported = dev_entry.get("supported_protocols") or {}
+        spec = supported.get(proto) if isinstance(supported, dict) else None
+        if not isinstance(spec, dict) or not spec.get("supported"):
+            targets.clear_device_protocol_override(hostname)
+            raise ValidationError(
+                f"Протокол '{proto}' не поддерживается на устройстве {hostname}"
+            )
     return targets.set_device_protocol_override(
-        session, build_toolchain(container.settings), container.settings, hostname, proto
+        session, toolchain, container.settings, hostname, proto
     )
 
 

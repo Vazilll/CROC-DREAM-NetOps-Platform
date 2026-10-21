@@ -7,8 +7,8 @@ import type {
   DeviceHardwareSpecs,
 } from '../../../api';
 import { Panel, downloadMarkdown } from '../../layout/ui';
-import { GrafanaTelemetryChart } from '../../charts/GrafanaTelemetryChart';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../../../constants';
+import { GrafanaTelemetryChart } from '../../charts/GrafanaTelemetryChart';
 
 export function exportDevicePassportMarkdown(
   device: DeviceDetail,
@@ -210,7 +210,11 @@ export const DeviceOverviewSection: React.FC<DeviceOverviewSectionProps> = ({
         <Stat icon={<Radio className="w-4 h-4" />} label="Ports" value={String(specs?.interfaces ? specs.interfaces.length : device.intent?.interfaces.length ?? 0)} />
       </div>
 
-      <GrafanaTelemetryChart mode="device" device={device} points={24} />
+      <GrafanaTelemetryChart
+        hostname={device.hostname}
+        devices={[device]}
+        compact
+      />
 
       <div className="grid md:grid-cols-2 gap-4">
         <Panel title="Доступ">

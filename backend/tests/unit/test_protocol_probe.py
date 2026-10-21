@@ -83,9 +83,26 @@ def snmp_agent(answer_versions: set[int], community: bytes = b"lab-ro") -> Itera
             version = protocol_probe._message_version(data)
             if version not in answer_versions:
                 continue
-            if version == 1 and community not in data:
-                continue  # чужое community — настоящий агент молчит
-            sock.sendto(data, addr)  # эхо сохраняет версию и структуру сообщения
+            if version == 1:
+                if community not in data:
+                    continue  # чужое community — настоящий агент молчит
+                varbind = protocol_probe._seq(
+                    protocol_probe._tlv(0x06, protocol_probe._SYS_DESCR_OID),
+                    protocol_probe._octets(b"Linux TestSwitch"),
+                )
+                pdu = protocol_probe._tlv(
+                    0xA2,
+                    protocol_probe._int(1)
+                    + protocol_probe._int(0)
+                    + protocol_probe._int(0)
+                    + protocol_probe._seq(varbind),
+                )
+                reply = protocol_probe._seq(
+                    protocol_probe._int(1), protocol_probe._octets(community), pdu
+                )
+                sock.sendto(reply, addr)
+            else:
+                sock.sendto(data, addr)  # эхо сохраняет версию и структуру сообщения
 
     thread = threading.Thread(target=serve, daemon=True)
     thread.start()

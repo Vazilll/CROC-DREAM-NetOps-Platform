@@ -95,7 +95,7 @@ export const ShareUsersTable: React.FC<ShareUsersTableProps> = ({
                   <select
                     aria-label={`Роль ${u.username}`}
                     value={u.role}
-                    disabled={String(u.role) === 'owner' || u.username === 'owner'}
+                    disabled={String(u.role) === 'owner' || u.username === 'owner' || u.username === 'static_viewer'}
                     onChange={(e) =>
                       u.id !== null &&
                       void runUserAction(() =>
@@ -119,6 +119,7 @@ export const ShareUsersTable: React.FC<ShareUsersTableProps> = ({
                   <select
                     aria-label={`Система ${u.username}`}
                     value={u.allowed_system || ''}
+                    disabled={u.username === 'owner' || u.username === 'static_viewer'}
                     onChange={(e) =>
                       u.id !== null &&
                       void runUserAction(() =>
@@ -141,6 +142,7 @@ export const ShareUsersTable: React.FC<ShareUsersTableProps> = ({
                   <select
                     aria-label={`TTL ${u.username}`}
                     value=""
+                    disabled={u.username === 'owner' || u.username === 'static_viewer'}
                     onChange={(e) =>
                       u.id !== null &&
                       e.target.value !== '' &&
@@ -154,7 +156,7 @@ export const ShareUsersTable: React.FC<ShareUsersTableProps> = ({
                     }
                     className={`w-[84px] shrink-0 px-1.5 h-6 text-[10px] cursor-pointer ${ctrlClass}`}
                   >
-                    <option value="">{expiryInfo.label}</option>
+                    <option value="">{u.username === 'static_viewer' ? '∞ Вечный' : expiryInfo.label}</option>
                     {TTL_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.label}

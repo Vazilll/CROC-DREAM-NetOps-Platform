@@ -3,17 +3,21 @@ import { Editor } from '@monaco-editor/react';
 import { Save, RotateCcw, AlertTriangle, CheckCircle2, Plus, GitBranch, RefreshCw } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type { IntentSaveResult } from '../../api';
+import type { Locale } from '../../i18n';
 import type { AppTheme } from '../layout/Header';
+import { useMonacoTheme } from './DiffViewerFallbacks';
 
 interface Props {
   deviceId: number;
   canEdit: boolean;
   theme?: AppTheme;
+  locale?: Locale;
 }
 
-const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: string }[] = [
+const SNIPPETS: { labelRu: string; labelEn: string; section: 'interfaces' | 'bgp' | 'acls'; block: string }[] = [
   {
-    label: '+ L3 Интерфейс',
+    labelRu: 'L3 Интерфейс',
+    labelEn: 'L3 Interface',
     section: 'interfaces',
     block: [
       '  - name: Ethernet3',
@@ -25,7 +29,8 @@ const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: 
     ].join('\n'),
   },
   {
-    label: '+ L2 VLAN Порт',
+    labelRu: 'L2 VLAN Порт',
+    labelEn: 'L2 VLAN Port',
     section: 'interfaces',
     block: [
       '  - name: Ethernet4',
@@ -37,7 +42,8 @@ const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: 
     ].join('\n'),
   },
   {
-    label: '+ Loopback',
+    labelRu: 'Loopback',
+    labelEn: 'Loopback',
     section: 'interfaces',
     block: [
       '  - name: Loopback1',
@@ -48,7 +54,8 @@ const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: 
     ].join('\n'),
   },
   {
-    label: '+ BGP Сосед',
+    labelRu: 'BGP Сосед',
+    labelEn: 'BGP Neighbor',
     section: 'bgp',
     block: [
       '    - peer_ip: 10.10.99.1',
@@ -59,7 +66,8 @@ const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: 
     ].join('\n'),
   },
   {
-    label: '+ ACL Фильтр',
+    labelRu: 'ACL Фильтр',
+    labelEn: 'ACL Filter',
     section: 'acls',
     block: [
       '  - name: PROTECT_CONTROL_PLANE',
@@ -80,7 +88,9 @@ const SNIPPETS: { label: string; section: 'interfaces' | 'bgp' | 'acls'; block: 
 ];
 
 /** Редактор intent-YAML устройства (Git SoT). Сохранение валидируется на бэкенде. */
-export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark' }) => {
+export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark', locale = 'ru' }) => {
+  const isEn = locale === 'en';
+  const monacoTheme = useMonacoTheme(theme);
   const [original, setOriginal] = useState('');
   const [text, setText] = useState('');
   const [editable, setEditable] = useState(true);
@@ -114,11 +124,11 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
   const writable = canEdit && editable;
 
   const liveHint = useMemo(() => {
-    if (!text.trim()) return 'Пустой YAML (нужен hostname)';
-    if (text.includes('\t')) return 'Табуляция (Tab) запрещена — используйте 2 пробела';
-    if (!/^hostname:\s*\S+/m.test(text)) return 'Укажите корневое поле hostname: <fqdn>';
+    if (!text.trim()) return isEn ? 'Empty YAML (hostname required)' : 'Пустой YAML (нужен hostname)';
+    if (text.includes('\t')) return isEn ? 'Tabs are forbidden — use 2 spaces' : 'Табуляция (Tab) запрещена — используйте 2 пробела';
+    if (!/^hostname:\s*\S+/m.test(text)) return isEn ? 'Specify root field hostname: <fqdn>' : 'Укажите корневое поле hostname: <fqdn>';
     return null;
-  }, [text]);
+  }, [text, isEn]);
 
   const insertSnippet = (snippet: (typeof SNIPPETS)[number]) => {
     setResult(null);
@@ -186,19 +196,29 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
     }
   };
 
-  if (loading) return <div className="p-8 text-zinc-500 font-mono">Загрузка intent…</div>;
+  if (loading) {
+    return (
+      <div className="p-8 text-[var(--text-muted)] font-mono">
+        {isEn ? 'Loading intent…' : 'Загрузка intent…'}
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col h-full min-h-0 gap-2">
+    <div className="flex flex-col h-full min-h-0 gap-2 p-2">
       <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-        <span className="text-zinc-400 inline-flex items-center gap-1.5">
-          <GitBranch className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+        <span className="text-[var(--text-secondary)] inline-flex items-center gap-1.5">
+          <GitBranch className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
           <span>
             {writable
               ? 'Git SoT · intent/devices/*.yaml'
               : editable
-              ? 'Только чтение (требуется Admin / Owner)'
-              : 'Только чтение (нет шаблона)'}
+                ? isEn
+                  ? 'Read-only (Admin / Owner required)'
+                  : 'Только чтение (требуется Admin / Owner)'
+                : isEn
+                  ? 'Read-only (no template)'
+                  : 'Только чтение (нет шаблона)'}
           </span>
         </span>
         {writable && (
@@ -207,10 +227,10 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
               type="button"
               onClick={handleSyncGit}
               disabled={syncing || saving}
-              className="px-2.5 py-1 rounded-lg border border-white/[0.1] hover:border-white/[0.2] text-zinc-300 disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
-              title="Синхронизировать с Git SoT и перечитать YAML"
+              className="px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 flex items-center gap-1.5 cursor-pointer transition"
+              title={isEn ? 'Sync with Git SoT and reload YAML' : 'Синхронизировать с Git SoT и перечитать YAML'}
             >
-              <RefreshCw className={`w-3.5 h-3.5 text-cyan-400 ${syncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? 'animate-spin' : ''}`} />
               <span>{syncing ? 'Sync…' : 'Git Sync'}</span>
             </button>
             <button
@@ -219,18 +239,18 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
                 setResult(null);
               }}
               disabled={!dirty || saving}
-              className="px-2.5 py-1 rounded-lg border border-white/[0.1] text-zinc-300 disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] disabled:opacity-40 flex items-center gap-1.5 cursor-pointer transition"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              Сбросить
+              <span>{isEn ? 'Reset' : 'Сбросить'}</span>
             </button>
             <button
               onClick={save}
               disabled={!dirty || saving || Boolean(liveHint)}
-              className="px-3 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 disabled:opacity-40 flex items-center gap-1.5 cursor-pointer"
+              className="px-3 py-1 rounded-lg bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 disabled:opacity-40 font-medium flex items-center gap-1.5 cursor-pointer transition"
             >
               <Save className="w-3.5 h-3.5" />
-              {saving ? 'Сохранение…' : 'Сохранить в Git SoT'}
+              <span>{saving ? (isEn ? 'Saving…' : 'Сохранение…') : isEn ? 'Save to Git SoT' : 'Сохранить в Git SoT'}</span>
             </button>
           </div>
         )}
@@ -238,42 +258,44 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
 
       {writable && (
         <div className="flex flex-wrap items-center gap-1.5 py-1">
-          <span className="text-[11px] font-mono text-zinc-500 mr-1">Шаблоны:</span>
+          <span className="text-[11px] font-mono text-[var(--text-muted)] mr-1">
+            {isEn ? 'Snippets:' : 'Шаблоны:'}
+          </span>
           {SNIPPETS.map((s) => (
             <button
-              key={s.label}
+              key={s.labelEn}
               type="button"
               onClick={() => insertSnippet(s)}
-              className="px-2 py-0.5 rounded-md bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/25 text-[11px] font-mono text-cyan-300 flex items-center gap-1 transition cursor-pointer"
+              className="px-2 py-0.5 rounded-md bg-[var(--bg-elevated)] hover:bg-[var(--bg-subtle)] border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 transition cursor-pointer"
             >
               <Plus className="w-3 h-3" />
-              <span>{s.label.replace(/^\+\s*/, '')}</span>
+              <span>{isEn ? s.labelEn : s.labelRu}</span>
             </button>
           ))}
         </div>
       )}
 
       {liveHint && (
-        <div className="text-xs text-amber-400 font-mono flex items-center gap-1.5">
+        <div className="text-xs text-amber-600 dark:text-amber-400 font-mono flex items-center gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
           <span>{liveHint}</span>
         </div>
       )}
-      {error && <div className="text-xs text-rose-400 font-mono">{error}</div>}
+      {error && <div className="text-xs text-rose-600 dark:text-rose-400 font-mono">{error}</div>}
       {result?.saved && (
-        <div className="text-xs text-emerald-400 font-mono flex items-center gap-1.5">
+        <div className="text-xs text-emerald-600 dark:text-emerald-400 font-mono flex items-center gap-1.5">
           <CheckCircle2 className="w-3.5 h-3.5" />
-          Сохранено в Git SoT · Запустите Dry-run
+          <span>{isEn ? 'Saved to Git SoT · Run Dry-run' : 'Сохранено в Git SoT · Запустите Dry-run'}</span>
         </div>
       )}
       {result && !result.saved && (
         <div className="text-xs font-mono rounded-lg border border-amber-500/30 bg-amber-500/[0.06] p-2 space-y-1">
-          <div className="flex items-center gap-1.5 text-amber-400">
+          <div className="flex items-center gap-1.5 text-amber-600 dark:text-amber-400">
             <AlertTriangle className="w-3.5 h-3.5" />
-            Ошибки валидации:
+            <span>{isEn ? 'Validation errors:' : 'Ошибки валидации:'}</span>
           </div>
           {result.issues.map((i, idx) => (
-            <div key={idx} className="text-amber-200">
+            <div key={idx} className="text-[var(--text-primary)]">
               {i.field ? `${i.field}: ` : ''}
               {i.message}
             </div>
@@ -281,10 +303,10 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
         </div>
       )}
 
-      <div className="flex-1 min-h-[300px] rounded-xl overflow-hidden border border-white/[0.04]">
+      <div className="flex-1 min-h-[300px] rounded-xl overflow-hidden border border-[var(--border-subtle)]">
         <Editor
           height="100%"
-          theme={theme === 'light' ? 'vs' : 'vs-dark'}
+          theme={monacoTheme}
           language="yaml"
           value={text}
           onChange={(v) => setText(v ?? '')}
@@ -300,4 +322,5 @@ export const IntentEditor: React.FC<Props> = ({ deviceId, canEdit, theme = 'dark
     </div>
   );
 };
+
 

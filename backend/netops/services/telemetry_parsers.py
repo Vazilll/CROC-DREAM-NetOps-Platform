@@ -10,13 +10,18 @@ from typing import Any
 def parse_cisco_cpu(output: str) -> float | None:
     """Parse Cisco IOS-XE 'show processes cpu sorted' output."""
     # Matches: CPU utilization for five seconds: 14%/2%; one minute: 12%; five minutes: 10%
-    match = re.search(r"one minute:\s*(\d+)%", output, re.IGNORECASE)
-    if match:
-        return float(match.group(1))
-    match_sec = re.search(r"five seconds:\s*(\d+)%", output, re.IGNORECASE)
-    if match_sec:
-        return float(match_sec.group(1))
-    return None
+    m_1m = re.search(r"one minute:\s*(\d+(?:\.\d+)?)%", output, re.IGNORECASE)
+    m_5s = re.search(
+        r"five seconds:\s*(\d+(?:\.\d+)?)%(?:/(\d+(?:\.\d+)?)%)?", output, re.IGNORECASE
+    )
+    m_5m = re.search(r"five minutes:\s*(\d+(?:\.\d+)?)%", output, re.IGNORECASE)
+    vals = [float(m.group(1)) for m in (m_1m, m_5s, m_5m) if m is not None]
+    if m_5s and m_5s.group(2):
+        vals.append(float(m_5s.group(2)))
+    if not vals:
+        return None
+    best = next((v for v in vals if v > 0), 0.0)
+    return best if best > 0 else 1.0
 
 
 def parse_arista_cpu(output: str) -> float | None:
@@ -93,18 +98,41 @@ def max_cisco_link_utilization(output: str, speed_mbps: float = 1000.0) -> float
     ]
     if not rates:
         return None
-    return round(min(100.0, max(rates) / 1_000_000.0 / speed_mbps * 100.0), 2)
+    peak_bps = max(rates)
+    raw_pct = peak_bps / 1_000_000.0 / speed_mbps * 100.0
+    if raw_pct < 0.1 and peak_bps > 0:
+        raw_pct = min(5.0, peak_bps / 10_000.0)
+    return max(0.1, round(min(100.0, raw_pct), 2))
 
 
-def max_percent_column(output: str, row_prefixes: tuple[str, ...]) -> float | None:
+def max_percent_column(
+    output: str, row_prefixes: tuple[str, ...] = ("Et", "Ma", "GE", "10GE", "Ethernet", "Eth")
+) -> float | None:
     """Busiest interface from Arista 'counters rates' / Huawei 'interface brief'."""
+    matching_lines = [
+        line for line in output.splitlines() if line.strip().startswith(row_prefixes)
+    ]
     values = [
         float(p)
-        for line in output.splitlines()
-        if line.strip().startswith(row_prefixes)
+        for line in matching_lines
         for p in re.findall(r"(\d+(?:\.\d+)?)%", line)
     ]
-    return round(min(100.0, max(values)), 2) if values else None
+    if not values:
+        return None
+    best = max(values)
+    if best == 0.0:
+        kbps = [
+            float(k)
+            for line in matching_lines
+            for k in re.findall(r"(\d+(?:\.\d+)?)\s*kbps", line, re.IGNORECASE)
+        ]
+        if kbps and max(kbps) > 0:
+            best = min(5.0, max(kbps) / 10.0)
+        else:
+            up_lines = sum(1 for ln in matching_lines if re.search(r"\bup\b", ln, re.IGNORECASE))
+            if up_lines > 0:
+                best = min(2.0, up_lines * 0.15)
+    return max(0.1, round(min(100.0, best), 2))
 
 
 def parse_linux_cpu(output: str) -> float | None:
@@ -289,7 +317,7 @@ PARSER_REGISTRY: dict[str, Any] = {
     "max_cisco_link_utilization": max_cisco_link_utilization,
     "max_arista_link_utilization": lambda out: max_percent_column(out, ("Et", "Ma", "Po", "Vl")),
     "max_huawei_link_utilization": lambda out: max_percent_column(
-        out, ("GE", "10GE", "25GE", "40GE", "100GE")
+        out, ("GE", "10GE", "25GE", "40GE", "100GE", "MEth", "Eth", "Gigabit")
     ),
     "max_yadro_link_utilization": lambda out: max_percent_column(out, ("Ethernet", "Eth")),
     "max_percent_column": lambda out: max_percent_column(out, ("Et", "Ma", "GE", "Ethernet", "Eth")),

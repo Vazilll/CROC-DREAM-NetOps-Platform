@@ -1,13 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Check, Copy, Bot, Play, RotateCcw, Lock, Terminal, Send } from 'lucide-react';
 import { api, getErrorMessage, type RiskExplanation } from '../../api';
+import type { Locale } from '../../i18n';
 import type { AppTheme } from '../layout/Header';
+
+export function useMonacoTheme(theme?: AppTheme): 'light' | 'vs-dark' {
+  const [domLight, setDomLight] = useState(
+    () => typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'light'
+  );
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const syncTheme = () => setDomLight(document.documentElement.getAttribute('data-theme') === 'light');
+    syncTheme();
+    const obs = new MutationObserver(syncTheme);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+    return () => obs.disconnect();
+  }, []);
+
+  return theme === 'light' || domLight ? 'light' : 'vs-dark';
+}
 
 interface PlainDiffProps {
   original: string;
   modified: string;
   isMobile: boolean;
   theme: AppTheme;
+  locale?: Locale;
   canEdit?: boolean;
   onEditModified?: (val: string) => void;
 }
@@ -16,9 +35,11 @@ export const PlainDiffFallback: React.FC<PlainDiffProps> = ({
   original,
   modified,
   isMobile,
+  locale = 'ru',
   canEdit = false,
   onEditModified,
 }) => {
+  const isEn = locale === 'en';
   const origLines = (original || '').split('\n');
   const modLines = (modified || '').split('\n');
 
@@ -27,7 +48,7 @@ export const PlainDiffFallback: React.FC<PlainDiffProps> = ({
       <div className={`grid ${isMobile ? 'grid-cols-1 divide-y' : 'grid-cols-2 divide-x'} divide-[var(--border-subtle)] h-full`}>
         <div>
           <div className="sticky top-0 px-3 py-1.5 font-bold text-[10px] uppercase tracking-wider border-b bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)]">
-            Текущая на устройстве (Running Config)
+            {isEn ? 'Running on Device (Running Config)' : 'Текущая на устройстве (Running Config)'}
           </div>
           <div className="p-2 space-y-0.5">
             {origLines.map((line, idx) => {
@@ -35,9 +56,7 @@ export const PlainDiffFallback: React.FC<PlainDiffProps> = ({
               return (
                 <div
                   key={`orig-${idx}`}
-                  className={`flex items-start px-2 py-0.5 rounded-xs ${
-                    isDiff && line ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-medium' : ''
-                  }`}
+                  className={`flex items-start px-2 py-0.5 rounded-xs ${isDiff && line ? 'bg-rose-500/15 text-rose-600 dark:text-rose-400 font-medium' : ''}`}
                 >
                   <span className="w-8 select-none text-right pr-3 opacity-40 text-[10px]">{idx + 1}</span>
                   <span className="whitespace-pre overflow-x-auto flex-1">{line || ' '}</span>
@@ -49,15 +68,19 @@ export const PlainDiffFallback: React.FC<PlainDiffProps> = ({
 
         <div className="flex flex-col h-full">
           <div className="sticky top-0 px-3 py-1.5 font-bold text-[10px] uppercase tracking-wider border-b bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] flex items-center justify-between">
-            <span>Целевая / Редактируемая (Intended Config)</span>
-            {canEdit && <span className="text-[10px] text-cyan-400 normal-case">Доступно редактирование</span>}
+            <span>{isEn ? 'Target / Editable (Intended Config)' : 'Целевая / Редактируемая (Intended Config)'}</span>
+            {canEdit && (
+              <span className="text-[10px] text-[var(--text-primary)] normal-case">
+                {isEn ? 'Direct edit active' : 'Доступно редактирование'}
+              </span>
+            )}
           </div>
           {canEdit && onEditModified ? (
             <textarea
               value={modified}
               onChange={(e) => onEditModified(e.target.value)}
               spellCheck={false}
-              className="flex-1 w-full min-h-[320px] p-3 font-mono text-xs bg-transparent text-emerald-300 focus:outline-none resize-none leading-relaxed"
+              className="flex-1 w-full min-h-[320px] p-3 font-mono text-xs bg-transparent text-[var(--text-primary)] focus:outline-none resize-none leading-relaxed"
             />
           ) : (
             <div className="p-2 space-y-0.5">
@@ -66,9 +89,7 @@ export const PlainDiffFallback: React.FC<PlainDiffProps> = ({
                 return (
                   <div
                     key={`mod-${idx}`}
-                    className={`flex items-start px-2 py-0.5 rounded-xs ${
-                      isDiff && line ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium' : ''
-                    }`}
+                    className={`flex items-start px-2 py-0.5 rounded-xs ${isDiff && line ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-medium' : ''}`}
                   >
                     <span className="w-8 select-none text-right pr-3 opacity-40 text-[10px]">{idx + 1}</span>
                     <span className="whitespace-pre overflow-x-auto flex-1">{line || ' '}</span>
@@ -87,9 +108,11 @@ export const PlainCodeFallback: React.FC<{
   code: string;
   label: string;
   theme?: AppTheme;
+  locale?: Locale;
   canEdit?: boolean;
   onEdit?: (val: string) => void;
-}> = ({ code, label, canEdit = false, onEdit }) => {
+}> = ({ code, label, locale = 'ru', canEdit = false, onEdit }) => {
+  const isEn = locale === 'en';
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(code);
@@ -105,10 +128,10 @@ export const PlainCodeFallback: React.FC<{
         <span className="text-[10px] uppercase font-bold tracking-wider">{label}</span>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+          className="flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] bg-[var(--bg-card)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] transition cursor-pointer"
         >
           {copied ? <Check className="w-3 h-3 text-emerald-500" /> : <Copy className="w-3 h-3" />}
-          <span>{copied ? 'Скопировано!' : 'Копировать'}</span>
+          <span>{copied ? (isEn ? 'Copied!' : 'Скопировано!') : isEn ? 'Copy' : 'Копировать'}</span>
         </button>
       </div>
       {canEdit && onEdit ? (
@@ -116,7 +139,7 @@ export const PlainCodeFallback: React.FC<{
           value={code}
           onChange={(e) => onEdit(e.target.value)}
           spellCheck={false}
-          className="flex-1 w-full p-3 font-mono text-xs bg-transparent text-emerald-300 focus:outline-none resize-none leading-relaxed"
+          className="flex-1 w-full p-3 font-mono text-xs bg-transparent text-[var(--text-primary)] focus:outline-none resize-none leading-relaxed"
         />
       ) : (
         <div className="flex-1 overflow-auto p-2 space-y-0.5">
@@ -130,7 +153,7 @@ export const PlainCodeFallback: React.FC<{
                     : line.startsWith('no ') || line.startsWith('undo ')
                       ? 'text-rose-600 dark:text-rose-400 font-semibold'
                       : line.startsWith('interface ') || line.startsWith('router ')
-                        ? 'text-cyan-600 dark:text-cyan-300 font-bold'
+                        ? 'text-[var(--text-primary)] font-bold'
                         : ''
                 }`}
               >
@@ -144,40 +167,86 @@ export const PlainCodeFallback: React.FC<{
   );
 };
 
-export function extractCliPatchFromDiff(runningConfig: string, modifiedConfig: string, basePatch: string): string {
-  const runLines = (runningConfig || '').split('\n');
-  const modLines = (modifiedConfig || '').split('\n');
-  const runSet = new Set(runLines.map((l) => l.trim()).filter(Boolean));
-  const out: string[] = [];
-  let currentSection = '';
-  let pushedSection = '';
+interface ParsedConfigLine {
+  trimmed: string;
+  section: string;
+  isIndented: boolean;
+}
 
-  for (let i = 0; i < modLines.length; i++) {
-    const raw = modLines[i];
+function parseConfigSections(text: string): ParsedConfigLine[] {
+  const parsed: ParsedConfigLine[] = [];
+  let currentSection = '';
+  for (const raw of (text || '').split('\n')) {
     const trimmed = raw.trim();
     if (!trimmed || trimmed.startsWith('!') || trimmed.startsWith('#')) continue;
     const isIndented = raw.startsWith(' ') || raw.startsWith('\t');
-    if (!isIndented) {
-      currentSection = trimmed;
+    if (!isIndented) currentSection = trimmed;
+    parsed.push({ trimmed, section: isIndented ? currentSection : '', isIndented });
+  }
+  return parsed;
+}
+
+export function extractCliPatchFromDiff(
+  runningConfig: string,
+  modifiedConfig: string,
+  basePatch: string,
+  baselineIntendedConfig?: string
+): string {
+  const baseText = baselineIntendedConfig !== undefined ? baselineIntendedConfig : runningConfig || '';
+  const baseEntries = parseConfigSections(baseText);
+  const runEntries = parseConfigSections(runningConfig || '');
+  const modEntries = parseConfigSections(modifiedConfig || '');
+
+  const baseKeySet = new Set(baseEntries.map((e) => `${e.section}::${e.trimmed}`));
+  const runKeySet = new Set(runEntries.map((e) => `${e.section}::${e.trimmed}`));
+  const modKeySet = new Set(modEntries.map((e) => `${e.section}::${e.trimmed}`));
+  const modSectionHeaders = new Set(modEntries.filter((e) => !e.isIndented).map((e) => e.trimmed));
+
+  const out: string[] = [];
+  let pushedSection = '';
+
+  const ensureSection = (sec: string) => {
+    if (sec && pushedSection !== sec) {
+      out.push(sec);
+      pushedSection = sec;
+    } else if (!sec) {
+      pushedSection = '';
     }
-    const sameAtPos = (runLines[i] || '').trim() === trimmed;
-    if (!sameAtPos && !runSet.has(trimmed)) {
-      if (isIndented && currentSection && pushedSection !== currentSection) {
-        out.push(currentSection);
-        pushedSection = currentSection;
+  };
+
+  for (const entry of baseEntries) {
+    const key = `${entry.section}::${entry.trimmed}`;
+    if (modKeySet.has(key) || (!entry.isIndented && modSectionHeaders.has(entry.trimmed))) continue;
+    const cmdPrefix = entry.trimmed.startsWith('no ') ? entry.trimmed.slice(3).trim() : `no ${entry.trimmed}`;
+    ensureSection(entry.section);
+    out.push(cmdPrefix);
+  }
+
+  for (const entry of modEntries) {
+    const key = `${entry.section}::${entry.trimmed}`;
+    const isModifiedFromBase = !baseKeySet.has(key);
+    const isModifiedFromRunning = !runKeySet.has(key);
+    if (isModifiedFromBase || isModifiedFromRunning) {
+      if (!entry.isIndented) {
+        pushedSection = entry.trimmed;
+        if (isModifiedFromBase && isModifiedFromRunning) out.push(entry.trimmed);
+      } else {
+        ensureSection(entry.section);
+        out.push(entry.trimmed);
       }
-      out.push(trimmed);
     }
   }
-  if (out.length > 0) return out.join('\n');
-  return basePatch.trim();
+
+  return out.length > 0 ? out.join('\n') : basePatch.trim();
 }
 
 interface DiffDirectToolbarProps {
   hostname: string;
+  locale?: Locale;
   canOperate: boolean;
   isAdmin: boolean;
   hasCustomEdit: boolean;
+  changedLinesCount?: number;
   applyingPatch: boolean;
   applyStatus: { ok: boolean; text: string } | null;
   onApplyDirect: () => void;
@@ -186,14 +255,17 @@ interface DiffDirectToolbarProps {
 
 export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
   hostname,
+  locale = 'ru',
   canOperate,
   isAdmin,
   hasCustomEdit,
+  changedLinesCount = 0,
   applyingPatch,
   applyStatus,
   onApplyDirect,
   onResetEdits,
 }) => {
+  const isEn = locale === 'en';
   const [cliOpen, setCliOpen] = useState(false);
   const [cliCmd, setCliCmd] = useState('show ip bgp summary');
   const [cliOut, setCliOut] = useState('');
@@ -208,9 +280,9 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
     setRunningCli(true);
     try {
       const res = await api.executeEmergencyCommand(hostname, cliCmd);
-      setCliOut(res.output || '(нет вывода)');
+      setCliOut(res.output || (isEn ? '(no output)' : '(нет вывода)'));
     } catch (err) {
-      setCliOut(`[ОШИБКА]: ${getErrorMessage(err)}`);
+      setCliOut(`[${isEn ? 'ERROR' : 'ОШИБКА'}]: ${getErrorMessage(err)}`);
     } finally {
       setRunningCli(false);
     }
@@ -219,8 +291,7 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
   const handleToggleFreeze = async () => {
     setBusyAction(true);
     try {
-      const next = !frozen;
-      const st = await api.setFreezeStatus(next, 'Переключение Freeze из Diff & Config');
+      const st = await api.setFreezeStatus(!frozen, 'Toggle Freeze from Diff & Config');
       setFrozen(Boolean(st.frozen));
     } catch {
       // ignore
@@ -237,27 +308,29 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
       setCliOpen(true);
       window.dispatchEvent(new Event('netops-topology-mutated'));
     } catch (err) {
-      setCliOut(`[ОШИБКА]: ${getErrorMessage(err)}`);
+      setCliOut(`[${isEn ? 'ERROR' : 'ОШИБКА'}]: ${getErrorMessage(err)}`);
       setCliOpen(true);
     } finally {
       setBusyAction(false);
     }
   };
 
+  const compactBtnCls =
+    'px-2 py-1 rounded bg-[var(--bg-card)] hover:bg-[var(--bg-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border border-[var(--border-subtle)] text-[11px] flex items-center gap-1 transition cursor-pointer disabled:opacity-50';
+
   return (
     <div className="mb-3 space-y-2">
-      <div className="px-3 py-2 rounded-xl bg-cyan-500/[0.06] border border-cyan-500/20 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[11px]">
-            ✏️ Прямая правка конфига и патча активна
+      <div className="bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-secondary)]">
+          <span className="font-medium text-[var(--text-primary)]">
+            {isEn
+              ? 'Direct edit mode · modify lines on the right or CLI patch'
+              : 'Режим прямой правки · измените строки справа или CLI-патч'}
           </span>
-          {hasCustomEdit && (
-            <button
-              onClick={onResetEdits}
-              className="px-2 py-0.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[11px] cursor-pointer"
-            >
-              Сбросить правки
-            </button>
+          {changedLinesCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] text-[10px] text-[var(--text-primary)]">
+              {isEn ? `${changedLinesCount} cmd(s)` : `${changedLinesCount} ком.`}
+            </span>
           )}
         </div>
 
@@ -266,42 +339,49 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
             onClick={onApplyDirect}
             disabled={applyingPatch}
             data-testid="apply-direct-config-btn"
-            className="px-3 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-zinc-950 font-semibold text-[11px] flex items-center gap-1.5 cursor-pointer shadow-sm"
-            title="Накатить отредактированный конфиг / патч прямо на устройство по SSH"
+            className="px-2.5 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 disabled:opacity-50 font-medium text-[11px] flex items-center gap-1.5 cursor-pointer transition"
+            title={
+              isEn
+                ? 'Push edited config / patch directly to device via SSH'
+                : 'Накатить отредактированный конфиг / патч прямо на устройство по SSH'
+            }
           >
             <Play className="w-3 h-3 fill-current" />
-            <span>{applyingPatch ? 'Применение…' : `Применить на ${hostname}`}</span>
+            <span>
+              {applyingPatch
+                ? isEn
+                  ? 'Applying…'
+                  : 'Применение…'
+                : isEn
+                  ? `Apply to ${hostname}`
+                  : `Применить на ${hostname}`}
+            </span>
           </button>
+
+          {hasCustomEdit && (
+            <button onClick={onResetEdits} className={compactBtnCls}>
+              <span>{isEn ? 'Reset' : 'Сбросить'}</span>
+            </button>
+          )}
 
           {isAdmin && (
             <>
-              <button
-                onClick={() => setCliOpen((v) => !v)}
-                className="px-2.5 py-1 rounded-lg bg-zinc-800/90 hover:bg-zinc-700 text-cyan-300 border border-white/10 text-[11px] flex items-center gap-1 cursor-pointer"
-              >
+              <button onClick={() => setCliOpen((v) => !v)} className={compactBtnCls}>
                 <Terminal className="w-3 h-3" />
-                <span>SSH CLI</span>
+                <span>&gt;_ SSH CLI</span>
               </button>
-              <button
-                onClick={handleToggleFreeze}
-                disabled={busyAction}
-                className={`px-2.5 py-1 rounded-lg border text-[11px] flex items-center gap-1 cursor-pointer ${
-                  frozen
-                    ? 'bg-cyan-500/20 text-cyan-200 border-cyan-500/40'
-                    : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
-                }`}
-              >
+              <button onClick={handleToggleFreeze} disabled={busyAction} className={compactBtnCls}>
                 <Lock className="w-3 h-3" />
                 <span>{frozen ? 'Unfreeze' : 'Freeze'}</span>
               </button>
               <button
                 onClick={handleSoftReset}
                 disabled={busyAction}
-                className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] flex items-center gap-1 cursor-pointer"
-                title="Мягкий сброс всех узлов стенда к эталону Git SoT"
+                className={compactBtnCls}
+                title={isEn ? 'Soft reset all fabric nodes to Git SoT' : 'Мягкий сброс всех узлов стенда к эталону Git SoT'}
               >
                 <RotateCcw className="w-3 h-3" />
-                <span>К эталону SoT</span>
+                <span>{isEn ? 'To SoT Baseline' : 'К эталону SoT'}</span>
               </button>
             </>
           )}
@@ -312,8 +392,8 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
         <div
           className={`px-3 py-2 rounded-xl text-xs font-mono border ${
             applyStatus.ok
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-300'
+              : 'bg-rose-500/10 border-rose-500/30 text-rose-600 dark:text-rose-300'
           }`}
         >
           {applyStatus.text}
@@ -321,28 +401,28 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
       )}
 
       {cliOpen && isAdmin && (
-        <div className="p-3 rounded-xl bg-[#090b10] border border-white/10 space-y-2 font-mono text-xs">
+        <div className="p-3 rounded-xl bg-[var(--bg-card)] border border-[var(--border-subtle)] space-y-2 font-mono text-xs">
           <div className="flex items-center gap-2">
-            <span className="text-cyan-400">[{hostname}] #</span>
+            <span className="text-[var(--text-secondary)] font-semibold">[{hostname}] #</span>
             <input
               type="text"
               value={cliCmd}
               onChange={(e) => setCliCmd(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleExecCli()}
-              className="flex-1 bg-zinc-900 border border-white/10 rounded px-2.5 py-1 text-xs text-white focus:outline-none focus:border-cyan-500"
-              placeholder="Команда CLI (например: show ip bgp summary)..."
+              className="flex-1 bg-[var(--bg-main)] border border-[var(--border-subtle)] rounded px-2.5 py-1 text-xs text-[var(--text-primary)] focus:outline-none focus:border-[var(--border-hover)]"
+              placeholder={isEn ? 'CLI command (e.g. show ip bgp summary)...' : 'Команда CLI (например: show ip bgp summary)...'}
             />
             <button
               onClick={handleExecCli}
               disabled={runningCli}
-              className="px-3 py-1 rounded bg-cyan-500 hover:bg-cyan-400 text-zinc-950 font-semibold flex items-center gap-1 cursor-pointer"
+              className="px-3 py-1 rounded bg-[var(--text-primary)] hover:opacity-90 text-[var(--bg-main)] font-medium flex items-center gap-1 cursor-pointer"
             >
               <Send className="w-3 h-3" />
-              <span>{runningCli ? '...' : 'Выполнить'}</span>
+              <span>{runningCli ? '...' : isEn ? 'Run' : 'Выполнить'}</span>
             </button>
           </div>
           {cliOut && (
-            <pre className="p-2.5 rounded bg-black/60 text-emerald-400 max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px]">
+            <pre className="p-2.5 rounded bg-[var(--bg-main)] border border-[var(--border-subtle)] text-[var(--text-primary)] max-h-40 overflow-y-auto whitespace-pre-wrap text-[11px]">
               {cliOut}
             </pre>
           )}
@@ -355,60 +435,68 @@ export const DiffDirectToolbar: React.FC<DiffDirectToolbarProps> = ({
 interface DiffAiRiskCardProps {
   analyzingAi: boolean;
   aiAnalysis: RiskExplanation | null;
+  locale?: Locale;
   onAnalyzeWithAI: () => void;
 }
 
 export const DiffAiRiskCard: React.FC<DiffAiRiskCardProps> = ({
   analyzingAi,
   aiAnalysis,
+  locale = 'ru',
   onAnalyzeWithAI,
-}) => (
-  <div className="p-4 rounded-2xl bg-[#0c0e14] border border-white/[0.08] space-y-3">
-    <div className="flex items-center justify-between gap-2">
-      <div className="flex items-center space-x-1.5 min-w-0">
-        <Bot className="w-4 h-4 text-cyan-400 shrink-0" />
-        <span className="text-xs font-bold font-mono text-white truncate">LLM Risk Assistant</span>
+}) => {
+  const isEn = locale === 'en';
+  return (
+    <div className="p-4 rounded-2xl bg-[var(--bg-card)] border border-[var(--border-subtle)] space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center space-x-1.5 min-w-0">
+          <Bot className="w-4 h-4 text-[var(--text-secondary)] shrink-0" />
+          <span className="text-xs font-bold font-mono text-[var(--text-primary)] truncate">LLM Risk Assistant</span>
+        </div>
+        <button
+          onClick={onAnalyzeWithAI}
+          disabled={analyzingAi}
+          className="px-2.5 py-1 rounded-lg bg-[var(--bg-elevated)] hover:bg-[var(--bg-subtle)] text-[var(--text-primary)] text-[11px] font-mono border border-[var(--border-subtle)] hover:border-[var(--border-hover)] transition flex items-center space-x-1 cursor-pointer shrink-0"
+        >
+          <span>{analyzingAi ? (isEn ? 'Analyzing...' : 'Анализ...') : isEn ? 'Assess Risks' : 'Оценить риски'}</span>
+        </button>
       </div>
-      <button
-        onClick={onAnalyzeWithAI}
-        disabled={analyzingAi}
-        className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[11px] font-mono border border-cyan-500/30 transition flex items-center space-x-1 cursor-pointer shrink-0"
-      >
-        <span>{analyzingAi ? 'Анализ...' : 'Оценить риски'}</span>
-      </button>
+
+      {aiAnalysis && (
+        <div className="space-y-2.5 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[var(--text-secondary)] text-[11px] font-mono">
+              {isEn ? 'Risk Level:' : 'Уровень риска:'}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
+                aiAnalysis.risk_level === 'HIGH' || aiAnalysis.risk_level === 'CRITICAL'
+                  ? 'bg-rose-500/15 text-rose-600 dark:text-rose-300 border border-rose-500/30'
+                  : aiAnalysis.risk_level === 'MEDIUM'
+                    ? 'bg-amber-500/15 text-amber-600 dark:text-amber-300 border border-amber-500/30'
+                    : 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-300 border border-emerald-500/30'
+              }`}
+            >
+              {aiAnalysis.risk_level} RISK
+            </span>
+          </div>
+
+          <p className="text-[var(--text-primary)] text-[11px] leading-relaxed">{aiAnalysis.summary}</p>
+
+          <div className="space-y-1 pt-2 border-t border-[var(--border-subtle)]">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-[var(--text-muted)] block">
+              {isEn ? 'Risk Factors:' : 'Факторы риска:'}
+            </span>
+            {aiAnalysis.key_points.map((pt, i) => (
+              <div key={i} className="flex items-start space-x-1.5 text-[11px] text-[var(--text-secondary)]">
+                <span className="text-[var(--text-muted)] mt-0.5">•</span>
+                <span>{pt}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
+  );
+};
 
-    {aiAnalysis && (
-      <div className="space-y-2.5 text-xs">
-        <div className="flex items-center justify-between">
-          <span className="text-zinc-400 text-[11px] font-mono">Уровень риска:</span>
-          <span
-            className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-              aiAnalysis.risk_level === 'HIGH' || aiAnalysis.risk_level === 'CRITICAL'
-                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-[0_0_8px_rgba(244,63,94,0.3)]'
-                : aiAnalysis.risk_level === 'MEDIUM'
-                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
-                  : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
-            }`}
-          >
-            {aiAnalysis.risk_level} RISK
-          </span>
-        </div>
-
-        <p className="text-zinc-300 text-[11px] leading-relaxed">{aiAnalysis.summary}</p>
-
-        <div className="space-y-1 pt-2 border-t border-white/[0.06]">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 block">
-            Факторы риска:
-          </span>
-          {aiAnalysis.key_points.map((pt, i) => (
-            <div key={i} className="flex items-start space-x-1.5 text-[11px] text-zinc-400">
-              <span className="text-cyan-400 mt-0.5">•</span>
-              <span>{pt}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-  </div>
-);

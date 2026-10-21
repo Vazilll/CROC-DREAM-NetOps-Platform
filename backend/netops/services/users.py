@@ -100,10 +100,24 @@ class UserService:
             user = self._session.scalar(
                 select(User).where(User.token_sha256 == hash_token(cleaned_token))
             )
+            if user is None and cleaned_token.startswith("crk_viewer_"):
+                existing_sv = self._session.scalar(
+                    select(User).where(User.username == "static_viewer")
+                )
+                if existing_sv is None:
+                    from netops.services.static_viewer import StaticViewerService
+
+                    StaticViewerService.get_or_create(self._session, settings=settings)
+                    user = self._session.scalar(
+                        select(User).where(User.token_sha256 == hash_token(cleaned_token))
+                    )
         if user is None or not user.is_active:
             return None
 
         if user.username == "static_viewer":
+            if user.expires_at is not None:
+                user.expires_at = None
+                self._session.commit()
             if matched_invite:
                 from netops.services.sessions import consume_invite_code
 

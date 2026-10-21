@@ -80,6 +80,7 @@ def get_users_static_viewer(
     return get_static_viewer(request, session, container, admin)
 
 
+@router.patch("/static-viewer", response_model=StaticViewerResponse, include_in_schema=False)
 @router.post("/static-viewer/toggle", response_model=StaticViewerResponse, include_in_schema=False)
 def toggle_users_static_viewer(
     req: StaticViewerToggleRequest,

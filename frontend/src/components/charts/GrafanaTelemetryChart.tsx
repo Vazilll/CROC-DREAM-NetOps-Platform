@@ -1,12 +1,17 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { Activity, ExternalLink, RefreshCw } from 'lucide-react';
-import { api, type Device, type StandDeviceTelemetrySeries } from '../../api';
+import { api, type Device, type StandDeviceTelemetrySeries, type StandRead } from '../../api';
 
 export interface GrafanaTelemetryChartProps {
   mode?: 'stand' | 'device';
   devices?: Device[];
   device?: Device;
+  hostname?: string;
   fabricId?: string;
+  activeStand?: string;
+  stands?: StandRead[];
+  locale?: string;
+  onOpenDevice?: (id: number) => void;
   points?: number;
   title?: string;
   compact?: boolean;
@@ -55,22 +60,7 @@ function buildFallbackSeries(dev: Device, pointsCount: number): {
   uplink_util_pct: number[];
 } {
   const base = dev.sparkline && dev.sparkline.length > 0 ? dev.sparkline.slice(-pointsCount) : [];
-  const seed = dev.hostname.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-  const len = Math.max(pointsCount, base.length || 12);
-  const cpu: number[] = [];
-  const mem: number[] = [];
-  const up: number[] = [];
-  for (let i = 0; i < len; i++) {
-    const sparkVal = base.length > 0 ? base[i % base.length] : 14 + ((seed + i * 3) % 18);
-    const wave = Math.sin((i + (seed % 7)) * 0.55) * 3.2;
-    const cVal = Math.max(2, Math.min(98, Number((sparkVal + wave * 0.6).toFixed(1))));
-    const mVal = Math.max(12, Math.min(96, Number((28 + (seed % 26) + Math.cos(i * 0.35) * 2.1).toFixed(1))));
-    const uVal = Math.max(1, Math.min(99, Number((sparkVal * 0.78 + Math.abs(wave) * 1.4).toFixed(1))));
-    cpu.push(cVal);
-    mem.push(mVal);
-    up.push(uVal);
-  }
-  return { cpu_pct: cpu.slice(-pointsCount), memory_pct: mem.slice(-pointsCount), uplink_util_pct: up.slice(-pointsCount) };
+  return { cpu_pct: base, memory_pct: base, uplink_util_pct: base };
 }
 
 function buildSmoothSvgPath(pts: { x: number; y: number }[]): string {
@@ -87,14 +77,26 @@ function buildSmoothSvgPath(pts: { x: number; y: number }[]): string {
 }
 
 export const GrafanaTelemetryChart: React.FC<GrafanaTelemetryChartProps> = ({
-  mode = 'stand',
+  mode: propMode,
   devices = [],
-  device,
-  fabricId,
+  device: propDevice,
+  hostname,
+  fabricId: propFabricId,
+  activeStand,
   points = 24,
   title,
   compact = false,
 }) => {
+  const device = useMemo(
+    () =>
+      propDevice ||
+      (hostname ? devices.find((d) => d.hostname === hostname) : undefined) ||
+      (hostname && devices.length === 1 ? devices[0] : undefined),
+    [propDevice, hostname, devices]
+  );
+  const mode = propMode || (device || hostname ? 'device' : 'stand');
+  const fabricId = propFabricId || (activeStand && activeStand !== 'all' ? activeStand : undefined);
+
   const [selectedMetric, setSelectedMetric] = useState<MetricKey>('cpu_pct');
   const [remoteRows, setRemoteRows] = useState<StandDeviceTelemetrySeries[]>([]);
   const [timestamps, setTimestamps] = useState<string[]>([]);
@@ -105,8 +107,14 @@ export const GrafanaTelemetryChart: React.FC<GrafanaTelemetryChartProps> = ({
     try {
       const targetFabric = mode === 'device' ? (device?.fabric_id || undefined) : fabricId;
       const res = await api.getStandTelemetrySeries(targetFabric, points);
-      if (res && Array.isArray(res.devices) && res.devices.length > 0) {
-        setRemoteRows(res.devices);
+      const rawDevices = res?.devices;
+      const list = Array.isArray(rawDevices)
+        ? rawDevices
+        : rawDevices && typeof rawDevices === 'object'
+        ? Object.values(rawDevices)
+        : [];
+      if (list.length > 0) {
+        setRemoteRows(list);
         if (Array.isArray(res.timestamps)) setTimestamps(res.timestamps);
         return;
       }
@@ -159,9 +167,10 @@ export const GrafanaTelemetryChart: React.FC<GrafanaTelemetryChartProps> = ({
       };
     };
 
-    if (mode === 'device' && device) {
-      const match = remoteRows.find((r) => r.hostname === device.hostname);
-      const fb = buildFallbackSeries(device, points);
+    if (mode === 'device' && (device || hostname)) {
+      const targetHost = device?.hostname || hostname || '';
+      const match = remoteRows.find((r) => r.hostname === targetHost);
+      const fb = device ? buildFallbackSeries(device, points) : { cpu_pct: [], memory_pct: [], uplink_util_pct: [] };
       const cpuPts = (match?.cpu_pct?.length ? match.cpu_pct : match?.series?.cpu_pct?.length ? match.series.cpu_pct : fb.cpu_pct);
       const memPts = (match?.memory_pct?.length ? match.memory_pct : match?.series?.memory_pct?.length ? match.series.memory_pct : fb.memory_pct);
       const upPts = (match?.uplink_util_pct?.length ? match.uplink_util_pct : match?.series?.uplink_util_pct?.length ? match.series.uplink_util_pct : fb.uplink_util_pct);

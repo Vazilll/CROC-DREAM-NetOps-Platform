@@ -47,6 +47,7 @@ scheduling:
 
 session:
   ttl_seconds: 43200         # одна смена NOC (12 часов)
+  eternal_ttl_seconds: 315360000  # 10 лет для вечного QR-доступа (static_viewer)
 
 # Консоли и доступ. Роль определяется портом: порты admin/operator/viewer закреплены за ролью.
 console:
@@ -59,6 +60,7 @@ console:
   nginx_role_ports: [81, 82, 83]
   loopback_hosts: [localhost, 127.0.0.1, "::1", "[::1]", testserver]
   local_owner_login_token: local-owner-console
+  static_viewer_token: crk_viewer_eternal_croc_dream_netops_qr
 
 # Публичный SSH reverse-tunnel к аутентифицированной консоли.
 tunnel:

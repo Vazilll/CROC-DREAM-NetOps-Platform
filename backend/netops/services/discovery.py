@@ -355,7 +355,11 @@ def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> No
     devices_dir.mkdir(parents=True, exist_ok=True)
     intent_file = devices_dir / f"{device.hostname}.yaml"
     if not intent_file.is_file():
-        baseline_intent = extract_brownfield_intent(device, data, settings)
+        baseline_intent = (
+            extract_brownfield_intent(device, data, settings)
+            if str(getattr(settings, "network_driver", "offline")) == "scrapli"
+            else None
+        )
         if baseline_intent is not None:
             try:
                 DeviceIntent.model_validate(baseline_intent)

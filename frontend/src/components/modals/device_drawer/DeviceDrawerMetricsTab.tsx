@@ -1,4 +1,5 @@
 import React from 'react';
+import { ExternalLink } from 'lucide-react';
 import type { CollectorDevicePlan, DeviceDetail } from '../../../api';
 import { GrafanaTelemetryChart } from '../../charts/GrafanaTelemetryChart';
 
@@ -17,9 +18,31 @@ export const DeviceDrawerMetricsTab: React.FC<DeviceDrawerMetricsTabProps> = ({
   isViewer,
   onProtocolChange,
 }) => {
+  const host = typeof window !== 'undefined' ? window.location.hostname || 'localhost' : 'localhost';
+  const grafanaUrl = `${typeof window !== 'undefined' ? window.location.protocol : 'http:'}//${host}:3000/d/croc-dream-noc`;
+
   return (
     <div className="space-y-4">
-      <GrafanaTelemetryChart mode="device" device={device} points={24} compact />
+      <GrafanaTelemetryChart
+        hostname={device.hostname}
+        devices={[device]}
+        compact
+      />
+
+      <div className="p-3.5 rounded-xl bg-white/[0.02] border border-white/[0.08] flex items-center justify-between gap-3">
+        <div className="text-xs font-mono text-zinc-300">
+          Графики метрик (CPU, RAM, трафик интерфейсов) синхронизированы с Prometheus и Grafana
+        </div>
+        <a
+          href={grafanaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.12] text-xs font-mono text-white transition-colors shrink-0"
+        >
+          <span>Grafana</span>
+          <ExternalLink className="w-3.5 h-3.5" />
+        </a>
+      </div>
 
       {/* Protocol Capabilities Matrix & Scenario Selector (PostgreSQL system_state) */}
       <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.08] space-y-3">

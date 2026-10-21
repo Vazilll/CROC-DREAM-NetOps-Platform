@@ -1,30 +1,90 @@
+import { useEffect, useState } from 'react';
 import type { Device, TopologyGraphLink, TopologyGraphNode, TopologyGraphResponse } from '../../api';
+import { translations, type Locale } from '../../i18n';
 
-export const W = 960, H = 460, NODE_W = 148, NODE_H = 48;
+export function useTranslation(explicitLocale?: Locale) {
+  const [storedLocale, setStoredLocale] = useState<Locale>(() => {
+    if (typeof window === 'undefined') return 'ru';
+    return (localStorage.getItem('netops_lang') as Locale) === 'en' ? 'en' : 'ru';
+  });
+
+  useEffect(() => {
+    if (explicitLocale) return;
+    const syncLocale = () => {
+      const next = (localStorage.getItem('netops_lang') as Locale) === 'en' ? 'en' : 'ru';
+      setStoredLocale((prev) => (prev === next ? prev : next));
+    };
+    window.addEventListener('storage', syncLocale);
+    window.addEventListener('click', syncLocale);
+    return () => {
+      window.removeEventListener('storage', syncLocale);
+      window.removeEventListener('click', syncLocale);
+    };
+  }, [explicitLocale]);
+
+  const locale: Locale = explicitLocale || storedLocale;
+  return {
+    locale,
+    isEn: locale === 'en',
+    t: translations[locale],
+  };
+}
+
+export const W = 960, H = 470, NODE_W = 156, NODE_H = 54;
 export const POS_STORAGE_KEY = 'netops_topo_node_positions_v1';
 export const STATUS_COLOR: Record<string, string> = {
-  IN_SYNC: '#10b981', DRIFT_DETECTED: '#f59e0b', UNREACHABLE: '#f43f5e', IN_PROGRESS: '#06b6d4', UNKNOWN: '#71717a',
+  IN_SYNC: '#10b981',
+  DRIFT_DETECTED: '#d97706',
+  UNREACHABLE: '#e11d48',
+  IN_PROGRESS: '#3b82f6',
+  UNKNOWN: '#64748b',
 };
-const _VB = { bg: 'rgba(255, 255, 255, 0.05)', stroke: 'rgba(255, 255, 255, 0.14)', text: '#a1a1aa' };
+
+const _VB = {
+  bg: 'var(--bg-elevated)',
+  stroke: 'var(--border-subtle)',
+  text: 'var(--text-secondary)',
+};
+
 export const VENDOR_BADGE: Record<string, { bg: string; stroke: string; text: string; label: string }> = {
-  arista_eos: { ..._VB, label: 'EOS' }, cisco_iosxe: { ..._VB, label: 'IOS-XE' },
-  huawei_vrp: { ..._VB, label: 'VRP' }, eltex_esr: { ..._VB, label: 'ESR' },
-  eltex_mes: { ..._VB, label: 'MES' }, juniper_junos: { ..._VB, label: 'JUNOS' },
-  yadro_kornfe: { ..._VB, label: 'KORNFE' }, linux_server: { ..._VB, label: 'LINUX' },
+  arista_eos: { ..._VB, label: 'EOS' },
+  cisco_iosxe: { ..._VB, label: 'IOS-XE' },
+  huawei_vrp: { ..._VB, label: 'VRP' },
+  eltex_esr: { ..._VB, label: 'ESR' },
+  eltex_mes: { ..._VB, label: 'MES' },
+  juniper_junos: { ..._VB, label: 'JUNOS' },
+  yadro_kornfe: { ..._VB, label: 'KORNFE' },
+  linux_server: { ..._VB, label: 'LINUX' },
 };
+
 export const LAYER_FILTERS = [
-  { id: 'ALL', label: 'Все' },
-  { id: 'L2_LLDP', label: 'Физика (L2)' },
-  { id: 'L3_SUBNET', label: 'Сеть (IP)' },
-  { id: 'BGP_EVPN', label: 'Маршруты (BGP)' },
-  { id: 'INTER_STAND', label: 'Стенды (DCI)' },
+  { id: 'ALL', label: 'Все', labelEn: 'All' },
+  { id: 'L2_LLDP', label: 'Физика (L2)', labelEn: 'Physical (L2)' },
+  { id: 'L3_SUBNET', label: 'Сеть (IP)', labelEn: 'Network (IP)' },
+  { id: 'BGP_EVPN', label: 'Маршруты (BGP)', labelEn: 'Routing (BGP)' },
+  { id: 'INTER_STAND', label: 'Стенды (DCI)', labelEn: 'Stands (DCI)' },
 ] as const;
 
 export const shortPort = (p: string) =>
   p.replace(/^GigabitEthernet/i, 'Gi').replace(/^Ethernet/i, 'Eth');
 
 export const linkLoad = (a: Device, b: Device) =>
-  Math.max(a.sparkline?.length ? a.sparkline[a.sparkline.length - 1] : 0, b.sparkline?.length ? b.sparkline[b.sparkline.length - 1] : 0);
+  Math.max(
+    a.sparkline?.length ? a.sparkline[a.sparkline.length - 1] : 0,
+    b.sparkline?.length ? b.sparkline[b.sparkline.length - 1] : 0,
+  );
+
+export function resolveNodeProtocolLabel(device: Device, meta?: TopologyGraphNode): string {
+  const mode = meta?.telemetry_mode || 'auto';
+  const rawProto = meta?.telemetry_protocol || 'ssh_cli';
+  if (device.platform === 'huawei_vrp' && (mode === 'auto' || rawProto === 'ssh_cli' || rawProto === 'snmp')) {
+    return 'CLI';
+  }
+  if (rawProto === 'gnmi') return 'gNMI';
+  if (rawProto === 'snmp') return 'SNMP';
+  if (rawProto === 'node_exporter' || rawProto === 'prometheus_exporter') return 'EXP';
+  return 'CLI';
+}
 
 export interface ActiveLayer {
   roles: string[];
@@ -79,14 +139,18 @@ export function computeTopologyLayout(
 } {
   const autoPos = new Map<number, { x: number; y: number }>();
   const standSlugs = Array.from(new Set(microDevices.map((d) => d.fabric_id || d.site || 'croc-dc1-pod1')));
-  const padX = 72, podW = (W - padX - 24) / Math.max(1, standSlugs.length);
+  const padX = 74, podW = (W - padX - 24) / Math.max(1, standSlugs.length);
 
   standSlugs.forEach((slug, sIdx) => {
     const podStartX = padX + sIdx * podW;
     const podDevices = microDevices.filter((d) => (d.fabric_id || d.site || 'croc-dc1-pod1') === slug);
     activeLayers.forEach((layer) => {
-      const list = podDevices.filter((d) => layer.roles.includes(d.role) || (layer.roles.includes('server') && d.platform === 'linux_server'));
-      list.forEach((d, i) => autoPos.set(d.id, { x: Math.round(podStartX + ((i + 1) * podW) / (list.length + 1)), y: layer.y }));
+      const list = podDevices.filter(
+        (d) => layer.roles.includes(d.role) || (layer.roles.includes('server') && d.platform === 'linux_server'),
+      );
+      list.forEach((d, i) =>
+        autoPos.set(d.id, { x: Math.round(podStartX + ((i + 1) * podW) / (list.length + 1)), y: layer.y }),
+      );
     });
   });
 
@@ -100,40 +164,62 @@ export function computeTopologyLayout(
   const computedLayerLabels = activeLayers.map((l) => {
     const ys = microDevices
       .filter((d) => l.roles.includes(d.role) || (l.roles.includes('server') && d.platform === 'linux_server'))
-      .map((d) => pos.get(d.id)?.y).filter((y): y is number => y !== undefined);
+      .map((d) => pos.get(d.id)?.y)
+      .filter((y): y is number => y !== undefined);
     return { label: l.label, y: ys.length ? Math.round(ys.reduce((a, b) => a + b, 0) / ys.length) : l.y };
   });
 
-  const boxes = standSlugs.map((slug, idx) => {
-    const pts = microDevices.filter((d) => (d.fabric_id || d.site || 'croc-dc1-pod1') === slug && pos.has(d.id)).map((d) => pos.get(d.id)!);
-    if (!pts.length) return null;
-    const minX = Math.max(62, Math.min(...pts.map((p) => p.x - NODE_W / 2)) - 14);
-    const maxX = Math.min(W - 8, Math.max(...pts.map((p) => p.x + NODE_W / 2)) + 14);
-    const minY = Math.max(6, Math.min(...pts.map((p) => p.y)) - 22);
-    const maxY = Math.min(H - 6, Math.max(...pts.map((p) => p.y + NODE_H)) + 12);
-    return { slug, idx, x: minX, y: minY, w: maxX - minX, h: maxY - minY, count: pts.length };
-  }).filter((b): b is NonNullable<typeof b> => b !== null);
+  const boxes = standSlugs
+    .map((slug, idx) => {
+      const pts = microDevices
+        .filter((d) => (d.fabric_id || d.site || 'croc-dc1-pod1') === slug && pos.has(d.id))
+        .map((d) => pos.get(d.id)!);
+      if (!pts.length) return null;
+      const minX = Math.max(62, Math.min(...pts.map((p) => p.x - NODE_W / 2)) - 14);
+      const maxX = Math.min(W - 8, Math.max(...pts.map((p) => p.x + NODE_W / 2)) + 14);
+      const minY = Math.max(6, Math.min(...pts.map((p) => p.y)) - 22);
+      const maxY = Math.min(H - 6, Math.max(...pts.map((p) => p.y + NODE_H)) + 12);
+      return { slug, idx, x: minX, y: minY, w: maxX - minX, h: maxY - minY, count: pts.length };
+    })
+    .filter((b): b is NonNullable<typeof b> => b !== null);
 
   const byId = new Map(microDevices.map((d) => [d.id, d]));
   let rawLinks: TopologyGraphLink[] = [];
   if (graphData && graphData.links.length > 0) {
     rawLinks = graphData.links.filter((l) => pos.has(l.source_id) && pos.has(l.target_id));
   } else {
-    const spine = microDevices.filter((d) => d.role === 'spine'), leaf = microDevices.filter((d) => d.role === 'leaf');
+    const spine = microDevices.filter((d) => d.role === 'spine');
+    const leaf = microDevices.filter((d) => d.role === 'leaf');
     const border = microDevices.filter((d) => ['border', 'border_firewall'].includes(d.role));
     const server = microDevices.filter((d) => d.role === 'server' || d.platform === 'linux_server');
+    const torLeaves = leaf.slice(0, 2);
     const pairs: [Device, Device][] = [
       ...border.flatMap((b) => spine.map((s): [Device, Device] => [b, s])),
-      ...spine.flatMap((s) => leaf.filter((l) => (l.fabric_id || '') === (s.fabric_id || '')).map((l): [Device, Device] => [s, l])),
-      ...server.flatMap((srv) => leaf.map((l): [Device, Device] => [l, srv])),
+      ...spine.flatMap((s) =>
+        leaf.filter((l) => (l.fabric_id || '') === (s.fabric_id || '')).map((l): [Device, Device] => [s, l]),
+      ),
+      ...server.flatMap((srv) => torLeaves.map((l): [Device, Device] => [l, srv])),
     ];
     rawLinks = pairs.map(([a, b], idx) => ({
       id: `link-${Math.min(a.id, b.id)}-${Math.max(a.id, b.id)}`,
-      source_id: a.id, target_id: b.id, source_hostname: a.hostname, target_hostname: b.hostname,
-      source_port: `eth${idx + 1}`, target_port: `eth${idx + 1}`, subnet: null, layer: 'L3_SUBNET',
-      layers: ['L2_LLDP', 'L3_SUBNET', 'BGP_EVPN'], protocol: 'Clos', bgp_asn: null, vxlan_vni: null,
-      is_inter_stand: (a.fabric_id || '') !== (b.fabric_id || ''), source_stand: a.fabric_id || '', target_stand: b.fabric_id || '',
-      load_pct: linkLoad(a, b), admin_state: 'UP', oper_status: 'UP',
+      source_id: a.id,
+      target_id: b.id,
+      source_hostname: a.hostname,
+      target_hostname: b.hostname,
+      source_port: `eth${idx + 1}`,
+      target_port: `eth${idx + 1}`,
+      subnet: null,
+      layer: 'L3_SUBNET',
+      layers: ['L2_LLDP', 'L3_SUBNET', 'BGP_EVPN'],
+      protocol: 'Clos',
+      bgp_asn: null,
+      vxlan_vni: null,
+      is_inter_stand: (a.fabric_id || '') !== (b.fabric_id || ''),
+      source_stand: a.fabric_id || '',
+      target_stand: b.fabric_id || '',
+      load_pct: linkLoad(a, b),
+      admin_state: 'UP',
+      oper_status: 'UP',
     }));
   }
 
@@ -148,10 +234,17 @@ export function computeTopologyLayout(
 
   const placedBadges: { x: number; y: number }[] = [];
   const builtLinks = filteredLinks.map((lnk) => {
-    const a = byId.get(lnk.source_id)!, b = byId.get(lnk.target_id)!, pa = pos.get(lnk.source_id)!, pb = pos.get(lnk.target_id)!;
-    const sameLayer = Math.abs(pa.y - pb.y) < 15, topFirst = pa.y <= pb.y;
-    const x1 = topFirst ? pa.x : pb.x, y1 = (topFirst ? pa.y : pb.y) + NODE_H;
-    const x2 = topFirst ? pb.x : pa.x, y2 = topFirst ? pb.y : pa.y, dx = x2 - x1;
+    const a = byId.get(lnk.source_id)!;
+    const b = byId.get(lnk.target_id)!;
+    const pa = pos.get(lnk.source_id)!;
+    const pb = pos.get(lnk.target_id)!;
+    const sameLayer = Math.abs(pa.y - pb.y) < 15;
+    const topFirst = pa.y <= pb.y;
+    const x1 = topFirst ? pa.x : pb.x;
+    const y1 = (topFirst ? pa.y : pb.y) + NODE_H;
+    const x2 = topFirst ? pb.x : pa.x;
+    const y2 = topFirst ? pb.y : pa.y;
+    const dx = x2 - x1;
     const baseT = sameLayer ? 0.5 : Math.abs(dx) >= 320 ? (dx > 0 ? 0.22 : 0.78) : Math.abs(dx) > 25 ? (dx > 0 ? 0.34 : 0.66) : 0.5;
     const ptAt = (t: number) => ({
       x: sameLayer ? (pa.x + pb.x) / 2 : x1 + (x2 - x1) * t,
@@ -160,7 +253,8 @@ export function computeTopologyLayout(
     const free = (cx: number, cy: number) => !placedBadges.some((p) => Math.abs(p.x - cx) < 78 && Math.abs(p.y - cy) < 16);
     let { x: bx, y: by } = ptAt(baseT);
     const hitT = [baseT, 0.22, 0.78, 0.35, 0.65, 0.5, 0.16, 0.84, 0.28, 0.72, 0.42, 0.58].find((ct) => {
-      const c = ptAt(ct); return free(c.x, c.y);
+      const c = ptAt(ct);
+      return free(c.x, c.y);
     });
     if (hitT !== undefined) ({ x: bx, y: by } = ptAt(hitT));
     else {
@@ -174,6 +268,8 @@ export function computeTopologyLayout(
   const nodeMetaMap = new Map((graphData?.nodes || []).map((n) => [n.id, n]));
   return {
     nodes: microDevices.filter((d) => pos.has(d.id)).map((d) => ({ d, meta: nodeMetaMap.get(d.id), ...pos.get(d.id)! })),
-    resolvedLinks: builtLinks, standBoxes: boxes, layerLabels: computedLayerLabels,
+    resolvedLinks: builtLinks,
+    standBoxes: boxes,
+    layerLabels: computedLayerLabels,
   };
 }

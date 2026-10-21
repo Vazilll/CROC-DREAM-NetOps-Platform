@@ -139,7 +139,7 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'max by (fabric_id, hostname) (netops_device_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_cpu_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
+      - expr: 'max by (fabric_id, hostname) (netops_device_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} > 0 or netops_cpu_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} > 0 or clamp_min(cpmCPUTotal5secRev{fabric_id=~"$fabric_id", hostname=~"$hostname"} or cpmCPUTotal1minRev{fabric_id=~"$fabric_id", hostname=~"$hostname"}, 1))'
         legendFormat: "{{hostname}} CPU"
         refId: A
 
@@ -166,7 +166,7 @@ panels:
       - expr: 'max by (fabric_id, hostname) (netops_device_memory_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_memory_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} RAM"
         refId: A
-      - expr: 'max by (fabric_id, hostname) (netops_device_uplink_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_uplink_util_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
+      - expr: 'max by (fabric_id, hostname) (netops_device_uplink_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} > 0.01 or netops_uplink_util_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} > 0.01 or clamp_min(clamp_max((rate(gnmi_interfaces_interface_state_counters_in_octets{fabric_id=~"$fabric_id", hostname=~"$hostname"}[2m]) + rate(gnmi_interfaces_interface_state_counters_out_octets{fabric_id=~"$fabric_id", hostname=~"$hostname"}[2m])) * 8 / 1e4, 100), 0.1) or clamp_min(clamp_max((rate(ifHCInOctets{fabric_id=~"$fabric_id", hostname=~"$hostname"}[2m]) + rate(ifHCOutOctets{fabric_id=~"$fabric_id", hostname=~"$hostname"}[2m])) * 8 / 1e4, 100), 0.1) or clamp_min(netops_device_uplink_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"}, 0.1))'
         legendFormat: "{{hostname}} Uplink"
         refId: B
 

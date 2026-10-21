@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { api, isLocalOwnerConsole, rolePortList, type StandRead, type UserRole } from './api';
+import { api, isLocalOwnerConsole, rolePortList, type UserRole } from './api';
 import { Header, type AppTheme } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './components/views/Dashboard';
@@ -58,7 +58,6 @@ export function App() {
   const [accessCodeModalOpen, setAccessCodeModalOpen] = useState<boolean>(false);
   const [activeStand, setActiveStand] = useState<string>('all');
   const [standsModalOpen, setStandsModalOpen] = useState<boolean>(false);
-  const [stands, setStands] = useState<StandRead[]>([]);
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotRequest, setCopilotRequest] = useState<{ text: string; n: number } | null>(null);
@@ -84,6 +83,8 @@ export function App() {
 
   const {
     devices,
+    stands,
+    setStands,
     jobs,
     selectedJobId,
     setSelectedJobId,
@@ -120,7 +121,7 @@ export function App() {
     } catch {
       // Ignore if stands endpoint is unauthenticated or offline during initial load
     }
-  }, []);
+  }, [setStands]);
 
   const handleRefreshStandsAndDevices = useCallback(async () => {
     try {
@@ -132,13 +133,7 @@ export function App() {
       await fetchStands();
     }
     await refreshAll();
-  }, [fetchStands, refreshAll]);
-
-  useEffect(() => {
-    if (apiHealthy) {
-      void fetchStands();
-    }
-  }, [apiHealthy, devices.length, fetchStands]);
+  }, [fetchStands, refreshAll, setStands]);
 
   useEffect(() => {
     const onTopoMutated = () => {

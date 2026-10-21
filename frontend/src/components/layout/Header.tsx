@@ -91,7 +91,7 @@ export const Header: React.FC<HeaderProps> = ({
         ok: true,
       });
     } catch (err: unknown) {
-      setGitNote({ text: getErrorMessage(err, 'Ошибка Git'), ok: false });
+      setGitNote({ text: getErrorMessage(err, locale === 'en' ? 'Git Error' : 'Ошибка Git'), ok: false });
     } finally {
       setSyncingGit(false);
       window.setTimeout(() => setGitNote(null), 4000);
@@ -99,7 +99,7 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   const ghostBtn =
-    'h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)]/50 hover:bg-[var(--bg-elevated)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
+    'h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)] hover:bg-[var(--bg-panel)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
 
   const grafanaUrl =
     typeof window !== 'undefined'
@@ -107,7 +107,7 @@ export const Header: React.FC<HeaderProps> = ({
       : 'http://localhost:3000/d/croc-dream-noc';
 
   return (
-    <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/90 backdrop-blur-md sticky top-0 z-50 px-3 sm:px-5 h-13 flex items-center justify-between gap-2 transition-colors">
+    <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] sticky top-0 z-50 px-3 sm:px-5 h-14 flex items-center justify-between gap-2 transition-colors">
       {/* Brand & Connection Status (Geist / Linear Monochrome) */}
       <div className="flex items-center gap-2.5 min-w-0">
         <div className="h-7 w-7 rounded-md bg-[var(--bg-elevated)] border border-[var(--border-subtle)] flex items-center justify-center text-[var(--text-primary)] shrink-0">
@@ -138,21 +138,15 @@ export const Header: React.FC<HeaderProps> = ({
               data-testid="header-stands-selector"
               className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono shrink-0 border transition-colors cursor-pointer ${
                 activeStand !== 'all'
-                  ? 'bg-cyan-500/15 text-cyan-500 dark:text-cyan-300 border-cyan-500/30 hover:border-cyan-400/50'
-                  : 'bg-[var(--bg-elevated)]/60 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)] hover:border-[var(--border-hover)]'
+                  ? 'bg-[var(--bg-panel)] text-[var(--text-primary)] border-[var(--border-strong)]'
+                  : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)] hover:border-[var(--border-hover)]'
               }`}
-              title={
-                locale === 'en'
-                  ? 'Switch active stand / data center pod'
-                  : 'Переключить активный стенд / ЦОД'
-              }
+              title={t.switchStandTooltip}
             >
-              <Layers className="w-3 h-3 text-cyan-400" />
+              <Layers className="w-3 h-3 text-[var(--text-secondary)]" />
               <span className="truncate max-w-[140px]">
                 {activeStand === 'all'
-                  ? locale === 'en'
-                    ? `Stands (${standsCount})`
-                    : `Стенды (${standsCount})`
+                  ? `${t.standsLabel} (${standsCount})`
                   : activeStand}
               </span>
             </button>
@@ -172,22 +166,20 @@ export const Header: React.FC<HeaderProps> = ({
             className={`${ghostBtn} font-mono ${
               gitNote
                 ? gitNote.ok
-                  ? 'border-emerald-500/40 text-emerald-400'
-                  : 'border-rose-500/40 text-rose-400'
+                  ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                  : 'border-rose-500/40 text-rose-600 dark:text-rose-400'
                 : ''
             }`}
             title={
               gitStatus?.commit_short
-                ? `Git SoT: ${gitStatus.branch || 'main'}@${gitStatus.commit_short} — нажмите для синхронизации`
-                : locale === 'en'
-                  ? 'Sync Git SoT & Inventory'
-                  : 'Синхронизировать Git SoT и инвентарь'
+                ? `Git SoT: ${gitStatus.branch || 'main'}@${gitStatus.commit_short} — ${t.syncGitSotTooltip}`
+                : t.syncGitSotTooltip
             }
           >
             {syncingGit ? (
-              <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+              <RefreshCw className="w-3.5 h-3.5 text-[var(--text-secondary)] animate-spin" />
             ) : (
-              <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+              <GitBranch className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             )}
             <span className="hidden md:inline text-[11px]">
               {syncingGit
@@ -202,10 +194,10 @@ export const Header: React.FC<HeaderProps> = ({
         ) : (
           gitStatus?.commit_short && (
             <span
-              className="hidden md:inline-flex h-8 items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/30 text-[11px] font-mono text-[var(--text-muted)]"
+              className="hidden md:inline-flex h-8 items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-[11px] font-mono text-[var(--text-muted)]"
               title={`Git SoT: ${gitStatus.branch || 'main'}@${gitStatus.commit_short}`}
             >
-              <GitBranch className="w-3 h-3 text-emerald-400" />
+              <GitBranch className="w-3 h-3 text-[var(--text-secondary)]" />
               <span>{gitStatus.commit_short}</span>
             </span>
           )
@@ -217,13 +209,9 @@ export const Header: React.FC<HeaderProps> = ({
           target="_blank"
           rel="noopener noreferrer"
           className={`${ghostBtn} hidden sm:flex`}
-          title={
-            locale === 'en'
-              ? 'Open Grafana NOC Dashboard'
-              : 'Открыть дашборд Grafana NOC'
-          }
+          title={t.openGrafanaTooltip}
         >
-          <BarChart3 className="w-3.5 h-3.5 text-amber-500" />
+          <BarChart3 className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
           <span className="hidden md:inline text-[11px] font-medium">Grafana</span>
         </a>
 
@@ -232,8 +220,8 @@ export const Header: React.FC<HeaderProps> = ({
           onClick={onToggleCopilot}
           className={`h-8 flex items-center gap-1.5 px-2.5 rounded-md text-xs font-medium cursor-pointer transition-colors border ${
             copilotOpen
-              ? 'bg-[var(--text-primary)] text-[var(--bg-main)] border-[var(--text-primary)]'
-              : 'bg-[var(--bg-elevated)]/50 hover:bg-[var(--bg-elevated)] text-[var(--text-primary)] border-[var(--border-subtle)] hover:border-[var(--border-hover)]'
+              ? 'bg-[var(--text-primary)] text-[var(--bg-base)] border-[var(--text-primary)]'
+              : 'bg-[var(--bg-elevated)] hover:bg-[var(--bg-panel)] text-[var(--text-primary)] border-[var(--border-subtle)] hover:border-[var(--border-hover)]'
           }`}
           title={t.aiAssistant}
         >
@@ -243,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
             className={`text-[9px] font-mono uppercase px-1 py-0.2 rounded border ${
               copilotOpen
                 ? 'bg-black/15 border-black/20 text-current'
-                : 'bg-[var(--bg-subtle)] text-[var(--text-secondary)] border-[var(--border-subtle)]'
+                : 'bg-[var(--bg-surface)] text-[var(--text-secondary)] border-[var(--border-subtle)]'
             }`}
           >
             AI
@@ -255,11 +243,11 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenShareModal}
             className={ghostBtn}
-            title={locale === 'en' ? 'Share Canvas (Jury / Team)' : 'Поделиться доступом (Жюри / Команда)'}
+            title={t.shareTooltip}
           >
             <Share2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             <span className="hidden sm:inline text-[11px] font-medium">
-              {locale === 'en' ? 'Share' : 'Поделиться'}
+              {t.shareBtn}
             </span>
           </button>
         )}
@@ -304,21 +292,21 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
             <span className="hidden md:inline text-[11px] text-[var(--text-secondary)]">
-              {locale === 'en' ? 'Setup ·' : 'Настройки ·'}
+              {t.setupPrefix}
             </span>
-            <Shield className="w-3 h-3 text-emerald-500" />
+            <Shield className="w-3 h-3 text-[var(--text-secondary)]" />
             <span className="capitalize font-medium text-[var(--text-primary)] hidden xs:inline">
               {userRole}
             </span>
           </button>
         ) : (
           <div
-            className="h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 text-xs font-mono select-none"
+            className="h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs font-mono select-none"
             title={`RBAC Role: ${userRole.toUpperCase()}`}
           >
-            <Shield className={`w-3 h-3 ${userRole === 'admin' ? 'text-cyan-400' : userRole === 'operator' ? 'text-amber-400' : 'text-zinc-400'}`} />
+            <Shield className="w-3 h-3 text-[var(--text-secondary)]" />
             <span className="capitalize font-medium text-[var(--text-primary)]">
-              {userRole === 'viewer' ? (locale === 'en' ? 'Jury (Read-Only)' : 'Жюри (Чтение)') : userRole}
+              {userRole === 'viewer' ? t.juryReadOnly : userRole}
             </span>
           </div>
         )}

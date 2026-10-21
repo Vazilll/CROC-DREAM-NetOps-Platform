@@ -195,13 +195,16 @@ def collect_metrics_from_cli(
 ) -> dict[str, float]:
     profile = platform_profile or load_profile_for_platform(platform, repo_path=repo_path)
     collected: dict[str, float] = {}
+    cmd_cache: dict[str, str] = {}
     if profile and profile.telemetry:
         for metric, spec in profile.telemetry.items():
             parser_fn = PARSER_REGISTRY.get(spec.parser)
             if not parser_fn:
                 continue
             try:
-                value = parser_fn(send(spec.command))
+                if spec.command not in cmd_cache:
+                    cmd_cache[spec.command] = str(send(spec.command) or "")
+                value = parser_fn(cmd_cache[spec.command])
             except Exception:
                 continue
             if value is not None:
@@ -316,7 +319,7 @@ def detect_optimal_telemetry_protocol(
                 if (is_open and username and password)
                 else None
             )
-            cli_ok = _cli_reports_gnmi(ssh_send, profile.gnmi) if is_open else False
+            cli_ok = _cli_reports_gnmi(ssh_send, profile.gnmi) if (is_open and caps is None) else False
             ok = is_open and not ((caps is not None and not caps.ok) or (caps is None and not cli_ok))
             verified = ("gnmi_capabilities" if caps is not None else "cli+tcp") if ok else None
             supported_protocols[TelemetryProtocol.GNMI.value] = {
@@ -345,8 +348,12 @@ def detect_optimal_telemetry_protocol(
                 }
         elif proto == "snmp" and profile.snmp:
             port = ports.get("snmp") or profile.snmp.base_port
-            versions = protocol_probe.snmp_agent_versions(
-                host, port, community=snmp_community, timeout=timeout
+            versions = (
+                set()
+                if str(platform) == "huawei_vrp"
+                else protocol_probe.snmp_agent_versions(
+                    host, port, community=snmp_community, timeout=timeout
+                )
             )
             snmp_agent = sorted(versions)
             ok = "v2c" in versions
@@ -422,21 +429,24 @@ def metric_series(
             live = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
         if live and (not cached or any(v > 0 for v in live)):
             cached = live
-    if cached and any(v > 0 for v in cached):
-        return cached[-points:]
     if "PYTEST_CURRENT_TEST" in os.environ:
         return cached[-points:]
+    non_zero = [v for v in cached if v > 0]
     try:
         from netops.settings import get_settings
 
         settings = get_settings()
-        if settings.prometheus_url:
+        if settings.prometheus_url and (
+            not non_zero or len(non_zero) < min(points, 6) or len(set(non_zero)) <= 1
+        ):
             prom = query_prometheus_metric(settings.prometheus_url, hostname, metric, points)
-            if prom:
+            if prom and any(v > 0 for v in prom) and (
+                not non_zero or len(set(prom)) >= len(set(non_zero))
+            ):
                 return prom
     except Exception:
         _ = None
-    return cached[-points:]
+    return (non_zero if non_zero else cached)[-points:]
 
 
 __all__ = [

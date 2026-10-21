@@ -144,9 +144,10 @@ export interface StandDeviceTelemetrySeries {
 
 export interface StandTelemetrySeriesResponse {
   fabric_id?: string | null;
-  points: number;
+  points?: number;
+  step_seconds?: number;
   timestamps?: string[];
-  devices: StandDeviceTelemetrySeries[];
+  devices: StandDeviceTelemetrySeries[] | Record<string, StandDeviceTelemetrySeries>;
 }
 
 export class NetOpsStandsClient extends NetOpsHttpClient {

@@ -74,9 +74,6 @@ def publish(
     merge_fabric: str | None = None,
     live_fabrics: set[str] | None = None,
 ) -> datetime:
-    import os
-    import urllib.request
-
     collected_at = utcnow()
     ts_iso = collected_at.isoformat()
     sm = get_state_manager()
@@ -132,21 +129,6 @@ def publish(
             {"collected_at": ts_iso, "samples": fab_rows},
             ex=ttl_seconds,
         )
-
-    vm_url = os.environ.get("NETOPS_VICTORIAMETRICS_URL", "").strip().rstrip("/")
-    if vm_url and "PYTEST_CURRENT_TEST" not in os.environ and samples:
-        try:
-            body = metrics.render(samples, collected_at).encode("utf-8")
-            req = urllib.request.Request(
-                f"{vm_url}/api/v1/import/prometheus?extra_label=job=netops_backend&extra_label=instance=api:8000",
-                data=body,
-                headers={"Content-Type": "text/plain"},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=2.0):
-                pass
-        except Exception as exc:
-            logger.debug("VictoriaMetrics direct push skipped: %s", exc)
     return collected_at
 
 
@@ -253,17 +235,14 @@ def _emit_switch_samples(
     res: list[Sample] = []
     if health.cpu_pct is not None:
         val = float(health.cpu_pct)
-        res.append(Sample(metrics.CPU_USAGE, val, labels))
         res.append(Sample(metrics.DEVICE_CPU_UTIL, val, labels))
         record_live_metric(hostname, "cpu_pct", val)
     if health.memory_pct is not None:
         val = float(health.memory_pct)
-        res.append(Sample(metrics.MEMORY_USAGE, val, labels))
         res.append(Sample(metrics.DEVICE_MEMORY_UTIL, val, labels))
         record_live_metric(hostname, "memory_pct", val)
     if health.uplink_util_pct is not None:
         val = float(health.uplink_util_pct)
-        res.append(Sample(metrics.UPLINK_UTIL, val, labels))
         res.append(Sample(metrics.DEVICE_UPLINK_UTIL, val, labels))
         record_live_metric(hostname, "uplink_util_pct", val)
     for attr, m_name in (
@@ -343,6 +322,30 @@ def _build_probe_tasks(
     return probe_tasks
 
 
+def _probe_external_server(dev: Device, tgt: Any) -> bool:
+    from netops.services import protocol_probe
+    from netops.telemetry import targets
+
+    if not targets.is_externally_collected(dev.hostname):
+        return False
+    dev_info = ((targets.last_collector_plan() or {}).get("devices") or {}).get(dev.hostname, {})
+    proto = dev_info.get("protocol")
+    port = dev_info.get("port")
+    host = tgt.host or dev.management_ip
+    try:
+        if proto == TelemetryProtocol.PROMETHEUS_EXPORTER.value:
+            return protocol_probe.prometheus_exporter_ok(
+                host, int(port or 9100), dev_info.get("path") or "/metrics", timeout=1.5
+            )
+        if proto == TelemetryProtocol.GNMI.value:
+            return protocol_probe.tcp_open(host, int(port or 6030), timeout=1.5)
+        if proto == TelemetryProtocol.SNMP.value:
+            return bool(protocol_probe.snmp_agent_versions(host, int(port or 161), timeout=1.5))
+        return protocol_probe.tcp_open(host, int(tgt.port or 22), timeout=1.5)
+    except Exception:
+        return False
+
+
 # Опрос стенда: что заявлено в intent, то и проверяем. Устройство, которое не ответило,
 # отмечаем недоступным и идём дальше — сбор метрик не должен падать из-за одной ноды.
 def device_samples(
@@ -382,17 +385,24 @@ def device_samples(
         dev, lbls, exp, tgt, prep_err, ports = item
         if prep_err is not None or tgt is None:
             return dev, lbls, None, prep_err, ports
+        is_scrapli = toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
         try:
-            if toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver":
-                exp = HealthExpectations(bgp_peers=(), interfaces=exp.interfaces)
-            snap = toolchain.health_probe.snapshot(tgt, exp)
-            hw_json: str | None = None
             from netops.services.discovery_parsers import _needs_hardware_specs
 
             if (
-                _needs_hardware_specs(dev.hardware_specs)
-                and toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
+                is_scrapli
+                and _is_server_device(dev)
+                and not _needs_hardware_specs(dev.hardware_specs)
+                and _probe_external_server(dev, tgt)
             ):
+                from netops.network.base import HealthSnapshot
+
+                return dev, lbls, HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}), None, ports, None
+            if is_scrapli:
+                exp = HealthExpectations(bgp_peers=(), interfaces=exp.interfaces)
+            snap = toolchain.health_probe.snapshot(tgt, exp)
+            hw_json: str | None = None
+            if is_scrapli and _needs_hardware_specs(dev.hardware_specs):
                 try:
                     import json
 
@@ -421,47 +431,10 @@ def device_samples(
                     logger.debug("Hardware specs probe skipped for %s: %s", dev.hostname, hw_exc)
             return dev, lbls, snap, None, ports, hw_json
         except Exception as ssh_exc:
-            if (
-                toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
-                and _is_server_device(dev)
-            ):
+            if is_scrapli and _is_server_device(dev) and _probe_external_server(dev, tgt):
                 from netops.network.base import HealthSnapshot
-                from netops.services import protocol_probe
-                from netops.telemetry import targets
 
-                if targets.is_externally_collected(dev.hostname):
-                    plan = targets.last_collector_plan() or {}
-                    dev_info = (plan.get("devices") or {}).get(dev.hostname, {})
-                    proto = dev_info.get("protocol")
-                    port = dev_info.get("port")
-                    host = tgt.host or dev.management_ip
-                    try:
-                        if proto == TelemetryProtocol.PROMETHEUS_EXPORTER.value:
-                            path = dev_info.get("path") or "/metrics"
-                            ok = protocol_probe.prometheus_exporter_ok(
-                                host, int(port or 9100), path, timeout=1.5
-                            )
-                        elif proto == TelemetryProtocol.GNMI.value:
-                            ok = protocol_probe.tcp_open(host, int(port or 6030), timeout=1.5)
-                        elif proto == TelemetryProtocol.SNMP.value:
-                            ok = bool(
-                                protocol_probe.snmp_agent_versions(
-                                    host, int(port or 161), timeout=1.5
-                                )
-                            )
-                        else:
-                            ok = protocol_probe.tcp_open(host, int(tgt.port or 22), timeout=1.5)
-                        if ok:
-                            return (
-                                dev,
-                                lbls,
-                                HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}),
-                                None,
-                                ports,
-                                None,
-                            )
-                    except Exception as fb_exc:
-                        logger.debug("Fallback probe failed for %s: %s", dev.hostname, fb_exc)
+                return dev, lbls, HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}), None, ports, None
             return dev, lbls, None, ssh_exc, ports, None
 
     workers = max(1, min(max_workers, len(probe_tasks)))
@@ -473,10 +446,15 @@ def device_samples(
 
     samples: list[Sample] = []
     status_changed = False
+    is_live_driver = toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
     for item_res in results:
         device, labels, health, err, _ports = item_res[:5]
         hw_json = item_res[5] if len(item_res) > 5 else None
         if err is not None or health is None:
+            if "SSH-замок" in str(err):
+                prev, _ = latest_for_host(device.hostname)
+                samples.extend(prev or [Sample(metrics.DEVICE_REACHABLE, 1.0, labels)])
+                continue
             from netops.services.telemetry import clear_live_metrics
 
             logger.info("Телеметрия с %s не снята: %s", device.hostname, err)
@@ -487,13 +465,20 @@ def device_samples(
             samples.append(Sample(metrics.DEVICE_REACHABLE, 0.0, labels))
             continue
 
-        if device.status == DeviceStatus.UNREACHABLE:
-            device.status = (
-                DeviceStatus.IN_SYNC if _is_server_device(device) else DeviceStatus.UNKNOWN
-            )
-            status_changed = True
-        elif _is_server_device(device) and device.status == DeviceStatus.UNKNOWN:
-            device.status = DeviceStatus.IN_SYNC
+        from netops.services.vitality import clear_connection_failure
+
+        clear_connection_failure(device.hostname)
+        if device.status in (DeviceStatus.UNREACHABLE, DeviceStatus.UNKNOWN):
+            from netops.models.drift import DriftRecord
+
+            dr = session.scalars(select(DriftRecord).where(DriftRecord.device_id == device.id).order_by(DriftRecord.id.desc()).limit(1)).first()
+            dr_val = getattr(getattr(dr, "status", None), "value", None)
+            if dr_val in (DeviceStatus.IN_SYNC.value, DeviceStatus.DRIFT_DETECTED.value):
+                device.status = DeviceStatus(dr_val)
+            elif is_live_driver or _is_server_device(device):
+                device.status = DeviceStatus.IN_SYNC
+            elif device.status == DeviceStatus.UNREACHABLE:
+                device.status = DeviceStatus.UNKNOWN
             status_changed = True
         if hw_json:
             device.hardware_specs = hw_json
@@ -501,10 +486,7 @@ def device_samples(
         device.last_checked_at = utcnow()
         status_changed = True
         samples.append(Sample(metrics.DEVICE_REACHABLE, 1.0, labels))
-        if _is_server_device(device):
-            samples.extend(_emit_server_samples(health, labels, device.hostname))
-        else:
-            samples.extend(_emit_switch_samples(health, labels, device.hostname))
+        samples.extend(_emit_server_samples(health, labels, device.hostname) if _is_server_device(device) else _emit_switch_samples(health, labels, device.hostname))
 
     if status_changed:
         session.commit()

@@ -158,24 +158,34 @@ export function bootstrapAuthSession(
   const url = new URL(window.location.href);
   const urlToken = url.searchParams.get('token') || url.searchParams.get('code');
   const legacyToken = localStorage.getItem('netops_token');
+  const savedQrToken = localStorage.getItem('netops_static_viewer_token');
   localStorage.removeItem('netops_token');
 
   if (urlToken) {
+    const cleanUrlToken = urlToken.trim();
     url.searchParams.delete('token');
     url.searchParams.delete('code');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
     localStorage.setItem('netops_onboarding_done', 'true');
+    if (cleanUrlToken.startsWith('crk_viewer_')) {
+      localStorage.setItem('netops_static_viewer_token', cleanUrlToken);
+    }
     try {
       sessionStorage.setItem('netops_invite_session', '1');
     } catch {
       // ignore storage errors
     }
-    return loginFn(urlToken.trim())
+    return loginFn(cleanUrlToken)
       .then((res) => {
         localStorage.setItem('netops_user_role', res.role);
         localStorage.setItem('netops_onboarding_done', 'true');
+        if (res.username === 'static_viewer') {
+          localStorage.setItem('netops_static_viewer_token', cleanUrlToken);
+        }
       })
-      .catch(() => undefined);
+      .catch(() => {
+        localStorage.removeItem('netops_static_viewer_token');
+      });
   }
 
   // Local hardware on main console (localhost:5173): always authenticate as Owner
@@ -191,13 +201,16 @@ export function bootstrapAuthSession(
       });
   }
 
-  if (legacyToken) {
-    return loginFn(legacyToken)
+  const persistentToken = savedQrToken || legacyToken;
+  if (persistentToken) {
+    return loginFn(persistentToken)
       .then((res) => {
         localStorage.setItem('netops_user_role', res.role);
         localStorage.setItem('netops_onboarding_done', 'true');
       })
-      .catch(() => undefined);
+      .catch(() => {
+        localStorage.removeItem('netops_static_viewer_token');
+      });
   }
 
   return Promise.resolve();

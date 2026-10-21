@@ -373,6 +373,11 @@ def restore_device_backup_route(
 def sync_inventory(
     service: DeviceServiceDep, container: ContainerDep, _: Admin
 ) -> InventorySyncResult:
+    import yaml
+    from sqlalchemy import select
+
+    from netops.intent.models import Inventory, InventoryDevice
+    from netops.models import Stand
     from netops.services.notifier import sync_access_registry
 
     settings = container.settings
@@ -382,6 +387,17 @@ def sync_inventory(
         )
     else:
         inventory = container.intents.load_inventory()
+        stands = list(service._session.scalars(select(Stand).order_by(Stand.id)).all())
+        if stands:
+            by_host = {d.hostname: d for d in inventory.devices}
+            for st in stands:
+                st_inv_path = settings.intent_repo_path / "stands" / st.slug / "inventory.yaml"
+                if st_inv_path.is_file():
+                    raw = yaml.safe_load(st_inv_path.read_text(encoding="utf-8")) or {}
+                    for item in raw.get("devices") or []:
+                        if isinstance(item, dict) and item.get("hostname"):
+                            by_host[str(item["hostname"])] = InventoryDevice.model_validate(item)
+            inventory = Inventory(devices=list(by_host.values()))
     res = service.sync_inventory(inventory)
     sync_access_registry(service._session, settings)
     return res

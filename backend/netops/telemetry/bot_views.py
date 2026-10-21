@@ -76,11 +76,11 @@ def _overview_text(session: Session, settings: Settings | None = None) -> str:
     bgp_up_by_host: dict[str, list[str]] = {}
     for s in samples:
         h = str(s.labels.get("hostname", ""))
-        if s.name == metrics.CPU_USAGE:
+        if s.name in (metrics.DEVICE_CPU_UTIL, metrics.SERVER_CPU_UTIL, metrics.CPU_USAGE):
             cpu_by_host[h] = s.value
-        elif s.name == metrics.MEMORY_USAGE:
+        elif s.name in (metrics.DEVICE_MEMORY_UTIL, metrics.SERVER_MEMORY_UTIL, metrics.MEMORY_USAGE):
             mem_by_host[h] = s.value
-        elif s.name == metrics.UPLINK_UTIL:
+        elif s.name in (metrics.DEVICE_UPLINK_UTIL, metrics.UPLINK_UTIL):
             uplink_by_host[h] = s.value
         elif s.name == metrics.BGP_SESSION_UP:
             state_lbl = "UP" if s.value else "DOWN"
@@ -212,11 +212,11 @@ def _summary(samples: Iterable[Sample]) -> list[str]:
             ports.append((f"{host} {sample.labels.get('interface')}", sample.value))
         elif sample.name == metrics.PING_LOSS:
             losses.append((f"{host} → {sample.labels.get('peer')}", sample.value))
-        elif sample.name == metrics.CPU_USAGE:
+        elif sample.name in (metrics.DEVICE_CPU_UTIL, metrics.CPU_USAGE):
             cpus.append(f"{host}: {sample.value:g}%")
-        elif sample.name == getattr(metrics, "MEMORY_USAGE", "netops_memory_usage_percent"):
+        elif sample.name in (metrics.DEVICE_MEMORY_UTIL, getattr(metrics, "MEMORY_USAGE", "netops_memory_usage_percent")):
             mems.append(f"{host}: {sample.value:g}%")
-        elif sample.name == metrics.UPLINK_UTIL:
+        elif sample.name in (metrics.DEVICE_UPLINK_UTIL, metrics.UPLINK_UTIL):
             uplinks.append(f"{host}: {sample.value:g}%")
 
     lines = [

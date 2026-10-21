@@ -262,7 +262,30 @@ class IntentRepository:
         if not path.is_file():
             issues.append(IntentIssue(self._inventory_file, "", "Inventory file is missing"))
             return None
-        return self._parse_file(path, Inventory, issues)
+        inv = self._parse_file(path, Inventory, issues)
+        if inv is None or self._inventory_file != INVENTORY_FILE:
+            return inv
+        stand_dirs = self._stand_device_dirs()
+        if not stand_dirs:
+            return inv
+        by_host = {d.hostname: d for d in inv.devices}
+        for sdir in stand_dirs:
+            sinv_path = sdir.parent / INVENTORY_FILE
+            if not sinv_path.is_file():
+                continue
+            sinv = self._parse_file(sinv_path, Inventory, [])
+            if sinv is None:
+                continue
+            for sd in sinv.devices:
+                base = by_host.get(sd.hostname)
+                if base is not None:
+                    merged = base.model_dump()
+                    for k, v in sd.model_dump(exclude_none=True).items():
+                        merged[k] = v
+                    by_host[sd.hostname] = base.model_validate(merged)
+                else:
+                    by_host[sd.hostname] = sd
+        return Inventory(devices=list(by_host.values()))
 
     def _parse_file(
         self, path: Path, model: type[ModelT], issues: list[IntentIssue]

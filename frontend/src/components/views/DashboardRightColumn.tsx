@@ -10,7 +10,7 @@ import { BentoCard } from '../layout/ui';
 const JOB_COLOR: Record<string, { text: string; bg: string; border: string }> = {
   SUCCESS: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
   FAILED: { text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
-  RUNNING: { text: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
+  RUNNING: { text: 'text-[var(--text-primary)]', bg: 'bg-[var(--bg-elevated)]', border: 'border-[var(--border-strong)]' },
   PENDING: { text: 'text-[var(--text-secondary)]', bg: 'bg-[var(--bg-subtle)]', border: 'border-[var(--border-subtle)]' },
 };
 

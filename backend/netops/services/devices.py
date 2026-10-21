@@ -149,16 +149,27 @@ class DeviceService:
     ) -> Device:
         from sqlalchemy.orm.attributes import set_committed_value
 
+        from netops.services.state import get_state_manager
+
         role_str = str(device.role.value if hasattr(device.role, "value") else device.role)
-        sparkline = metric_series(device.hostname, role_str, "uplink_util_pct", points=24)
-        if not sparkline or not any(v > 0 for v in sparkline):
-            cpu_series = metric_series(device.hostname, role_str, "cpu_pct", points=24)
-            if cpu_series and (not sparkline or any(v > 0 for v in cpu_series)):
-                sparkline = cpu_series
-        if not sparkline or not any(v > 0 for v in sparkline):
-            mem_series = metric_series(device.hostname, role_str, "memory_pct", points=24)
-            if mem_series and (not sparkline or any(v > 0 for v in mem_series)):
-                sparkline = mem_series
+        sm = get_state_manager()
+        sparkline: list[float] = []
+        for m_name in ("uplink_util_pct", "cpu_pct", "memory_pct"):
+            local_pts = sm.get_telemetry_series(device.hostname, m_name, points=24)
+            if local_pts and any(v > 0 for v in local_pts):
+                sparkline = local_pts[-24:]
+                break
+        if not sparkline:
+            for m_name in ("uplink_util_pct", "cpu_pct", "memory_pct"):
+                series = metric_series(device.hostname, role_str, m_name, points=24)
+                if series and (not sparkline or any(v > 0 for v in series)):
+                    sparkline = series
+                if sparkline and any(v > 0 for v in sparkline):
+                    break
+        if device.status == DeviceStatus.UNKNOWN and latest_drift is not None:
+            dr_val = getattr(latest_drift.status, "value", str(latest_drift.status))
+            if dr_val in (DeviceStatus.IN_SYNC.value, DeviceStatus.DRIFT_DETECTED.value):
+                set_committed_value(device, "status", DeviceStatus(dr_val))
         oper_status = self._derive_oper_status(device, sparkline, latest_drift)
         if topo_node:
             t_status = topo_node.get("status")
@@ -196,7 +207,7 @@ class DeviceService:
         if device.status == DeviceStatus.UNREACHABLE:
             return "DOWN"
         if device.status == DeviceStatus.UNKNOWN:
-            return "UNKNOWN"
+            return "UP" if (sparkline and any(v > 0 for v in sparkline)) else "UNKNOWN"
         if latest_drift:
             has_shutdown = any(
                 "shutdown" in line.lower() and "no shutdown" not in line.lower()

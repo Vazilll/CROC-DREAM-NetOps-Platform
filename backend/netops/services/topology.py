@@ -203,7 +203,11 @@ def build_topology_graph(
         active_proto = (
             override_mode
             if (override_mode and override_mode != "auto")
-            else str(dev_plan.get("protocol") or "ssh_cli")
+            else (
+                "ssh_cli"
+                if plat_str == "huawei_vrp"
+                else str(dev_plan.get("protocol") or "ssh_cli")
+            )
         )
         raw_status = db_status_map.get(dev.id) or getattr(dev.status, "value", str(dev.status))
         nodes_out.append({
@@ -225,7 +229,11 @@ def build_topology_graph(
             "telemetry_protocol": active_proto,
             "telemetry_mode": override_mode or str(dev_plan.get("selected_mode") or "auto"),
             "telemetry_port": int(
-                dev_plan.get("port")
+                (
+                    dev.management_port
+                    if active_proto == "ssh_cli"
+                    else dev_plan.get("port")
+                )
                 or ports.get("exporter" if active_proto in ("node_exporter", "prometheus_exporter") else active_proto, dev.management_port)
                 or 22
             ),
@@ -246,7 +254,7 @@ def build_topology_graph(
     # 3. Enrich/add L1/L2 links from Containerlab and LLDP
     synthesize_l2_lldp_links(devices, by_canon, eff, default_stand, links_map)
 
-    # 4. Clos role adjacency and DCI links
+    # 4. Clos role adjacency and DCI links (Dual-Homed ToR pair for servers)
     by_stand: dict[str, list[Device]] = collections.defaultdict(list)
     for d in devices:
         by_stand[

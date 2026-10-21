@@ -318,15 +318,16 @@ def synthesize_clos_and_dci_links(
                     default_stand=default_stand,
                 )
                 links_map.setdefault(lnk["id"], lnk)
+        tor_leaves = sorted(leaves, key=lambda x: (x.hostname or "", x.id or 0))[:2]
         for srv in servers:
             if srv.id in connected_ids:
                 continue
-            for idx_l, lf in enumerate(leaves, 1):
+            for idx_l, lf in enumerate(tor_leaves, 1):
                 lnk = make_base_link(
                     lf,
                     srv,
                     "GE1/0/10",
-                    f"bond0.{idx_l}",
+                    f"eth{idx_l}",
                     layer="L2_LLDP",
                     layers=["L2_LLDP", "L3_SUBNET"],
                     protocol="ToR LACP / VLAN 10 Access (10.20.1.0/24)",

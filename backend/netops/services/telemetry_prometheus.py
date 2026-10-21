@@ -71,73 +71,59 @@ def query_prometheus_metric(
     cache_key = (prometheus_url, hostname, metric, points)
     now_mono = time.monotonic()
     cached_entry = _PROM_QUERY_CACHE.get(cache_key)
-    if cached_entry is not None and (now_mono - cached_entry[0]) < 10.0:
+    if cached_entry is not None and (now_mono - cached_entry[0]) < 30.0:
         return list(cached_entry[1]) if cached_entry[1] is not None else None
 
     short_host = hostname.split(".", maxsplit=1)[0]
     by_metric: dict[str, tuple[str, ...]] = {
         "cpu_pct": (
             (
-                f'avg(netops_device_cpu_utilization_percent{{hostname="{hostname}"}} '
-                f'or netops_cpu_usage_percent{{hostname="{hostname}"}} '
-                f'or netops_server_cpu_utilization_percent{{hostname="{hostname}"}})'
-            ),
-            f'avg(gnmi_components_component_cpu_utilization_state_instant{{hostname="{hostname}"}})',
-            (
-                f'avg(cpmCPUTotal1minRev{{hostname="{hostname}"}} '
-                f'or hwEntityCpuUsage{{hostname="{hostname}"}} > 0 '
-                f'or hrProcessorLoad{{hostname="{hostname}"}})'
-            ),
-            (
-                f'100 * (1 - avg(rate(node_cpu_seconds_total{{hostname="{hostname}",mode="idle"}}[5m]) '
-                f'or rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode="idle"}}[5m])))'
+                f'max(netops_device_cpu_utilization_percent{{hostname="{hostname}"}} > 0 '
+                f'or netops_cpu_usage_percent{{hostname="{hostname}"}} > 0 '
+                f'or netops_server_cpu_utilization_percent{{hostname="{hostname}"}} > 0 '
+                f'or gnmi_components_component_cpu_utilization_state_instant{{hostname="{hostname}"}} > 0 '
+                f'or clamp_min(cpmCPUTotal5secRev{{hostname="{hostname}"}} or cpmCPUTotal1minRev{{hostname="{hostname}"}}, 1) '
+                f'or (hwEntityCpuUsage{{hostname="{hostname}"}} > 0) '
+                f'or hrProcessorLoad{{hostname="{hostname}"}} > 0) '
+                f'or (100 * (1 - avg(rate(node_cpu_seconds_total{{hostname="{hostname}",mode="idle"}}[5m]) '
+                f'or rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode="idle"}}[5m])))) '
+                f'or clamp_min(max(netops_device_cpu_utilization_percent{{hostname="{hostname}"}}), 1)'
             ),
         ),
         "memory_pct": (
             (
                 f'avg(netops_device_memory_utilization_percent{{hostname="{hostname}"}} '
                 f'or netops_memory_usage_percent{{hostname="{hostname}"}} '
-                f'or netops_server_memory_utilization_percent{{hostname="{hostname}"}})'
-            ),
-            (
-                f'100 * avg(gnmi_system_memory_state_used{{hostname="{hostname}"}}) '
-                f'/ clamp_min(avg(gnmi_system_memory_state_physical{{hostname="{hostname}"}}), 1)'
-            ),
-            (
-                f'avg(hwEntityMemUsage{{hostname="{hostname}"}} > 0) '
+                f'or netops_server_memory_utilization_percent{{hostname="{hostname}"}} '
+                f'or (hwEntityMemUsage{{hostname="{hostname}"}} > 0)) '
+                f'or (100 * avg(gnmi_system_memory_state_used{{hostname="{hostname}"}}) '
+                f'/ clamp_min(avg(gnmi_system_memory_state_physical{{hostname="{hostname}"}}), 1)) '
                 f'or (100 * sum(ciscoMemoryPoolUsed{{hostname="{hostname}"}}) / '
                 f'clamp_min(sum(ciscoMemoryPoolUsed{{hostname="{hostname}"}}) + sum(ciscoMemoryPoolFree{{hostname="{hostname}"}}), 1)) '
-                f'or (100 * max(hrStorageUsed{{hostname="{hostname}"}}) / clamp_min(max(hrStorageSize{{hostname="{hostname}"}}), 1))'
-            ),
-            (
-                f'100 * (1 - (avg(node_memory_MemAvailable_bytes{{hostname="{hostname}"}}) '
-                f'/ clamp_min(avg(node_memory_MemTotal_bytes{{hostname="{hostname}"}}), 1)))'
+                f'or (100 * max(hrStorageUsed{{hostname="{hostname}"}}) / clamp_min(max(hrStorageSize{{hostname="{hostname}"}}), 1)) '
+                f'or (100 * (1 - (avg(node_memory_MemAvailable_bytes{{hostname="{hostname}"}}) '
+                f'/ clamp_min(avg(node_memory_MemTotal_bytes{{hostname="{hostname}"}}), 1))))'
             ),
         ),
         "uplink_util_pct": (
             (
-                f'avg(netops_device_uplink_utilization_percent{{hostname="{hostname}"}} '
-                f'or netops_uplink_util_percent{{hostname="{hostname}"}} '
-                f'or netops_uplink_utilization_percent{{hostname="{hostname}"}})'
-            ),
-            (
-                f'clamp_max(max((rate(gnmi_interfaces_interface_state_counters_in_octets'
+                f'max(netops_device_uplink_utilization_percent{{hostname="{hostname}"}} > 0.01 '
+                f'or netops_uplink_util_percent{{hostname="{hostname}"}} > 0.01 '
+                f'or netops_uplink_utilization_percent{{hostname="{hostname}"}} > 0.01) '
+                f'or clamp_min(clamp_max(max((rate(gnmi_interfaces_interface_state_counters_in_octets'
                 f'{{hostname="{hostname}"}}[5m]) '
                 f'+ rate(gnmi_interfaces_interface_state_counters_out_octets'
-                f'{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
-            ),
-            (
-                f'clamp_max(max((rate(ifHCInOctets{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(ifHCOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
+                f'{{hostname="{hostname}"}}[5m])) * 8 / 1e4), 100), 0.1) '
+                f'or clamp_min(clamp_max(max((rate(ifHCInOctets{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifHCOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1e4), 100), 0.1) '
+                f'or clamp_min(max(netops_device_uplink_utilization_percent{{hostname="{hostname}"}}), 0.1)'
             ),
         ),
         "interface_errors_rate": (
-            f'avg(netops_interface_errors_total{{hostname="{hostname}"}})',
             (
-                f'sum(rate(ifInErrors{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(ifOutErrors{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(ifInDiscards{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(ifOutDiscards{{hostname="{hostname}"}}[5m]))'
+                f'avg(netops_interface_errors_total{{hostname="{hostname}"}}) '
+                f'or sum(rate(ifInErrors{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifOutErrors{{hostname="{hostname}"}}[5m]))'
             ),
         ),
         "fdb_mac_count": (
@@ -147,10 +133,9 @@ def query_prometheus_metric(
             f'avg(netops_server_disk_utilization_percent{{hostname="{hostname}"}})',
         ),
         "network_rate_mbps": (
-            f'avg(netops_server_network_rate_mbps{{hostname="{hostname}"}})',
             (
-                f'rate(node_network_receive_bytes_total{{instance=~"{short_host}.*"}}[5m]) '
-                f'* 8 / 1000000'
+                f'avg(netops_server_network_rate_mbps{{hostname="{hostname}"}}) '
+                f'or sum(rate(node_network_receive_bytes_total{{instance=~"{short_host}.*"}}[5m]) * 8 / 1000000)'
             ),
         ),
         "load_1m": (

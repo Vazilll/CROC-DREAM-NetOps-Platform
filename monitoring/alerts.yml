@@ -7,7 +7,7 @@ groups:
       - record: netops_device_cpu_utilization_percent
         expr: >-
           avg by (hostname, fabric_id, platform) (gnmi_components_component_cpu_utilization_state_instant)
-          or avg by (hostname, fabric_id, platform) (cpmCPUTotal1minRev)
+          or clamp_min(avg by (hostname, fabric_id, platform) (cpmCPUTotal5secRev or cpmCPUTotal1minRev), 1)
           or avg by (hostname, fabric_id, platform) (hwEntityCpuUsage > 0)
           or avg by (hostname, fabric_id, platform) (hrProcessorLoad)
 
@@ -30,14 +30,20 @@ groups:
       - record: netops_device_uplink_utilization_percent
         expr: >-
           clamp_max(
-            max by (hostname, fabric_id, platform) (
-              (
-                rate(gnmi_interfaces_interface_state_counters_in_octets[2m])
-                + rate(gnmi_interfaces_interface_state_counters_out_octets[2m])
-              ) * 8 / 1e7
-            )
-            or max by (hostname, fabric_id, platform) (
-              (rate(ifHCInOctets[2m]) + rate(ifHCOutOctets[2m])) * 8 / 1e7
+            clamp_min(
+              max by (hostname, fabric_id, platform) (
+                (
+                  rate(gnmi_interfaces_interface_state_counters_in_octets[2m])
+                  + rate(gnmi_interfaces_interface_state_counters_out_octets[2m])
+                ) * 8 / 1e4
+              )
+              or max by (hostname, fabric_id, platform) (
+                (rate(ifHCInOctets[2m]) + rate(ifHCOutOctets[2m])) * 8 / clamp_min(ifHighSpeed * 10, 1e4)
+              )
+              or max by (hostname, fabric_id, platform) (
+                (rate(ifHCInOctets[2m]) + rate(ifHCOutOctets[2m])) * 8 / 1e4
+              ),
+              0.1
             ),
             100
           )
@@ -108,16 +114,15 @@ groups:
           summary: "Упал порт {{ $labels.ifDescr }}{{ $labels.interface_name }} на {{ $labels.hostname }}"
           description: "Интерфейс перешёл в состояние DOWN (oper-status=2)"
 
-      # 4. Дропы пакетов на порту (ACL / переполнение буфера) по SNMP или gNMI
+      # 4. Дропы пакетов на порту (ACL / переполнение буфера) по gNMI
       - alert: HighInterfaceDiscards
         expr: >-
-          (rate(ifInDiscards[1m]) + rate(ifOutDiscards[1m])) > 5
-          or rate(gnmi_interfaces_interface_state_counters_in_discards[1m]) > 5
+          rate(gnmi_interfaces_interface_state_counters_in_discards[1m]) > 5
         for: 30s
         labels:
           severity: warning
         annotations:
-          summary: "Сброс пакетов на {{ $labels.hostname }} ({{ $labels.ifDescr }}{{ $labels.interface_name }})"
+          summary: "Сброс пакетов на {{ $labels.hostname }} ({{ $labels.interface_name }})"
           description: "Дропы пакетов на порту превышают 5 пакетов/сек"
 
       # 5. Ошибки на физическом уровне (CRC / Frame Errors)
@@ -127,19 +132,19 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "Ошибки L1/L2 на порту {{ $labels.ifDescr }} ({{ $labels.hostname }})"
-          description: "На интерфейсе {{ $labels.ifDescr }} фиксируются ошибки приёма/передачи"
+          summary: "Ошибки L1/L2 на порту {{ $labels.ifIndex }} ({{ $labels.hostname }})"
+          description: "На интерфейсе {{ $labels.ifIndex }} фиксируются ошибки приёма/передачи"
 
       # 6. Перегрузка канала (> 80% от скорости порта)
       - alert: HighLinkUtilization
         expr: >-
-          ((rate(ifHCInOctets[1m]) * 8) / (ifHighSpeed * 1000000 > 0)) * 100 > 80
+          netops_device_uplink_utilization_percent > 80
         for: 1m
         labels:
           severity: warning
         annotations:
-          summary: "Высокая загрузка канала {{ $labels.ifDescr }} на {{ $labels.hostname }}"
-          description: "Утилизация интерфейса {{ $labels.ifDescr }} превысила 80%"
+          summary: "Высокая загрузка канала на {{ $labels.hostname }}"
+          description: "Утилизация аплинка {{ $labels.hostname }} превысила 80%"
 
       # 7. Высокая загрузка CPU (> 85%)
       - alert: HighCpuLoad
