@@ -96,6 +96,12 @@ telemetry:
   sip_active_sessions:
     command: "ss -u -H sport = :5060 2>/dev/null | wc -l"
     parser: parse_sip_sessions
+  tcp_retransmits_rate:
+    command: "grep -E '^Tcp:' /proc/net/snmp 2>/dev/null || ss -s"
+    parser: parse_linux_tcp_retransmits
+  conntrack_usage_pct:
+    command: "cat /proc/sys/net/netfilter/nf_conntrack_count /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0"
+    parser: parse_linux_conntrack
 
 # ==============================================================================
 # БЛОК 5: АВАРИЙНОЕ УПРАВЛЕНИЕ (EMERGENCY HUB)

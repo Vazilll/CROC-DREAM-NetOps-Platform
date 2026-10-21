@@ -72,6 +72,12 @@ telemetry:
   uplink_util_pct:
     command: show interfaces counters rates
     parser: max_arista_link_utilization
+  interface_errors_rate:
+    command: show interfaces counters errors
+    parser: parse_interface_errors
+  fdb_mac_count:
+    command: show mac address-table count
+    parser: parse_fdb_mac_count
 
 # ==============================================================================
 # БЛОК 5: АВАРИЙНОЕ УПРАВЛЕНИЕ (EMERGENCY HUB)
