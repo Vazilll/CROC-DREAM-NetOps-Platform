@@ -1,0 +1,9 @@
+job_id: live-verify-commit
+job_type: DRIFT_SCAN
+committed_at: 1792605714
+changed_hosts:
+- leaf-1.croc.lab
+devices:
+- hostname: leaf-1.croc.lab
+  in_sync: false
+  remediation_lines: 2
