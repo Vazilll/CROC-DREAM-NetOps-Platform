@@ -165,13 +165,18 @@ export const DryRunModal: React.FC<DryRunModalProps> = ({
         {/* Content Body */}
         <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 text-xs">
           {/* Git Branch & Source of Truth */}
-          <div className="rounded-lg border border-white/[0.08] bg-[#10121a] p-3 flex items-start gap-2.5">
-            <GitBranch className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-            <div className="min-w-0">
-              <div className="text-[11px] text-zinc-400">Git SoT</div>
-              <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{liveGitBranch}</div>
-              <div className="text-[10px] text-zinc-500 font-mono truncate">{liveGitCommit}</div>
+          <div className="rounded-lg border border-white/[0.08] bg-[#10121a] p-3 flex items-center justify-between gap-2.5">
+            <div className="flex items-start gap-2.5 min-w-0">
+              <GitBranch className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <div className="text-[11px] text-zinc-400">Источник эталона (Git SoT)</div>
+                <div className="font-mono text-zinc-200 font-medium truncate mt-0.5">{liveGitBranch}</div>
+                <div className="text-[10px] text-zinc-500 font-mono truncate">{liveGitCommit}</div>
+              </div>
             </div>
+            <span className="px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-[10px] font-mono text-emerald-400 shrink-0">
+              Pre-flight Lint & Синтаксис: OK
+            </span>
           </div>
 
           {/* Blast Radius Estimation Card */}

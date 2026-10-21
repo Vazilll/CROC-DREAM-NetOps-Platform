@@ -126,6 +126,13 @@ def _probe_device(
     override = get_protocol_overrides().get(device.hostname)
     extra_kwargs: dict[str, Any] = {}
     if detect is detect_optimal_telemetry_protocol:
+        if not community:
+            for sp in (Path("/data/monitoring/snmp.yml"), Path("/app/monitoring/snmp.yml"), Path("monitoring/snmp.yml")):
+                if sp.is_file():
+                    raw_snmp = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
+                    community = ((raw_snmp.get("auths") or {}).get("public_v2") or {}).get("community")
+                    if community:
+                        break
         ssh_send = _make_ssh_trigger_sender(device, toolchain)
         extra_kwargs["timeout"] = 3.0  # стенды достижимы через интернет: 0.5с по умолчанию мало
         if ssh_send is not None:
@@ -134,16 +141,19 @@ def _probe_device(
             extra_kwargs["preferred_protocol"] = override
     probe_host = str(device.management_ip)
     stand_host = getattr(settings, "clab_host", None)
+    port_map = getattr(settings, "clab_port_map", None) or {}
+    mapped_ip = port_map.get(str(device.management_port))
     try:
         import ipaddress
 
-        ip_obj = ipaddress.ip_address(probe_host)
-        if stand_host and ip_obj.is_private and device.platform.value != "linux_server":
-            probe_host = str(stand_host)
+        ip_obj = ipaddress.ip_address(mapped_ip or probe_host)
+        if ip_obj.is_private and device.platform.value != "linux_server":
+            if stand_host:
+                probe_host = str(stand_host)
             extra_kwargs["snmp_port"] = SNMP_RELAY_BASE_PORT + int(ip_obj.packed[-1])
             extra_kwargs["gnmi_port"] = GNMI_RELAY_BASE_PORT + int(ip_obj.packed[-1])
     except ValueError:
-        pass
+        _ = None
     try:
         result = detect(
             probe_host,
@@ -175,36 +185,83 @@ def build_target_files(plan: dict[str, dict[str, Any]]) -> dict[str, Any]:
     snmp: list[dict[str, Any]] = []
     exporter: list[dict[str, Any]] = []
     for hostname, item in sorted(plan.items()):
-        if item["protocol"] == TelemetryProtocol.SSH_CLI.value or not item.get("port"):
-            continue  # остаётся на SSH CLI-опросе платформы
+        host = item.get("host")
+        if not host:
+            continue
+        proto = item.get("protocol")
+        supported = (
+            item.get("supported_protocols")
+            if isinstance(item.get("supported_protocols"), dict)
+            else {}
+        )
         labels = {
             "hostname": hostname,
-            "fabric_id": item["fabric_id"],
-            "platform": item["platform"],
+            "fabric_id": item.get("fabric_id", "default"),
+            "platform": item.get("platform", "linux_server"),
         }
-        address = f"{item['host']}:{item['port']}"
-        if item["protocol"] == TelemetryProtocol.GNMI.value:
-            entry: dict[str, Any] = {"address": address, "event-tags": labels}
-            # tls=None — проверено по CLI+TCP без gnmic: режим TLS неизвестен, пусть gnmic решает.
-            if item.get("tls") is True:
-                entry["skip-verify"] = True
-            elif item.get("tls") is False:
-                entry["insecure"] = True
-            gnmic[hostname] = entry
-        elif item["protocol"] == TelemetryProtocol.SNMP.value:
-            profile = load_profile_for_platform(item["platform"])
-            snmp_mod = profile.snmp.hardware_module if profile else "host_resources"
-            snmp_labels = labels | ({"snmp_module": snmp_mod} if snmp_mod else {})
-            snmp.append({"targets": [address], "labels": snmp_labels})
-        elif item["protocol"] == TelemetryProtocol.PROMETHEUS_EXPORTER.value:
-            path = item.get("path") or "/metrics"
+        gnmi_spec = supported.get("gnmi") if isinstance(supported.get("gnmi"), dict) else {}
+        if proto == TelemetryProtocol.GNMI.value or gnmi_spec.get("supported"):
+            gnmi_port = gnmi_spec.get("port") or item.get("port")
+            if gnmi_port:
+                tls = gnmi_spec.get("tls") if "tls" in gnmi_spec else item.get("tls")
+                entry: dict[str, Any] = {"address": f"{host}:{gnmi_port}", "event-tags": labels}
+                if tls is True:
+                    entry["skip-verify"] = True
+                elif tls is False:
+                    entry["insecure"] = True
+                gnmic[hostname] = entry
+
+        snmp_spec = supported.get("snmp") if isinstance(supported.get("snmp"), dict) else {}
+        if proto == TelemetryProtocol.SNMP.value or snmp_spec.get("supported"):
+            snmp_port = snmp_spec.get("port") or item.get("port")
+            if snmp_port:
+                profile = load_profile_for_platform(labels["platform"])
+                snmp_mod = profile.snmp.hardware_module if profile else "host_resources"
+                snmp_labels = labels | ({"snmp_module": snmp_mod} if snmp_mod else {})
+                snmp.append({"targets": [f"{host}:{snmp_port}"], "labels": snmp_labels})
+
+        exp_raw = supported.get("prometheus_exporter") or supported.get("node_exporter")
+        exp_spec = exp_raw if isinstance(exp_raw, dict) else {}
+        if (
+            proto in (TelemetryProtocol.PROMETHEUS_EXPORTER.value, "node_exporter")
+            or exp_spec.get("supported")
+        ):
+            exp_port = exp_spec.get("port") or item.get("port") or 9100
+            path = exp_spec.get("path") or item.get("path") or "/metrics"
             exporter_labels = labels | ({"__metrics_path__": path} if path != "/metrics" else {})
-            exporter.append({"targets": [address], "labels": exporter_labels})
+            exporter.append({"targets": [f"{host}:{exp_port}"], "labels": exporter_labels})
     return {
         GNMIC_TARGETS_FILE: gnmic,
         SNMP_TARGETS_FILE: snmp,
         EXPORTER_TARGETS_FILE: exporter,
     }
+
+
+def _persist_collector_plan(
+    plan: dict[str, dict[str, Any]],
+    settings: Settings,
+    *,
+    overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    files = build_target_files(plan)
+    _atomic_write(
+        settings.offline_lab_path / GNMIC_TARGETS_FILE,
+        yaml.safe_dump(files[GNMIC_TARGETS_FILE], sort_keys=True, allow_unicode=True),
+    )
+    sm = get_state_manager()
+    sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
+    sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
+
+    summary: dict[str, Any] = {
+        "refreshed_at": utcnow().isoformat(),
+        "protocols": dict(Counter(item.get("protocol", "ssh_cli") for item in plan.values())),
+        "devices": plan,
+    }
+    if overrides is not None:
+        summary["overrides"] = overrides
+    sm.set_json(PROTOCOLS_STATE_KEY, summary)
+    sm.set_db_state(PROTOCOLS_STATE_KEY, summary)
+    return summary
 
 
 def refresh_collector_targets(
@@ -220,24 +277,7 @@ def refresh_collector_targets(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         probed = list(pool.map(lambda d: _probe_device(d, toolchain, settings, detect), devices))
     plan = {dev.hostname: item for dev, item in zip(devices, probed, strict=True)}
-
-    files = build_target_files(plan)
-    out_dir = settings.offline_lab_path
-    _atomic_write(
-        out_dir / GNMIC_TARGETS_FILE,
-        yaml.safe_dump(files[GNMIC_TARGETS_FILE], sort_keys=True, allow_unicode=True),
-    )
-    sm = get_state_manager()
-    sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
-    sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
-
-    summary = {
-        "refreshed_at": utcnow().isoformat(),
-        "protocols": dict(Counter(item["protocol"] for item in plan.values())),
-        "devices": plan,
-    }
-    sm.set_json(PROTOCOLS_STATE_KEY, summary)
-    sm.set_db_state(PROTOCOLS_STATE_KEY, summary)
+    summary = _persist_collector_plan(plan, settings)
     sync_grafana_dashboard_to_db()
     return summary
 
@@ -298,14 +338,26 @@ def sync_grafana_dashboard_to_db(grafana_url: str | None = None) -> dict[str, An
     return dash
 
 
-def get_snmp_sd_targets() -> list[dict[str, Any]]:
-    raw = get_state_manager().get_db_state(SNMP_TARGETS_FILE, [])
+def _get_sd_targets(state_key: str) -> list[dict[str, Any]]:
+    sm = get_state_manager()
+    raw = sm.get_db_state(state_key, [])
+    if isinstance(raw, list) and raw:
+        return raw
+    plan = last_collector_plan()
+    if plan and isinstance(plan.get("devices"), dict) and plan["devices"]:
+        built = build_target_files(plan["devices"]).get(state_key, [])
+        if built:
+            sm.set_db_state(state_key, built)
+            return built
     return raw if isinstance(raw, list) else []
+
+
+def get_snmp_sd_targets() -> list[dict[str, Any]]:
+    return _get_sd_targets(SNMP_TARGETS_FILE)
 
 
 def get_exporter_sd_targets() -> list[dict[str, Any]]:
-    raw = get_state_manager().get_db_state(EXPORTER_TARGETS_FILE, [])
-    return raw if isinstance(raw, list) else []
+    return _get_sd_targets(EXPORTER_TARGETS_FILE)
 
 
 def last_collector_plan() -> dict[str, Any] | None:
@@ -363,21 +415,5 @@ def set_device_protocol_override(
             dict(devices_map[hostname]), norm, str(devices_map[hostname].get("platform", "linux_server")), 22
         )
 
-    files = build_target_files(devices_map)
-    _atomic_write(
-        settings.offline_lab_path / GNMIC_TARGETS_FILE,
-        yaml.safe_dump(files[GNMIC_TARGETS_FILE], sort_keys=True, allow_unicode=True),
-    )
-    sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
-    sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
-
-    summary = {
-        "refreshed_at": utcnow().isoformat(),
-        "protocols": dict(Counter(item.get("protocol", "ssh_cli") for item in devices_map.values())),
-        "devices": devices_map,
-        "overrides": overrides,
-    }
-    sm.set_json(PROTOCOLS_STATE_KEY, summary)
-    sm.set_db_state(PROTOCOLS_STATE_KEY, summary)
-    return summary
+    return _persist_collector_plan(devices_map, settings, overrides=overrides)
 

@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -1076,6 +1076,7 @@ source = { editable = "." }
 dependencies = [
     { name = "alembic" },
     { name = "celery", extra = ["redis"] },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "hier-config" },
     { name = "jinja2" },
@@ -1084,6 +1085,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
+    { name = "redis" },
     { name = "sqlalchemy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
@@ -1107,31 +1109,33 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "alembic", specifier = ">=1.13" },
-    { name = "celery", extras = ["redis"], specifier = ">=5.4" },
-    { name = "fastapi", specifier = ">=0.115" },
-    { name = "hier-config", specifier = ">=3.2,<4" },
+    { name = "alembic", specifier = ">=1.20" },
+    { name = "celery", extras = ["redis"], specifier = ">=5.6" },
+    { name = "cryptography", specifier = ">=42.0" },
+    { name = "fastapi", specifier = ">=0.141" },
+    { name = "hier-config", specifier = ">=3.7,<4" },
     { name = "jinja2", specifier = ">=3.1" },
     { name = "paramiko", specifier = ">=5.0.0" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
-    { name = "pydantic", specifier = ">=2.7" },
-    { name = "pydantic-settings", specifier = ">=2.3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3" },
+    { name = "pydantic", specifier = ">=2.13" },
+    { name = "pydantic-settings", specifier = ">=2.15" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "scrapli", marker = "extra == 'scrapli'", specifier = ">=2024.7.30" },
-    { name = "scrapli-community", marker = "extra == 'scrapli'", specifier = ">=2024.7.30" },
-    { name = "sqlalchemy", specifier = ">=2.0.30" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "redis", specifier = ">=5.0" },
+    { name = "scrapli", marker = "extra == 'scrapli'", specifier = ">=2026.2.20" },
+    { name = "scrapli-community", marker = "extra == 'scrapli'", specifier = ">=2025.1.30" },
+    { name = "sqlalchemy", specifier = ">=2.1" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.54" },
 ]
 provides-extras = ["scrapli"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "black", specifier = ">=24.4" },
-    { name = "httpx2", specifier = ">=2.0" },
-    { name = "mypy", specifier = ">=1.10" },
-    { name = "pytest", specifier = ">=8.2" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-    { name = "ruff", specifier = ">=0.5" },
+    { name = "black", specifier = ">=26.5" },
+    { name = "httpx2", specifier = ">=2.13" },
+    { name = "mypy", specifier = ">=2.3" },
+    { name = "pytest", specifier = ">=9.1" },
+    { name = "pytest-cov", specifier = ">=7.1" },
+    { name = "ruff", specifier = ">=0.16" },
     { name = "types-pyyaml", specifier = ">=6.0" },
 ]
 

@@ -38,17 +38,21 @@ def _reject_non_owner_bearer(request: Request, settings: Any) -> None:
             )
 
 
-def claim_owner(req: Any, request: Request, session: Session, container: Any) -> dict[str, Any]:
-    from netops.services.sessions import session_is_owner
-
-    settings = container.settings
+def _resolve_bot_username(request: Request, settings: Any) -> str:
     _reject_non_owner_bearer(request, settings)
     rt = settings.apply_runtime_overlay()
-    bot_uname = str(
+    return str(
         rt.get("telegram_bot_username")
         or getattr(settings, "telegram_bot_username", "")
         or ""
     ).lstrip("@")
+
+
+def claim_owner(req: Any, request: Request, session: Session, container: Any) -> dict[str, Any]:
+    from netops.services.sessions import session_is_owner
+
+    settings = container.settings
+    bot_uname = _resolve_bot_username(request, settings)
     client_id = (request.headers.get("X-Client-Id") or "").strip() or "owner-primary-pc"
     client_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = (request.headers.get("User-Agent") or "Browser")[:250]
@@ -57,12 +61,7 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
     user_tokens = load_user_tokens(settings)
     saved_tok = user_tokens.get("owner")
 
-    if (
-        owner is not None
-        and owner.bound_client_id
-        and rt.get("bootstrap_completed")
-        and not session_is_owner(request, session, settings)
-    ):
+    if owner is not None and not session_is_owner(request, session, settings):
         provided_key = (req.recovery_key or "").strip()
         key_valid = bool(
             provided_key
@@ -113,10 +112,10 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
     session.commit()
 
     save_user_token("owner", token, settings)
-    from netops.services.notifier import sync_access_registry
-
     sync_access_registry(session, settings)
-    settings.save_runtime_overlay({"cluster_name": req.cluster_name.strip() or ""})
+    rt = settings.apply_runtime_overlay()
+    effective_cluster = req.cluster_name.strip() or str(rt.get("cluster_name") or "")
+    settings.save_runtime_overlay({"cluster_name": effective_cluster})
 
     return {
         "status": "claimed",
@@ -126,19 +125,13 @@ def claim_owner(req: Any, request: Request, session: Session, container: Any) ->
         "recovery_key": token,
         "bound_client_id": client_id,
         "bound_ip": client_ip,
-        "cluster_name": req.cluster_name.strip() or "",
+        "cluster_name": effective_cluster,
     }
 
 
 def recover_owner(req: Any, request: Request, session: Session, container: Any) -> dict[str, Any]:
     settings = container.settings
-    _reject_non_owner_bearer(request, settings)
-    rt = settings.apply_runtime_overlay()
-    bot_uname = str(
-        rt.get("telegram_bot_username")
-        or getattr(settings, "telegram_bot_username", "")
-        or ""
-    ).lstrip("@")
+    bot_uname = _resolve_bot_username(request, settings)
     owner = session.scalar(select(User).where(User.username == "owner"))
     if owner is None:
         raise HTTPException(status_code=404, detail="Профиль owner ещё не инициализирован")
@@ -199,11 +192,19 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
     client_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = (request.headers.get("User-Agent") or "Browser")[:250]
 
+    for stale in session.scalars(
+        select(User).where(User.bound_client_id == client_id, User.username != "owner")
+    ).all():
+        stale.bound_client_id = None
+    session.flush()
+
     matched_key = next(
         (c for c in candidates if (saved_tok and c == saved_tok) or hash_token(c) == owner.token_sha256),
         None,
     )
     token = saved_tok or matched_key or f"crk_owner_{generate_token()[:24]}"
+    owner.is_active = True
+    owner.role = UserRole.OWNER
     owner.token_sha256 = hash_token(token)
     owner.bound_client_id = client_id
     owner.bound_ip = client_ip
@@ -222,6 +223,7 @@ def recover_owner(req: Any, request: Request, session: Session, container: Any) 
         "username": "owner",
         "role": "owner",
         "token": token,
+        "recovery_key": token,
         "bound_client_id": client_id,
         "bound_ip": client_ip,
     }

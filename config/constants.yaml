@@ -33,6 +33,11 @@ network:
   post_check_attempts: 6
   post_check_interval_seconds: 10.0
   clab_ssh_port: 221
+  ssh_session_idle_ttl_seconds: 90
+  ssh_session_pool_max: 256
+  ssh_lock_ttl_seconds: 45
+  ssh_lock_acquire_deadline_seconds: 8
+  stand_connection_cache_ttl_seconds: 30
 
 scheduling:
   drift_scan_interval_seconds: 900
@@ -94,5 +99,3 @@ audit:
   default_actor: admin           # по умолчанию для set_freeze_state
   default_freeze_user: operator  # по умолчанию для set_factory_freeze
 
-forecast:
-  timeout_seconds: 5.0

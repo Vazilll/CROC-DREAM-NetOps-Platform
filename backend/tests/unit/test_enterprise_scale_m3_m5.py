@@ -192,3 +192,67 @@ def test_grafana_provisioning_and_docker_compose_validity() -> None:
     dash_data = yaml.safe_load(dash_yaml_path.read_text(encoding="utf-8"))
     assert dash_data["uid"] == "croc-dream-noc"
     assert len(dash_data["panels"]) >= 6
+
+
+def test_celery_priority_queues_and_distributed_ssh_lock(settings) -> None:
+    from typing import Any
+
+    from netops.network.ssh_pool import _DistributedDeviceLock, _get_device_lock
+    from netops.worker.celery_app import (
+        COLLECT_METRICS_TASK,
+        FAIL_STALE_JOBS_TASK,
+        GENERATE_REGULAR_REPORT_TASK,
+        PURGE_EXPIRED_RECORDS_TASK,
+        QUEUE_BACKGROUND,
+        QUEUE_CRITICAL,
+        QUEUE_DEFAULT,
+        QUEUE_TELEMETRY,
+        REFRESH_COLLECTOR_TARGETS_TASK,
+        RUN_JOB_TASK,
+        SCHEDULED_DRIFT_SCAN_TASK,
+        CeleryJobDispatcher,
+        create_celery_app,
+    )
+
+    app = create_celery_app(settings)
+    assert app.conf.task_default_queue == QUEUE_DEFAULT
+    routes = app.conf.task_routes
+    assert routes[COLLECT_METRICS_TASK]["queue"] == QUEUE_TELEMETRY
+    assert routes[REFRESH_COLLECTOR_TARGETS_TASK]["queue"] == QUEUE_TELEMETRY
+    assert routes[SCHEDULED_DRIFT_SCAN_TASK]["queue"] == QUEUE_BACKGROUND
+    assert routes[FAIL_STALE_JOBS_TASK]["queue"] == QUEUE_BACKGROUND
+    assert routes[PURGE_EXPIRED_RECORDS_TASK]["queue"] == QUEUE_BACKGROUND
+    assert routes[GENERATE_REGULAR_REPORT_TASK]["queue"] == QUEUE_BACKGROUND
+
+    dispatched: list[dict[str, Any]] = []
+
+    class FakeCeleryApp:
+        def send_task(self, name: str, **opts: Any) -> None:
+            dispatched.append({"name": name, **opts})
+
+    disp = CeleryJobDispatcher(FakeCeleryApp())  # type: ignore[arg-type]
+    j_deploy = uuid.uuid4()
+    j_remed = uuid.uuid4()
+    j_dry = uuid.uuid4()
+    disp.dispatch(j_deploy, JobType.DEPLOY)
+    disp.dispatch(j_remed, JobType.DRIFT_REMEDIATE)
+    disp.dispatch(j_dry, JobType.DRY_RUN)
+    assert dispatched[0] == {
+        "name": RUN_JOB_TASK,
+        "args": [str(j_deploy)],
+        "task_id": str(j_deploy),
+        "queue": QUEUE_CRITICAL,
+    }
+    assert dispatched[1]["queue"] == QUEUE_CRITICAL
+    assert dispatched[2]["queue"] == QUEUE_DEFAULT
+
+    # Distributed device lock reentrant behavior
+    lock = _get_device_lock("10.250.99.1", 22)
+    assert isinstance(lock, _DistributedDeviceLock)
+    with lock:
+        assert lock._depth == 1
+        with lock:
+            assert lock._depth == 2
+        assert lock._depth == 1
+    assert lock._depth == 0
+

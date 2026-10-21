@@ -1,41 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  Key,
-  Server,
-  ArrowRight,
-  Globe,
-  CheckCircle2,
-  Check,
-  GitBranch,
-  Send,
-  ShieldCheck,
-  Cpu,
-  ExternalLink,
-  Smartphone,
-  Sun,
-  Moon,
-} from 'lucide-react';
-import {
-  api,
-  getErrorMessage,
-  isLoopbackUrl,
-  type UserRole,
-  type ServerDiscoveryResponse,
-  type LlmCascadeConfig,
-  allConsolePorts,
-  consoleConfig,
-} from '../../api';
+import { api, getErrorMessage, isLoopbackUrl, type UserRole, type ServerDiscoveryResponse, type LlmCascadeConfig, consoleConfig } from '../../api';
 import type { AppTheme } from '../layout/Header';
-import { translations, type Locale } from '../../i18n';
-import {
-  inferProviderDefaults,
-  inputClass,
-  primaryBtnClass,
-  secondaryBtnClass,
-  utilityPillClass,
-  type WizardStep,
-} from './welcome/WelcomeStepStyles';
-import { WelcomeAiStep, WelcomeServerStep } from './welcome/WelcomeSteps4And5';
+import type { Locale } from '../../i18n';
+import { inferProviderDefaults, type WizardStep } from './welcome/WelcomeStepStyles';
+import { WelcomeOwnerStep, WelcomeGithubStep, WelcomeTelegramStep } from './welcome/WelcomeSteps1To3';
+import { WelcomeHeader, WelcomeAiStep, WelcomeServerStep } from './welcome/WelcomeSteps4And5';
 
 interface WelcomeModalProps {
   isOpen: boolean;
@@ -46,14 +15,7 @@ interface WelcomeModalProps {
   setTheme: (t: AppTheme) => void;
 }
 
-export const WelcomeModal: React.FC<WelcomeModalProps> = ({
-  isOpen,
-  onClose,
-  locale,
-  setLocale,
-  theme,
-  setTheme,
-}) => {
+export const WelcomeModal: React.FC<WelcomeModalProps> = ({ isOpen, onClose, locale, setLocale, theme, setTheme }) => {
   const [wizardStep, setWizardStep] = useState<WizardStep>(1);
   const [clusterName, setClusterName] = useState('');
   const [exposureMode, setExposureMode] = useState<'local_only' | 'public_tunnel'>('public_tunnel');
@@ -68,8 +30,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [canTransferOwnerFlag, setCanTransferOwnerFlag] = useState(false);
 
   const [githubRepoUrl, setGithubRepoUrl] = useState('');
-  const [githubBranch, setGithubBranch] = useState('');
+  const [githubBranch, setGithubBranch] = useState('main');
   const [githubPat, setGithubPat] = useState('');
+  const [githubConnected, setGithubConnected] = useState(false);
+  const [githubCommitShort, setGithubCommitShort] = useState('HEAD');
+  const [githubError, setGithubError] = useState(false);
   const [savingGithub, setSavingGithub] = useState(false);
   const [githubSavedMsg, setGithubSavedMsg] = useState('');
 
@@ -96,7 +61,6 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const [discoveringServer, setDiscoveringServer] = useState(false);
   const [discoveryResult, setDiscoveryResult] = useState<ServerDiscoveryResponse | null>(null);
 
-  const t = translations[locale];
   const isEn = locale === 'en';
 
   const refreshBootstrapStatus = useCallback(async () => {
@@ -107,13 +71,11 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       if (st.exposure?.mode === 'public_tunnel' || st.exposure?.mode === 'local_only') {
         setExposureMode(st.exposure.mode);
       }
-      if (st.github?.repo_connected) {
-        setGithubRepoUrl(st.github.github_repo_url || '');
-        setGithubBranch(st.github.branch || '');
-      } else {
-        setGithubRepoUrl('');
-        setGithubBranch('');
-      }
+      const remoteUrl = st.github?.remote_url || st.github?.github_repo_url || '';
+      setGithubRepoUrl((prev) => prev || remoteUrl);
+      setGithubBranch((prev) => prev || st.github?.branch || 'main');
+      setGithubConnected(Boolean(st.github?.repo_connected || remoteUrl));
+      setGithubCommitShort(st.github?.commit_short || 'HEAD');
       setTelegramBotUsername(st.telegram?.bot_username || '');
       setTelegramClaimLink(st.telegram?.deep_link_claim || '');
       setTelegramRecoverLink(st.telegram?.deep_link_recover || '');
@@ -124,16 +86,13 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       setServerHost(st.server?.clab_host || '');
       if (st.server?.clab_port) setServerPort(st.server.clab_port);
       if (st.server?.clab_user) setServerUser(st.server.clab_user);
-      if (Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0) {
-        setLlmCascade(st.ai.cascade);
-      } else {
-        setLlmCascade([{ name: '', base_url: '', model: '', api_key: '', timeout_seconds: 2.5 }]);
-      }
-      if (st.initialized && st.caller_is_bound_owner === false) {
-        setRecoverMode(true);
-      } else if (!st.initialized) {
-        setRecoverMode(false);
-      }
+      setLlmCascade(
+        Array.isArray(st.ai?.cascade) && st.ai.cascade.length > 0
+          ? st.ai.cascade
+          : [{ name: '', base_url: '', model: '', api_key: '', timeout_seconds: 2.5 }]
+      );
+      if (st.initialized && st.caller_is_bound_owner === false) setRecoverMode(true);
+      else if (!st.initialized) setRecoverMode(false);
     } catch {
       // ignore
     }
@@ -147,9 +106,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
   useEffect(() => {
     if (!isOpen || wizardStep !== 3) return;
-    const timer = setInterval(() => {
-      void refreshBootstrapStatus();
-    }, 2000);
+    const timer = setInterval(() => void refreshBootstrapStatus(), 2000);
     return () => clearInterval(timer);
   }, [isOpen, wizardStep, refreshBootstrapStatus]);
 
@@ -195,15 +152,10 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     try {
       const res = await api.recoverOwnerAccess({ action: 'request_telegram_code' });
       setRecoveryStatusMsg(
-        res.message ||
-          (isEn
-            ? '6-digit code sent to Owner in Telegram'
-            : '6-значный код отправлен Владельцу в Telegram')
+        res.message || (isEn ? '6-digit code sent to Owner in Telegram' : '6-значный код отправлен Владельцу в Telegram')
       );
     } catch (err: unknown) {
-      setRecoveryStatusMsg(
-        getErrorMessage(err, isEn ? 'Failed to send code via Telegram' : 'Не удалось отправить код в Telegram')
-      );
+      setRecoveryStatusMsg(getErrorMessage(err, isEn ? 'Failed to send code via Telegram' : 'Не удалось отправить код в Telegram'));
     } finally {
       setSendingTelegramCode(false);
     }
@@ -232,27 +184,49 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
 
   const handleConnectGithub = async (advance: boolean) => {
     const targetUrl = githubRepoUrl.trim();
-    if (!targetUrl) {
-      if (advance) setWizardStep(3);
-      return;
-    }
     setSavingGithub(true);
+    setGithubError(false);
     setGithubSavedMsg('');
     try {
-      const res = await api.configureBootstrapLayers({
-        cluster_name: clusterName.trim(),
-        exposure_mode: exposureMode,
-        github_repo_url: targetUrl,
-        github_branch: githubBranch.trim() || 'main',
-        github_pat: githubPat.trim() || undefined,
-        auto_commit_on_diff: true,
-      });
-      const br = res.git?.branch || githubBranch.trim() || 'main';
-      setGithubBranch(br);
-      setGithubSavedMsg(`Подключён: ${targetUrl} (${br})`);
+      if (targetUrl) {
+        const res = await api.connectGitRepo({
+          repo_url: targetUrl,
+          branch: githubBranch.trim() || 'main',
+          pat: githubPat.trim() || undefined,
+          cluster_name: clusterName.trim(),
+          exposure_mode: exposureMode,
+        });
+        const gitInfo = res.git as (typeof res.git & { connected?: boolean; message?: string }) | undefined;
+        if (gitInfo?.connected === false) {
+          setGithubError(true);
+          setGithubConnected(false);
+          setGithubSavedMsg(gitInfo.message || 'Ошибка подключения к репозиторию');
+          return;
+        }
+        const br = gitInfo?.branch || githubBranch.trim() || 'main';
+        const sha = gitInfo?.commit_short || 'HEAD';
+        setGithubBranch(br);
+        setGithubCommitShort(sha);
+        setGithubConnected(true);
+        const syncRes = await api.syncGitSot().catch(() => null);
+        const syncSummary = syncRes
+          ? ` · Узлов: +${syncRes.sync.created.length} / ~${syncRes.sync.updated.length}`
+          : '';
+        setGithubSavedMsg(`Подключён: ${br}@${sha}${syncSummary}`);
+      } else {
+        const syncRes = await api.syncGitSot();
+        setGithubBranch(syncRes.git?.branch || 'main');
+        setGithubCommitShort(syncRes.git?.commit_short || 'HEAD');
+        setGithubConnected(true);
+        setGithubSavedMsg(
+          `Локальный SoT: ${syncRes.git?.branch || 'main'}@${syncRes.git?.commit_short || 'HEAD'} (+${syncRes.sync.created.length} / ~${syncRes.sync.updated.length})`
+        );
+      }
+      await refreshBootstrapStatus();
       if (advance) setWizardStep(3);
     } catch (err: unknown) {
-      setGithubSavedMsg(getErrorMessage(err, 'Ошибка сохранения GitHub'));
+      setGithubError(true);
+      setGithubSavedMsg(getErrorMessage(err, 'Ошибка синхронизации GitHub'));
     } finally {
       setSavingGithub(false);
     }
@@ -263,9 +237,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     setTelegramSavedMsg('');
     try {
       if (telegramBotToken.trim()) {
-        const res = await api.configureBootstrapLayers({
-          telegram_bot_token: telegramBotToken.trim(),
-        });
+        const res = await api.configureBootstrapLayers({ telegram_bot_token: telegramBotToken.trim() });
         if (res.bot_username) setTelegramBotUsername(res.bot_username);
         setTelegramSavedMsg('Токен бота сохранён');
       }
@@ -275,6 +247,17 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
       setTelegramSavedMsg(getErrorMessage(err, 'Ошибка сохранения Telegram'));
     } finally {
       setSavingTelegram(false);
+    }
+  };
+
+  const handleUnlinkTelegram = async () => {
+    try {
+      await api.unlinkOwnerTelegram();
+      setTelegramLinked(false);
+      setTelegramLinkedUser('');
+      setTelegramChatId('');
+    } catch (e) {
+      setTelegramSavedMsg(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -341,9 +324,7 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
   const handleFinishWizard = async () => {
     try {
       if (!ownerToken && !localStorage.getItem('netops_auth_token')) {
-        const res = await api.claimOwnerBootstrap({
-          cluster_name: clusterName.trim() || '',
-        });
+        const res = await api.claimOwnerBootstrap({ cluster_name: clusterName.trim() || '' });
         setOwnerToken(res.token);
       }
       await api.configureBootstrapLayers({
@@ -363,462 +344,87 @@ export const WelcomeModal: React.FC<WelcomeModalProps> = ({
     onClose('owner');
   };
 
-  const stepsMeta: { id: WizardStep; title: string; icon: React.ReactNode }[] = [
-    { id: 1, title: isEn ? '1. Owner' : '1. Владелец', icon: <Key className="w-3.5 h-3.5 shrink-0" /> },
-    { id: 2, title: '2. GitHub', icon: <GitBranch className="w-3.5 h-3.5 shrink-0" /> },
-    { id: 3, title: '3. Telegram', icon: <Send className="w-3.5 h-3.5 shrink-0" /> },
-    { id: 4, title: isEn ? '4. AI' : '4. ИИ', icon: <Cpu className="w-3.5 h-3.5 shrink-0" /> },
-    { id: 5, title: isEn ? '5. Server' : '5. Сервер', icon: <Server className="w-3.5 h-3.5 shrink-0" /> },
-  ];
-
   const displayPublicHost = serverHost.trim() || window.location.hostname;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-2 sm:p-4 bg-[var(--bg-main)]/95 backdrop-blur-xl overflow-y-auto">
       <div className="relative z-10 w-full max-w-xl max-h-[94dvh] rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] shadow-2xl text-[var(--text-primary)] flex flex-col overflow-hidden">
-        <div className="px-3.5 sm:px-5 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]/60 shrink-0">
-          <div className="flex items-center justify-between gap-2 mb-2.5">
-            <span className="inline-flex items-center gap-2 text-xs font-mono font-semibold">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>{isEn ? 'Cluster Setup' : 'Настройка кластера'}</span>
-            </span>
-
-            <div className="flex items-center gap-1.5">
-              <button
-                type="button"
-                onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
-                className={utilityPillClass}
-              >
-                {theme === 'dark' ? (
-                  <>
-                    <Sun className="w-3.5 h-3.5 text-amber-400" />
-                    <span className="hidden sm:inline">{t.themeLight}</span>
-                  </>
-                ) : (
-                  <>
-                    <Moon className="w-3.5 h-3.5 text-sky-600" />
-                    <span className="hidden sm:inline">{t.themeDark}</span>
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setLocale(locale === 'ru' ? 'en' : 'ru')}
-                className={utilityPillClass}
-              >
-                <Globe className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-                <span className="uppercase font-semibold">{locale === 'ru' ? 'RU' : 'EN'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleFinishWizard}
-                className="h-7 px-2.5 rounded-md text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-              >
-                {isEn ? 'Skip →' : 'Пропустить →'}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-5 gap-1 sm:gap-1.5">
-            {stepsMeta.map((s) => {
-              const active = wizardStep === s.id;
-              const completed = wizardStep > s.id;
-              return (
-                <button
-                  key={s.id}
-                  type="button"
-                  onClick={() => setWizardStep(s.id)}
-                  className={`px-1.5 sm:px-2 py-1.5 sm:py-2 rounded-lg border text-[10px] sm:text-[11px] font-medium transition-all cursor-pointer flex items-center justify-center gap-1 ${
-                    active
-                      ? 'border-[var(--text-primary)] bg-[var(--bg-card)] text-[var(--text-primary)]'
-                      : completed
-                        ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-500'
-                        : 'border-[var(--border-subtle)] bg-[var(--bg-main)]/60 text-[var(--text-secondary)]'
-                  }`}
-                >
-                  {completed ? <Check className="w-3.5 h-3.5 shrink-0" /> : s.icon}
-                  <span className="truncate">{s.title}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <WelcomeHeader
+          isEn={isEn}
+          locale={locale}
+          setLocale={setLocale}
+          theme={theme}
+          setTheme={setTheme}
+          wizardStep={wizardStep}
+          setWizardStep={setWizardStep}
+          onSkip={handleFinishWizard}
+          ownerToken={ownerToken}
+          copiedKey={copiedKey}
+          setCopiedKey={setCopiedKey}
+        />
 
         <div className="p-3.5 sm:p-5 space-y-4 overflow-y-auto flex-1">
-          {ownerToken && (
-            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-2.5 space-y-1.5">
-              <div className="text-xs font-semibold text-emerald-500 flex items-center gap-1.5">
-                <ShieldCheck className="w-4 h-4 shrink-0" />
-                <span>{isEn ? 'Owner Recovery Key:' : 'Резервный ключ Владельца:'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <code className="flex-1 bg-[var(--bg-main)] border border-[var(--border-subtle)] rounded px-2.5 py-1 text-xs font-mono text-emerald-500 select-all truncate">
-                  {ownerToken}
-                </code>
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(ownerToken);
-                    setCopiedKey(true);
-                    setTimeout(() => setCopiedKey(false), 2000);
-                  }}
-                  className={secondaryBtnClass}
-                >
-                  {copiedKey ? 'OK' : isEn ? 'Copy' : 'Копировать'}
-                </button>
-              </div>
-            </div>
-          )}
 
           {wizardStep === 1 && (
-            <div className="space-y-3.5">
-              {!recoverMode ? (
-                <div className="space-y-3.5">
-                  <div>
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {isEn ? 'Cluster Name' : 'Имя кластера'}
-                    </label>
-                    <input
-                      type="text"
-                      value={clusterName}
-                      onChange={(e) => setClusterName(e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                      {isEn ? 'Network Exposure' : 'Сетевой контур'}
-                    </label>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setExposureMode('public_tunnel')}
-                        className={`p-2.5 rounded-lg border text-left cursor-pointer ${
-                          exposureMode === 'public_tunnel'
-                            ? 'border-sky-500/60 bg-sky-500/10'
-                            : 'border-[var(--border-subtle)] bg-[var(--bg-main)]'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold">🌐 {isEn ? 'Public Internet Access' : 'Внешний доступ (Интернет)'}</div>
-                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">
-                          {displayPublicHost}:{allConsolePorts()[0]}..{allConsolePorts().slice(-1)[0]}
-                        </div>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setExposureMode('local_only')}
-                        className={`p-2.5 rounded-lg border text-left cursor-pointer ${
-                          exposureMode === 'local_only'
-                            ? 'border-emerald-500/60 bg-emerald-500/10'
-                            : 'border-[var(--border-subtle)] bg-[var(--bg-main)]'
-                        }`}
-                      >
-                        <div className="text-xs font-semibold">🔒 {isEn ? 'Local Only' : 'Только локально'}</div>
-                        <div className="text-[10px] font-mono text-[var(--text-muted)] mt-0.5">localhost:{consoleConfig().owner_port}</div>
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-1">
-                    {canTransferOwnerFlag ? (
-                      <button
-                        type="button"
-                        onClick={() => setRecoverMode(true)}
-                        className="text-[11px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] underline cursor-pointer"
-                      >
-                        {isEn ? 'Transfer Owner rights' : 'Перенести права со старого ПК'}
-                      </button>
-                    ) : (
-                      <span />
-                    )}
-                    <button
-                      type="button"
-                      onClick={handleClaimOwner}
-                      disabled={claimingOwner}
-                      className={primaryBtnClass}
-                    >
-                      <span>{claimingOwner ? '...' : isEn ? 'Next' : 'Далее'}</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-amber-500 flex items-center gap-1.5">
-                      <Smartphone className="w-4 h-4" />
-                      <span>{isEn ? 'Transfer Owner Authority' : 'Перенос прав Владельца'}</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setRecoverMode(false)}
-                      className="text-xs font-mono text-[var(--text-secondary)] cursor-pointer"
-                    >
-                      ← {isEn ? 'Back' : 'Назад'}
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-1.5 text-xs font-medium">
-                        <span>1. Telegram Code</span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={handleRequestTelegramRecoveryCode}
-                            disabled={sendingTelegramCode}
-                            className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[10px] font-mono text-emerald-500 cursor-pointer disabled:opacity-50"
-                          >
-                            {sendingTelegramCode ? '...' : isEn ? 'Send Code' : 'Отправить код'}
-                          </button>
-                          {telegramRecoverLink && (
-                            <a
-                              href={telegramRecoverLink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] font-mono text-emerald-500 inline-flex items-center gap-1 hover:underline"
-                            >
-                              <span>Bot</span>
-                              <ExternalLink className="w-3 h-3" />
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                      <input
-                        type="text"
-                        value={telegramCodeInput}
-                        onChange={(e) => setTelegramCodeInput(e.target.value)}
-                        placeholder="6-digit code"
-                        className={inputClass}
-                      />
-                    </div>
-
-                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-main)] p-3 space-y-2">
-                      <div className="flex items-center justify-between gap-1.5 text-xs font-medium">
-                        <span>2. Recovery Key</span>
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            try {
-                              const txt = await navigator.clipboard.readText();
-                              if (txt) setRecoveryKeyInput(txt.trim());
-                            } catch {
-                              // ignore
-                            }
-                          }}
-                          className="px-2 py-0.5 rounded border border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[10px] font-mono text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer"
-                        >
-                          {isEn ? 'Paste' : 'Вставить'}
-                        </button>
-                      </div>
-                      <input
-                        type="text"
-                        value={recoveryKeyInput}
-                        onChange={(e) => setRecoveryKeyInput(e.target.value)}
-                        placeholder="crk_owner_..."
-                        className={inputClass}
-                      />
-                    </div>
-                  </div>
-
-                  {recoveryStatusMsg && (
-                    <div className="text-xs font-mono text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded px-2.5 py-1.5">
-                      {recoveryStatusMsg}
-                    </div>
-                  )}
-
-                  <div className="flex justify-end">
-                    <button
-                      type="button"
-                      onClick={handleVerifyOwnerRecovery}
-                      disabled={claimingOwner}
-                      className={primaryBtnClass}
-                    >
-                      {isEn ? 'Bind This PC →' : 'Привязать этот ПК →'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
+            <WelcomeOwnerStep
+              isEn={isEn}
+              recoverMode={recoverMode}
+              setRecoverMode={setRecoverMode}
+              clusterName={clusterName}
+              setClusterName={setClusterName}
+              exposureMode={exposureMode}
+              setExposureMode={setExposureMode}
+              displayPublicHost={displayPublicHost}
+              canTransferOwnerFlag={canTransferOwnerFlag}
+              claimingOwner={claimingOwner}
+              onClaimOwner={handleClaimOwner}
+              sendingTelegramCode={sendingTelegramCode}
+              onRequestTelegramRecoveryCode={handleRequestTelegramRecoveryCode}
+              telegramRecoverLink={telegramRecoverLink}
+              telegramCodeInput={telegramCodeInput}
+              setTelegramCodeInput={setTelegramCodeInput}
+              recoveryKeyInput={recoveryKeyInput}
+              setRecoveryKeyInput={setRecoveryKeyInput}
+              recoveryStatusMsg={recoveryStatusMsg}
+              onVerifyOwnerRecovery={handleVerifyOwnerRecovery}
+            />
           )}
 
           {wizardStep === 2 && (
-            <div className="space-y-3.5">
-              <div>
-                <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                  GitHub Repository (SoT)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={githubRepoUrl}
-                    onChange={(e) => setGithubRepoUrl(e.target.value)}
-                    placeholder="https://github.com/org/netops-sot.git"
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void handleConnectGithub(false)}
-                    disabled={savingGithub}
-                    className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer"
-                  >
-                    {savingGithub ? '...' : 'Sync'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    GitHub Token (optional)
-                  </label>
-                  <input
-                    type="password"
-                    value={githubPat}
-                    onChange={(e) => setGithubPat(e.target.value)}
-                    placeholder="ghp_..."
-                    className={inputClass}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                    {isEn ? 'Branch' : 'Ветка'}
-                  </label>
-                  <input
-                    type="text"
-                    value={githubBranch}
-                    onChange={(e) => setGithubBranch(e.target.value)}
-                    placeholder="main"
-                    className={inputClass}
-                  />
-                </div>
-              </div>
-
-              {githubSavedMsg && (
-                <div className="text-xs font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
-                  {githubSavedMsg}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <button type="button" onClick={() => setWizardStep(1)} className={secondaryBtnClass}>
-                  ← {isEn ? 'Back' : 'Назад'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleConnectGithub(true)}
-                  disabled={savingGithub}
-                  className={primaryBtnClass}
-                >
-                  <span>{isEn ? 'Next' : 'Далее'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            <WelcomeGithubStep
+              isEn={isEn}
+              githubRepoUrl={githubRepoUrl}
+              setGithubRepoUrl={setGithubRepoUrl}
+              githubPat={githubPat}
+              setGithubPat={setGithubPat}
+              githubBranch={githubBranch}
+              setGithubBranch={setGithubBranch}
+              githubConnected={githubConnected}
+              githubCommitShort={githubCommitShort}
+              githubError={githubError}
+              savingGithub={savingGithub}
+              githubSavedMsg={githubSavedMsg}
+              onConnectGithub={(adv) => void handleConnectGithub(adv)}
+              setWizardStep={setWizardStep}
+            />
           )}
 
           {wizardStep === 3 && (
-            <div className="space-y-3.5">
-              <div>
-                <label className="block text-[11px] font-mono text-[var(--text-secondary)] mb-1">
-                  Telegram Bot Token (@BotFather)
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="password"
-                    value={telegramBotToken}
-                    onChange={(e) => setTelegramBotToken(e.target.value)}
-                    placeholder="8993240454:AAHnq-..."
-                    className={inputClass}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void handleSaveTelegram(false)}
-                    disabled={savingTelegram || !telegramBotToken.trim()}
-                    className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-zinc-950 text-xs font-semibold shrink-0 cursor-pointer"
-                  >
-                    {savingTelegram ? '...' : isEn ? 'Connect' : 'Подключить'}
-                  </button>
-                </div>
-              </div>
-
-              {telegramLinked ? (
-                <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 flex items-center justify-between gap-2 text-xs font-mono text-emerald-500">
-                  <span className="flex items-center gap-2">
-                    <CheckCircle2 className="w-4 h-4 shrink-0" />
-                    <span>
-                      Owner: <strong>{telegramLinkedUser ? `@${telegramLinkedUser}` : 'owner'}</strong>
-                      {telegramChatId ? ` (${telegramChatId})` : ''}
-                    </span>
-                  </span>
-                  <span className="flex items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        try {
-                          await api.unlinkOwnerTelegram();
-                          setTelegramLinked(false);
-                          setTelegramLinkedUser('');
-                          setTelegramChatId('');
-                        } catch (e) {
-                          setTelegramSavedMsg(e instanceof Error ? e.message : String(e));
-                        }
-                      }}
-                      className="px-2 py-0.5 rounded border border-emerald-500/40 hover:bg-emerald-500/20 text-[10px] font-bold cursor-pointer"
-                    >
-                      {isEn ? 'Change' : 'Сменить'}
-                    </button>
-                    <span className="px-2 py-0.5 rounded bg-emerald-500 text-zinc-950 text-[10px] font-bold">OWNER</span>
-                  </span>
-                </div>
-              ) : (
-                <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--bg-main)] p-2.5 flex items-center justify-between gap-2 text-xs font-mono text-[var(--text-secondary)]">
-                  <span>
-                    {telegramBotUsername
-                      ? `${telegramBotUsername} · /start`
-                      : isEn
-                        ? 'Add a bot token to get the bot link'
-                        : 'Укажите токен бота — появится ссылка'}
-                  </span>
-                  {telegramClaimLink && (
-                    <a
-                      href={telegramClaimLink}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="px-2.5 py-1 rounded bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-[11px] font-mono text-emerald-500 inline-flex items-center gap-1 shrink-0"
-                    >
-                      <span>{isEn ? 'Open Bot (/start)' : 'Открыть бота (/start)'}</span>
-                      <ExternalLink className="w-3 h-3" />
-                    </a>
-                  )}
-                </div>
-              )}
-
-              {telegramSavedMsg && (
-                <div className="text-xs font-mono text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 rounded px-3 py-1.5">
-                  {telegramSavedMsg}
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <button type="button" onClick={() => setWizardStep(2)} className={secondaryBtnClass}>
-                  ← {isEn ? 'Back' : 'Назад'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSaveTelegram(true)}
-                  disabled={savingTelegram}
-                  className={primaryBtnClass}
-                >
-                  <span>{isEn ? 'Next' : 'Далее'}</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
+            <WelcomeTelegramStep
+              isEn={isEn}
+              telegramBotToken={telegramBotToken}
+              setTelegramBotToken={setTelegramBotToken}
+              savingTelegram={savingTelegram}
+              telegramLinked={telegramLinked}
+              telegramLinkedUser={telegramLinkedUser}
+              telegramChatId={telegramChatId}
+              telegramBotUsername={telegramBotUsername}
+              telegramClaimLink={telegramClaimLink}
+              telegramSavedMsg={telegramSavedMsg}
+              onSaveTelegram={(adv) => void handleSaveTelegram(adv)}
+              onUnlinkTelegram={() => void handleUnlinkTelegram()}
+              setWizardStep={setWizardStep}
+            />
           )}
 
           {wizardStep === 4 && (

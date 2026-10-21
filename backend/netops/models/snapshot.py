@@ -29,7 +29,7 @@ class ConfigSnapshot(Base):
     kind: Mapped[SnapshotKind] = mapped_column(enum_type(SnapshotKind))
     content: Mapped[str] = mapped_column(Text)
     sha256: Mapped[str] = mapped_column(String(64))
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
 
     @property
     def config_hash(self) -> str:

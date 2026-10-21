@@ -120,7 +120,7 @@ class JobLog(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
-    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
     level: Mapped[LogLevel] = mapped_column(enum_type(LogLevel), default=LogLevel.INFO)
     step: Mapped[str] = mapped_column(String(64))
     hostname: Mapped[str | None] = mapped_column(String(253))

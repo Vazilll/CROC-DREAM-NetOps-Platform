@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -25,7 +26,8 @@ PLATFORMS_DIR = "platforms"
 DIFF_FILTERS_FILE = "diff_filters.yaml"
 _YAML_SUFFIXES = (".yaml", ".yml")
 
-_REPO_PLATFORMS_DIR = Path(__file__).resolve().parents[3] / "intent" / "platforms"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+_REPO_PLATFORMS_DIR = _REPO_ROOT / "intent" / "platforms"
 _DEFAULT_PLATFORMS_DIR = (
     Path("/data/intent/platforms")
     if Path("/data/intent/platforms").is_dir()
@@ -66,6 +68,7 @@ class IntentRepository:
         self._inventory_file = inventory_file
         self._platform_cache: dict[str, PlatformProfile] = {}
         self._diff_filters_cache: DiffFilters | None = None
+        self._stand_hosts: set[str] = set()
 
     @property
     def root(self) -> Path:
@@ -225,7 +228,7 @@ class IntentRepository:
                         hostname,
                         "unknown_device",
                     )
-                    for hostname in sorted(intents.keys() - known)
+                    for hostname in sorted(intents.keys() - known - self._stand_hosts)
                 )
 
         if fabric_id is not None:
@@ -284,18 +287,46 @@ class IntentRepository:
             )
             return None
 
+    def _stand_device_dirs(self) -> list[Path]:
+        """Stand overlay `stands/<slug>/devices` (live discovery); off for the tracked repo under pytest."""
+        stands = self._root / "stands"
+        if not stands.is_dir():
+            return []
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            try:
+                if self._root.resolve().is_relative_to(_REPO_ROOT.resolve()):
+                    return []
+            except Exception:
+                return []
+        return sorted(d / DEVICES_DIR for d in stands.iterdir() if (d / DEVICES_DIR).is_dir())
+
     def _device_files(self) -> list[Path]:
         directory = self._root / DEVICES_DIR
-        if not directory.is_dir():
-            return []
-        return sorted(p for p in directory.iterdir() if p.is_file() and p.suffix in _YAML_SUFFIXES)
+        files = (
+            {p.stem: p for p in directory.iterdir() if p.is_file() and p.suffix in _YAML_SUFFIXES}
+            if directory.is_dir()
+            else {}
+        )
+        root_stems = set(files)
+        self._stand_hosts = set()
+        for sdir in self._stand_device_dirs():
+            for p in sdir.iterdir():
+                if p.is_file() and p.suffix in _YAML_SUFFIXES:
+                    files[p.stem] = p
+                    if p.stem not in root_stems:
+                        self._stand_hosts.add(p.stem)
+        return sorted(files.values())
 
     def _device_file(self, hostname: str) -> Path | None:
-        directory = (self._root / DEVICES_DIR).resolve()
-        for suffix in _YAML_SUFFIXES:
-            path = (directory / f"{hostname}{suffix}").resolve()
-            if path.parent == directory and path.is_file():
-                return path
+        dirs = [
+            *(d.resolve() for d in self._stand_device_dirs()),
+            (self._root / DEVICES_DIR).resolve(),
+        ]
+        for directory in dirs:
+            for suffix in _YAML_SUFFIXES:
+                path = (directory / f"{hostname}{suffix}").resolve()
+                if path.parent == directory and path.is_file():
+                    return path
         return None
 
     def _relative(self, path: Path) -> str:

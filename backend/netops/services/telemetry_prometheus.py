@@ -84,8 +84,13 @@ def query_prometheus_metric(
             ),
             f'avg(gnmi_components_component_cpu_utilization_state_instant{{hostname="{hostname}"}})',
             (
-                f'100 * (1 - avg(rate(node_cpu_seconds_total'
-                f'{{instance=~"{short_host}.*",mode="idle"}}[5m])))'
+                f'avg(cpmCPUTotal1minRev{{hostname="{hostname}"}} '
+                f'or hwEntityCpuUsage{{hostname="{hostname}"}} > 0 '
+                f'or hrProcessorLoad{{hostname="{hostname}"}})'
+            ),
+            (
+                f'100 * (1 - avg(rate(node_cpu_seconds_total{{hostname="{hostname}",mode="idle"}}[5m]) '
+                f'or rate(node_cpu_seconds_total{{instance=~"{short_host}.*",mode="idle"}}[5m])))'
             ),
         ),
         "memory_pct": (
@@ -98,6 +103,45 @@ def query_prometheus_metric(
                 f'100 * avg(gnmi_system_memory_state_used{{hostname="{hostname}"}}) '
                 f'/ clamp_min(avg(gnmi_system_memory_state_physical{{hostname="{hostname}"}}), 1)'
             ),
+            (
+                f'avg(hwEntityMemUsage{{hostname="{hostname}"}} > 0) '
+                f'or (100 * sum(ciscoMemoryPoolUsed{{hostname="{hostname}"}}) / '
+                f'clamp_min(sum(ciscoMemoryPoolUsed{{hostname="{hostname}"}}) + sum(ciscoMemoryPoolFree{{hostname="{hostname}"}}), 1)) '
+                f'or (100 * max(hrStorageUsed{{hostname="{hostname}"}}) / clamp_min(max(hrStorageSize{{hostname="{hostname}"}}), 1))'
+            ),
+            (
+                f'100 * (1 - (avg(node_memory_MemAvailable_bytes{{hostname="{hostname}"}}) '
+                f'/ clamp_min(avg(node_memory_MemTotal_bytes{{hostname="{hostname}"}}), 1)))'
+            ),
+        ),
+        "uplink_util_pct": (
+            (
+                f'avg(netops_device_uplink_utilization_percent{{hostname="{hostname}"}} '
+                f'or netops_uplink_util_percent{{hostname="{hostname}"}} '
+                f'or netops_uplink_utilization_percent{{hostname="{hostname}"}})'
+            ),
+            (
+                f'clamp_max(max((rate(gnmi_interfaces_interface_state_counters_in_octets'
+                f'{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(gnmi_interfaces_interface_state_counters_out_octets'
+                f'{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
+            ),
+            (
+                f'clamp_max(max((rate(ifHCInOctets{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifHCOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
+            ),
+        ),
+        "interface_errors_rate": (
+            f'avg(netops_interface_errors_total{{hostname="{hostname}"}})',
+            (
+                f'sum(rate(ifInErrors{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifOutErrors{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifInDiscards{{hostname="{hostname}"}}[5m]) '
+                f'+ rate(ifOutDiscards{{hostname="{hostname}"}}[5m]))'
+            ),
+        ),
+        "fdb_mac_count": (
+            f'avg(netops_fdb_mac_entries_total{{hostname="{hostname}"}})',
         ),
         "disk_util_pct": (
             f'avg(netops_server_disk_utilization_percent{{hostname="{hostname}"}})',
@@ -115,31 +159,19 @@ def query_prometheus_metric(
                 f'or node_load1{{hostname="{hostname}"}})'
             ),
         ),
-    }
-    queries = by_metric.get(
-        metric,
-        (
-            (
-                f'avg(netops_device_uplink_utilization_percent{{hostname="{hostname}"}} '
-                f'or netops_uplink_util_percent{{hostname="{hostname}"}} '
-                f'or netops_uplink_utilization_percent{{hostname="{hostname}"}})'
-            ),
-            (
-                f'clamp_max(max((rate(gnmi_interfaces_interface_state_counters_in_octets'
-                f'{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(gnmi_interfaces_interface_state_counters_out_octets'
-                f'{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
-            ),
-            (
-                f'clamp_max(max((rate(ifHCInOctets{{hostname="{hostname}"}}[5m]) '
-                f'+ rate(ifHCOutOctets{{hostname="{hostname}"}}[5m])) * 8 / 1e7), 100)'
-            ),
+        "tcp_retransmits_rate": (
+            f'avg(netops_server_tcp_retransmits_total{{hostname="{hostname}"}})',
         ),
-    )
+        "conntrack_usage_pct": (
+            f'avg(netops_server_conntrack_utilization_percent{{hostname="{hostname}"}})',
+        ),
+    }
+    queries = by_metric.get(metric, by_metric["uplink_util_pct"])
 
     now = int(time.time())
     start = now - (points * STEP_SECONDS)
     base_url = prometheus_url.rstrip("/")
+    fallback_pts: list[float] | None = None
     for prom_query in queries:
         params = {
             "query": prom_query,
@@ -162,10 +194,13 @@ def query_prometheus_metric(
                     ]
                     if len(pts) >= 2:
                         res_pts = pts[-points:]
-                        if len(_PROM_QUERY_CACHE) >= 512:
-                            _PROM_QUERY_CACHE.clear()
-                        _PROM_QUERY_CACHE[cache_key] = (now_mono, res_pts)
-                        return list(res_pts)
+                        if any(p > 0 for p in res_pts):
+                            if len(_PROM_QUERY_CACHE) >= 512:
+                                _PROM_QUERY_CACHE.clear()
+                            _PROM_QUERY_CACHE[cache_key] = (now_mono, res_pts)
+                            return list(res_pts)
+                        if fallback_pts is None:
+                            fallback_pts = res_pts
         except urllib.error.HTTPError:
             continue
         except urllib.error.URLError:
@@ -174,5 +209,5 @@ def query_prometheus_metric(
             continue
     if len(_PROM_QUERY_CACHE) >= 512:
         _PROM_QUERY_CACHE.clear()
-    _PROM_QUERY_CACHE[cache_key] = (now_mono, None)
-    return None
+    _PROM_QUERY_CACHE[cache_key] = (now_mono, fallback_pts)
+    return list(fallback_pts) if fallback_pts is not None else None

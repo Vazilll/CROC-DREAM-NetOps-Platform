@@ -82,7 +82,7 @@ def create_session(
             "username": principal.username,
             "role": principal.role.value,
             "allowed_system": principal.allowed_system,
-            "token_sha256": token_sha256 or hash_token(token),
+            "token_sha256": token_sha256 or hash_token(token.strip()),
             "db_user": db_user,
             "csrf": csrf,
             "created_at": int(time.time()),
@@ -168,11 +168,12 @@ def session_is_owner(request: Request, session: Session, settings: Settings) -> 
         if principal is not None:
             return principal.role == UserRole.OWNER
         user = session.scalar(select(User).where(User.token_sha256 == hash_token(tok)))
-        return bool(
+        if (
             user
             and user.is_active
             and not _is_expired(user.expires_at)
             and user.role == UserRole.OWNER
-        )
+        ):
+            return True
     principal, _ = principal_from_session(request, session, settings)
     return principal is not None and principal.role == UserRole.OWNER

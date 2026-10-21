@@ -240,6 +240,16 @@ class DeviceIntent(IntentModel):
         return self
 
 
+def normalize_stand_dict(data: Any) -> Any:
+    if isinstance(data, dict):
+        data = dict(data)
+        if data.get("site") and not data.get("fabric_id"):
+            data["fabric_id"] = data["site"]
+        elif data.get("fabric_id") and not data.get("site"):
+            data["site"] = data["fabric_id"]
+    return data
+
+
 # id и status есть в модели устройства из ТЗ. Статус в файле справочный: в базе его
 # выставляет Drift Engine.
 class InventoryDevice(IntentModel):
@@ -258,16 +268,7 @@ class InventoryDevice(IntentModel):
     rack: str | None = None
     unit: int | None = Field(default=None, ge=1, le=60)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_stand(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            data = dict(data)
-            if data.get("site") and not data.get("fabric_id"):
-                data["fabric_id"] = data["site"]
-            elif data.get("fabric_id") and not data.get("site"):
-                data["site"] = data["fabric_id"]
-        return data
+    _normalize_stand = model_validator(mode="before")(normalize_stand_dict)
 
 
 class Inventory(IntentModel):
@@ -354,17 +355,6 @@ class PlatformProfile(IntentModel):
         default_factory=lambda: ["gnmi", "node_exporter", "snmp", "ssh_cli"]
     )
     emergency_commands: dict[str, str] = Field(default_factory=dict)
-
-    def get(self, key: str, default: Any = None) -> Any:
-        if key in type(self).model_fields:
-            val = getattr(self, key)
-            return default if val is None else val
-        return default
-
-    def __getitem__(self, key: str) -> Any:
-        if key in type(self).model_fields:
-            return getattr(self, key)
-        raise KeyError(key) from None
 
 
 class DropLinePatternSpec(IntentModel):

@@ -123,6 +123,12 @@ class ChangePlanner:
     def _collect(self, plans: Sequence[DevicePlan]) -> None:
         if not plans:
             return
+        from netops.services.vitality import (
+            clear_connection_failure,
+            record_connection_failure,
+            save_device_backup,
+        )
+
         self._recorder.info("collect", f"Collecting running-config from {len(plans)} device(s)")
         targets = [plan.target for plan in plans if plan.target is not None]
         try:
@@ -130,6 +136,7 @@ class ChangePlanner:
         except Exception as exc:
             logger.warning("Collector failed", exc_info=True)
             for plan in plans:
+                record_connection_failure(plan.hostname, str(exc))
                 plan.fail(f"Collection failed: {exc}", unreachable=True)
             return
 
@@ -137,9 +144,12 @@ class ChangePlanner:
             result = results.get(plan.hostname)
             if result is None or result.config is None:
                 reason = result.error if result is not None else "no result from the collector"
+                record_connection_failure(plan.hostname, reason)
                 plan.fail(f"Cannot collect running-config: {reason}", unreachable=True)
                 continue
+            clear_connection_failure(plan.hostname)
             plan.running = self._toolchain.normalizer.normalize(plan.device.platform, result.config)
+            save_device_backup(plan.hostname, plan.running, getattr(plan.device, "fabric_id", None))
 
     def _diff(self, plan: DevicePlan, running: str, intended: str) -> None:
         try:

@@ -26,5 +26,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("devices", "unit")
-    op.drop_column("devices", "rack")
+    with op.batch_alter_table("devices") as batch_op:
+        batch_op.drop_column("unit")
+        batch_op.drop_column("rack")

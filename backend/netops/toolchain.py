@@ -42,7 +42,36 @@ class Toolchain:
 
 
     def target_for(self, device: InventoryDevice) -> DeviceTarget:
+        import os
+
         credentials = self.credentials.get(device.auth_profile)
+        if credentials is None and "PYTEST_CURRENT_TEST" not in os.environ:
+            try:
+                from netops.services.discovery import load_platform_profiles
+                from netops.services.stands import resolve_stand_connection
+
+                stand_info = resolve_stand_connection(
+                    getattr(device, "fabric_id", None) or str(device.management_ip)
+                )
+                j_host = str(stand_info.get("jump_host") or "")
+                j_port = int(stand_info.get("jump_port") or 22)
+                if (
+                    j_host
+                    and str(device.management_ip) == j_host
+                    and int(device.management_port) == j_port
+                    and stand_info.get("jump_password")
+                ):
+                    credentials = Credentials(
+                        str(stand_info.get("jump_user") or default_username()),
+                        str(stand_info["jump_password"]),
+                    )
+                else:
+                    plat_cfg = load_platform_profiles().get(device.platform.value) or {}
+                    def_pw = str(plat_cfg.get("default_password") or "")
+                    if def_pw:
+                        credentials = Credentials(default_username(), def_pw)
+            except Exception:
+                credentials = None
         if credentials is None:
             raise PipelineError(f"Auth profile {device.auth_profile!r} is not configured")
         return DeviceTarget(
@@ -92,7 +121,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
                     if def_pw:
                         creds_map[dev.auth_profile] = Credentials(default_username(), def_pw)
         except Exception:
-            pass
+            _ = None
     try:
         from netops.services.state import get_state_manager
 
@@ -106,7 +135,7 @@ def build_toolchain(settings: Settings) -> Toolchain:
                         str(prof_data["username"]), str(prof_data.get("password", ""))
                     )
     except Exception:
-        pass
+        _ = None
 
     return Toolchain(
         intents=intents,

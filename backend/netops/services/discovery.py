@@ -26,7 +26,6 @@ from netops.schemas.devices import (
     DeviceProbeResult,
 )
 from netops.services.discovery_brownfield import (
-    _PORT_MAP,
     _SOT_INV_LOCK,
     _build_default_device_intent,
     _parse_acl_endpoint,
@@ -37,6 +36,7 @@ from netops.services.discovery_brownfield import (
     _sot_inventory_remove,
     _sot_inventory_upsert,
     _wildcard_to_cidr,
+    sync_stand_inventory_and_devices,
 )
 from netops.services.discovery_parsers import (
     _flush_parsed_iface,
@@ -61,6 +61,16 @@ from netops.services.discovery_profiles import (
 from netops.toolchain import build_toolchain
 
 logger = logging.getLogger(__name__)
+
+
+def _infer_probe_role(
+    platform: Platform, hostname: str, default_role: str = "leaf"
+) -> DeviceRole:
+    if platform == Platform.LINUX_SERVER:
+        return DeviceRole.SERVER
+    if "spine" in hostname.lower() or default_role == "spine":
+        return DeviceRole.SPINE
+    return DeviceRole.LEAF
 
 
 def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResult:
@@ -104,15 +114,10 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
             hostname, interfaces, lldp_neighbors = _parse_ssh_topology(conn, detected_platform, hostname)
             collect_metrics_from_cli(hostname, detected_platform.value, lambda c: conn.send_command(c).result)
     except Exception as exc:
-        role_err = (
-            DeviceRole.SERVER
-            if detected_platform == Platform.LINUX_SERVER
-            else (DeviceRole.SPINE if "spine" in hostname else DeviceRole.LEAF)
-        )
         return DeviceProbeResult(
             reachable=False,
             detected_platform=detected_platform,
-            detected_role=role_err,
+            detected_role=_infer_probe_role(detected_platform, hostname),
             hostname=hostname,
             os_version=os_ver,
             interfaces=[],
@@ -120,15 +125,10 @@ def run_device_probe(req: DeviceProbeRequest, container: Any) -> DeviceProbeResu
             message=f"TCP-порт открыт ({banner or 'passthrough'}), но SSH-сессия не установлена: {exc}",
         )
 
-    role = (
-        DeviceRole.SERVER
-        if detected_platform == Platform.LINUX_SERVER
-        else (DeviceRole.SPINE if "spine" in hostname.lower() else DeviceRole.LEAF)
-    )
     return DeviceProbeResult(
         reachable=True,
         detected_platform=detected_platform,
-        detected_role=role,
+        detected_role=_infer_probe_role(detected_platform, hostname),
         hostname=hostname,
         os_version=os_ver,
         cpu_cores=cpu_cores,
@@ -151,6 +151,7 @@ def discover_live_switch_via_ssh(
     candidate_passwords: list[str] | None = None,
     passwords_by_platform: dict[str, str] | None = None,
     initial_platform: Platform | None = None,
+    fabric_id: str | None = None,
 ) -> dict[str, Any] | None:
     """Probe TCP banner, connect via SSH, extract live identity, running-config, and intent."""
     profiles = load_platform_profiles(getattr(settings, "intent_repo_path", None))
@@ -222,13 +223,10 @@ def discover_live_switch_via_ssh(
     if not connected:
         return None
 
-    role = (
-        "server"
-        if detected_platform == Platform.LINUX_SERVER
-        else ("spine" if ("spine" in hostname.lower() or default_role == "spine") else "leaf")
-    )
+    role = _infer_probe_role(detected_platform, hostname, default_role).value
     auth_profile = f"{hostname.split('.')[0].replace('-', '')}_auth"
     _persist_custom_auth(settings, auth_profile, username or default_username(), used_pw)
+    fab_slug = (fabric_id or _resolve_fabric_id(settings)).strip()
 
     if (
         settings.network_driver == "offline"
@@ -240,17 +238,33 @@ def discover_live_switch_via_ssh(
         cfg_file.write_text(running_config, encoding="utf-8")
 
     if not _is_protected_repo_path(settings.intent_repo_path):
-        devices_dir = settings.intent_repo_path / "devices"
+        inv_path = settings.intent_repo_path / "inventory.yaml"
+        in_root_inv = True
+        if inv_path.is_file():
+            raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+            inv_hosts = {
+                str(d.get("hostname"))
+                for d in (raw_inv.get("devices") or [])
+                if isinstance(d, dict) and d.get("hostname")
+            }
+            in_root_inv = hostname in inv_hosts
+        live_stand = settings.network_driver != "offline"
+        use_stand_dir = live_stand or not in_root_inv
+        devices_dir = (
+            settings.intent_repo_path / "stands" / fab_slug / "devices"
+            if use_stand_dir
+            else settings.intent_repo_path / "devices"
+        )
         devices_dir.mkdir(parents=True, exist_ok=True)
         intent_file = devices_dir / f"{hostname}.yaml"
-        if not intent_file.is_file():
+        if not intent_file.is_file() or use_stand_dir:
             intent_data = _parse_brownfield_intent_from_config(hostname, running_config, detected_platform)
             if intent_data is not None:
                 try:
                     DeviceIntent.model_validate(intent_data)
                 except Exception:
                     intent_data = None
-            if intent_data is None:
+            if intent_data is None and not intent_file.is_file():
                 dummy_dev = Device(
                     id=port % 100,
                     hostname=hostname,
@@ -259,6 +273,7 @@ def discover_live_switch_via_ssh(
                     platform=detected_platform,
                     role=DeviceRole(role),
                     auth_profile=auth_profile,
+                    fabric_id=fab_slug,
                 )
                 intent_data = _build_default_device_intent(dummy_dev)
             if intent_data is not None:
@@ -274,6 +289,7 @@ def discover_live_switch_via_ssh(
         "management_port": port,
         "endpoint": f"{host}:{port}",
         "auth_profile": auth_profile,
+        "fabric_id": fab_slug,
         "reachable": True,
         "banner": banner,
         "running_config": running_config,
@@ -328,7 +344,14 @@ def bind_device_to_sot(data: DeviceCreate, device: Device, container: Any) -> No
     if _is_protected_repo_path(settings.intent_repo_path):
         return
 
-    devices_dir = settings.intent_repo_path / "devices"
+    default_fab = _resolve_fabric_id(settings)
+    dev_fabric = str(getattr(device, "fabric_id", default_fab) or default_fab).strip()
+    stand_dir = settings.intent_repo_path / "stands" / dev_fabric
+    devices_dir = (
+        stand_dir / "devices"
+        if dev_fabric != default_fab and stand_dir.is_dir()
+        else settings.intent_repo_path / "devices"
+    )
     devices_dir.mkdir(parents=True, exist_ok=True)
     intent_file = devices_dir / f"{device.hostname}.yaml"
     if not intent_file.is_file():
@@ -363,8 +386,14 @@ def remove_device_from_sot(
     clear_live_metrics(hostname)
     if _is_protected_repo_path(intent_repo_path):
         return
+    stand_device_files = (
+        list((intent_repo_path / "stands").glob(f"*/devices/{hostname}.yaml"))
+        if (intent_repo_path / "stands").is_dir()
+        else []
+    )
     for extra_file in (
         intent_repo_path / "devices" / f"{hostname}.yaml",
+        *stand_device_files,
         *(
             [offline_lab_path / f"{hostname}.cfg"]
             if offline_lab_path is not None and not _is_protected_repo_path(offline_lab_path)

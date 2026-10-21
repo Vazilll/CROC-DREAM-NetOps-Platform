@@ -17,25 +17,20 @@ from types import MappingProxyType
 
 from netops.enums import Platform
 from netops.network.base import (
-    BgpSessionState,
     ChangePlan,
     DeviceTarget,
     FetchResult,
     HealthExpectations,
     HealthSnapshot,
-    InterfaceState,
 )
 from netops.network.ssh_pool import (
     _CLI_METRICS_DEDUP_SEC,
-    _DEAD_ENDPOINTS,
-    _DEVICE_LOCKS,
-    _JUMP_LOCK,
     _LAST_CLI_METRICS_TS,
     _POOL_GUARD,
     _SESSION_IDLE_TTL,
     _SESSION_POOL,
-    _check_tcp_endpoint,
     _close_pooled_session,
+    _close_ssh_objects,
     _get_device_lock,
     connect_with_sock,
     establish_fresh_session,
@@ -44,9 +39,9 @@ from netops.network.ssh_pool import (
     open_jump_channel,
     resolve_clab_jump_defaults,
     resolve_container_endpoint,
+    sweep_session_pool,
 )
 from netops.network.table_parsers import collect_device_health_tables
-from netops.services.telemetry import collect_metrics_from_cli
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +87,13 @@ class _ParamikoConnAdapter:
     """Transparent SSH adapter with per-device lock and persistent session pooling."""
 
     def __init__(
-        self, target: DeviceTarget, timeout: int = 15, proxy_jump: str | None = None
+        self,
+        target: DeviceTarget,
+        timeout: int = 15,
+        proxy_jump: str | None = None,
+        mutating: bool = False,
     ) -> None:
+        self.mutating = mutating
         self.target = target
         self.timeout = timeout
         self.proxy_jump = proxy_jump
@@ -125,10 +125,11 @@ class _ParamikoConnAdapter:
     def __enter__(self):
         key = (self.target.host, self.target.port)
         self._device_lock = _get_device_lock(self.target.host, self.target.port)
-        self._device_lock.acquire()
+        self._device_lock.acquire(fail_closed=self.mutating)
         try:
             self._use_pool = "PYTEST_CURRENT_TEST" not in os.environ
             if self._use_pool:
+                sweep_session_pool()
                 with _POOL_GUARD:
                     pooled = _SESSION_POOL.get(key)
                 if pooled is not None:
@@ -159,23 +160,27 @@ class _ParamikoConnAdapter:
                     _close_pooled_session(self.target.host, self.target.port)
 
             self._establish_fresh_session()
-            if self._use_pool and self.client is not None and self.shell is not None:
-                with _POOL_GUARD:
-                    _SESSION_POOL[key] = {
-                        "client": self.client,
-                        "shell": self.shell,
-                        "jump_client": self._jump_client,
-                        "platform": self.target.platform,
-                        "authenticated_password": self.authenticated_password,
-                        "last_used": time.monotonic(),
-                    }
+            self._store_pooled_session()
             return self
         except Exception:
             self._device_lock.release()
             self._device_lock = None
             raise
 
-    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+    def _store_pooled_session(self) -> None:
+        if self._use_pool and self.client is not None and self.shell is not None:
+            key = (self.target.host, self.target.port)
+            with _POOL_GUARD:
+                _SESSION_POOL[key] = {
+                    "client": self.client,
+                    "shell": self.shell,
+                    "jump_client": self._jump_client,
+                    "platform": self.target.platform,
+                    "authenticated_password": self.authenticated_password,
+                    "last_used": time.monotonic(),
+                }
+
+    def __exit__(self, exc_type: object, _exc_val: object, _exc_tb: object) -> None:
         try:
             key = (self.target.host, self.target.port)
             if self._use_pool and exc_type is None and not self._invalidate_pool:
@@ -186,29 +191,27 @@ class _ParamikoConnAdapter:
             if self._use_pool:
                 _close_pooled_session(self.target.host, self.target.port)
                 return
-
-            if self.shell is not None:
-                with contextlib.suppress(Exception):
-                    if self.target.platform == Platform.HUAWEI_VRP:
-                        self.shell.send("return\nquit\ny\n")
-                    else:
-                        self.shell.send("exit\n")
-                    time.sleep(0.1)
-                    self.shell.close()
-            if self.client:
-                self.client.close()
-            if self._jump_client:
-                self._jump_client.close()
+            _close_ssh_objects(self.shell, self.client, self._jump_client, self.target.platform)
         finally:
             if self._device_lock is not None:
                 self._device_lock.release()
                 self._device_lock = None
 
+    def _retry_dead_session(self, fn, arg):
+        try:
+            return fn(self, arg)
+        except (OSError, EOFError):
+            # pooled shell died between uses ("Socket is closed"): reconnect once and retry
+            _close_pooled_session(self.target.host, self.target.port)
+            self._establish_fresh_session()
+            self._store_pooled_session()
+            return fn(self, arg)
+
     def send_command(self, cmd: str) -> _ScrapliResponse:
-        return _ScrapliResponse(execute_shell_command(self, cmd))
+        return _ScrapliResponse(self._retry_dead_session(execute_shell_command, cmd))
 
     def send_configs(self, lines: Sequence[str]) -> _ScrapliResponse:
-        return _ScrapliResponse(execute_shell_configs(self, lines))
+        return _ScrapliResponse(self._retry_dead_session(execute_shell_configs, lines))
 
 
 class ScrapliNetworkDriver:
@@ -224,7 +227,20 @@ class ScrapliNetworkDriver:
             target, timeout=self.timeout_socket, proxy_jump=target.proxy_jump
         )
 
+    def _mutating_connection(self, target: DeviceTarget):
+        """Connection for deploy/confirm/rollback: fail closed if the SSH lock is not obtained."""
+        conn = self._get_connection(target)
+        with contextlib.suppress(AttributeError):
+            conn.mutating = True
+        return conn
+
     def fetch_running_configs(self, targets: Sequence[DeviceTarget]) -> Mapping[str, FetchResult]:
+        from netops.services.vitality import (
+            clear_connection_failure,
+            record_connection_failure,
+            save_device_backup,
+        )
+
         results: dict[str, FetchResult] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_host = {
@@ -234,10 +250,14 @@ class ScrapliNetworkDriver:
                 hostname = future_to_host[future]
                 try:
                     config = future.result()
+                    clear_connection_failure(hostname)
+                    save_device_backup(hostname, config)
                     results[hostname] = FetchResult.success(config)
                 except Exception as exc:
                     logger.warning("Failed to collect running-config from %s: %s", hostname, exc)
+                    record_connection_failure(hostname, str(exc))
                     results[hostname] = FetchResult.failure(str(exc))
+        sweep_session_pool()
         return results
 
     def _fetch_single(self, target: DeviceTarget) -> str:
@@ -256,18 +276,15 @@ class ScrapliNetworkDriver:
                         raise RuntimeError(f"Command '{cmd}' failed: {response.result}")
                     if not response.result.strip():
                         raise RuntimeError("Empty response from device")
+                    from netops.network.table_parsers import collect_device_cli_metrics
                     from netops.telemetry.targets import is_externally_collected
 
-                    now_ts = time.monotonic()
-                    last_m = _LAST_CLI_METRICS_TS.get(target.hostname, 0.0)
-                    if not is_externally_collected(target.hostname) and (
-                        now_ts - last_m >= _CLI_METRICS_DEDUP_SEC
-                    ):
-                        _LAST_CLI_METRICS_TS[target.hostname] = now_ts
-                        collect_metrics_from_cli(
-                            target.hostname,
-                            target.platform.value,
-                            lambda c: conn.send_command(c).result,
+                    if not is_externally_collected(target.hostname):
+                        collect_device_cli_metrics(
+                            conn,
+                            target,
+                            last_cli_metrics_ts=_LAST_CLI_METRICS_TS,
+                            cli_metrics_dedup_sec=_CLI_METRICS_DEDUP_SEC,
                         )
                     return response.result
             except Exception as exc:
@@ -285,6 +302,16 @@ class ScrapliNetworkDriver:
                 if any(x in err_str for x in fast_fail):
                     break
                 time.sleep(1.0)
+        with contextlib.suppress(Exception):
+            from netops.services.vitality import record_connection_failure
+
+            record_connection_failure(
+                target.hostname,
+                str(last_exc),
+                host=target.host,
+                port=target.port,
+                proxy_jump=target.proxy_jump,
+            )
         raise RuntimeError(str(last_exc))
 
     def apply(self, target: DeviceTarget, plan: ChangePlan, *, confirm_timeout: int) -> None:
@@ -301,48 +328,55 @@ class ScrapliNetworkDriver:
                 "нужны commit/rollback этой платформы, иначе откат не гарантирован"
             )
 
-        with self._get_connection(target) as conn:
+        with self._mutating_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
-                conn.send_configs(lines)
-                conn.send_command(f"commit confirmed {confirm_timeout}")
+                self._ensure_ok(conn.send_configs(lines))
+                self._ensure_ok(conn.send_command(f"commit confirmed {confirm_timeout}"))
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command(f"configure session {ARISTA_SESSION}")
-                conn.send_configs(lines)
-                conn.send_command(f"commit timer {confirm_timeout}")
+                self._ensure_ok(conn.send_command(f"configure session {ARISTA_SESSION}"))
+                self._ensure_ok(conn.send_configs(lines))
+                hh, rem = divmod(int(confirm_timeout), 3600)
+                mm, ss = divmod(rem, 60)
+                self._ensure_ok(conn.send_command(f"commit timer {hh:02d}:{mm:02d}:{ss:02d}"))
             elif target.platform == Platform.HUAWEI_VRP:
-                self._commit_ids[target.hostname] = _latest_commit_id(
-                    conn.send_command(HUAWEI_COMMIT_LIST).result
-                )
-                conn.send_configs(lines)
-                conn.send_command("commit")
+                res = conn.send_command(HUAWEI_COMMIT_LIST)
+                self._ensure_ok(res)
+                self._commit_ids[target.hostname] = _latest_commit_id(res.result)
+                self._ensure_ok(conn.send_configs(lines))
+                self._ensure_ok(conn.send_command("commit"))
             else:
-                conn.send_configs(lines)
+                self._ensure_ok(conn.send_configs(lines))
+
+    @staticmethod
+    def _ensure_ok(response: object) -> None:
+        if getattr(response, "failed", False):
+            raise RuntimeError(f"CLI command failed: {getattr(response, 'result', response)}")
 
     def confirm(self, target: DeviceTarget) -> None:
         if target.platform is Platform.HUAWEI_VRP:
             self._commit_ids.pop(target.hostname, None)
             return
-        with self._get_connection(target) as conn:
+        with self._mutating_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
-                conn.send_command("commit")
-                conn.send_command("write memory")
+                self._ensure_ok(conn.send_command("commit"))
+                self._ensure_ok(conn.send_command("write memory"))
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command(f"configure session {ARISTA_SESSION}")
-                conn.send_command("commit")
-                conn.send_command("write memory")
+                self._ensure_ok(conn.send_command(f"configure session {ARISTA_SESSION}"))
+                self._ensure_ok(conn.send_command("commit"))
+                self._ensure_ok(conn.send_command("write memory"))
             else:
-                conn.send_command("write memory")
+                self._ensure_ok(conn.send_command("write memory"))
 
     def rollback(self, target: DeviceTarget, plan: ChangePlan) -> None:
         if target.platform is Platform.HUAWEI_VRP:
             self._rollback_huawei(target)
             return
-        with self._get_connection(target) as conn:
+        with self._mutating_connection(target) as conn:
             if target.platform == Platform.CISCO_IOSXE:
-                conn.send_command("abort")
+                self._ensure_ok(conn.send_command("abort"))
             elif target.platform == Platform.ARISTA_EOS:
-                conn.send_command(f"configure session {ARISTA_SESSION}")
-                conn.send_command("abort")
+                self._ensure_ok(conn.send_command(f"configure session {ARISTA_SESSION}"))
+                self._ensure_ok(conn.send_command("abort"))
 
             rollback_lines = [
                 line.strip()
@@ -350,7 +384,7 @@ class ScrapliNetworkDriver:
                 if line.strip() and not line.startswith(("!", "#"))
             ]
             if rollback_lines:
-                conn.send_configs(rollback_lines)
+                self._ensure_ok(conn.send_configs(rollback_lines))
 
     def _rollback_huawei(self, target: DeviceTarget) -> None:
         commit_id = self._commit_ids.pop(target.hostname, None)
@@ -359,7 +393,7 @@ class ScrapliNetworkDriver:
             if commit_id
             else "rollback configuration last 1"
         )
-        with self._get_connection(target) as conn:
+        with self._mutating_connection(target) as conn:
             conn.send_command("system-view")
             conn.send_command(command)
             conn.send_command("commit")
@@ -382,15 +416,9 @@ __all__ = [
     "HUAWEI_COMMIT_LIST",
     "SCRAPLI_PLATFORMS",
     "TRANSACTIONAL_PLATFORMS",
-    "_DEAD_ENDPOINTS",
-    "_DEVICE_LOCKS",
-    "_JUMP_LOCK",
     "_LAST_CLI_METRICS_TS",
     "_SESSION_POOL",
-    "BgpSessionState",
-    "InterfaceState",
     "ScrapliNetworkDriver",
     "_ParamikoConnAdapter",
-    "_check_tcp_endpoint",
     "_latest_commit_id",
 ]

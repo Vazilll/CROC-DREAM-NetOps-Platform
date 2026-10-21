@@ -81,6 +81,58 @@ write memory
   fi
 }
 
+RAW_TELNET_PY='
+import re, socket, sys, time
+
+class RawTelnet:
+    def __init__(self, host, port, timeout=10.0):
+        self.sock = socket.create_connection((host, port), timeout=timeout)
+        self.sock.settimeout(timeout)
+        self.buf = bytearray()
+
+    def write(self, data):
+        self.sock.sendall(data)
+
+    def read_very_eager(self):
+        self.sock.setblocking(False)
+        out = bytearray()
+        try:
+            while True:
+                chunk = self.sock.recv(4096)
+                if not chunk:
+                    break
+                out.extend(chunk)
+        except (BlockingIOError, OSError):
+            pass
+        finally:
+            self.sock.setblocking(True)
+        return bytes(out)
+
+    def expect(self, patterns, timeout=2.0):
+        self.sock.settimeout(timeout)
+        compiled = [re.compile(p) for p in patterns]
+        start = time.time()
+        while time.time() - start < timeout:
+            for idx, pat in enumerate(compiled):
+                m = pat.search(self.buf)
+                if m:
+                    end = m.end()
+                    matched = bytes(self.buf[:end])
+                    del self.buf[:end]
+                    return idx, m, matched
+            try:
+                chunk = self.sock.recv(1024)
+                if not chunk:
+                    break
+                self.buf.extend(chunk)
+            except (socket.timeout, BlockingIOError, OSError):
+                break
+        return -1, None, bytes(self.buf)
+
+    def close(self):
+        self.sock.close()
+'
+
 # --- 2. Huawei CE12800 (VRP) ---
 reset_huawei() {
   local node="$1"
@@ -92,13 +144,11 @@ reset_huawei() {
   local pass=$(echo "$creds" | cut -d':' -f2)
 
   if docker inspect "${container}" > /dev/null 2>&1; then
-    docker exec -i "${container}" python3 -W ignore -c '
-import telnetlib, sys, time
-
+    docker exec -i "${container}" python3 -W ignore -c "${RAW_TELNET_PY}"'
 user, pwd, node_name, cfg_name = sys.argv[1:5]
 lines = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
 
-tn = telnetlib.Telnet("127.0.0.1", 5000, timeout=10)
+tn = RawTelnet("127.0.0.1", 5000, timeout=10)
 tn.write(b"\x1a\r\n")
 time.sleep(0.3)
 tn.read_very_eager()
@@ -156,7 +206,7 @@ for i, line in enumerate(lines):
                 in_bgp_af = False
             continue
 
-        # Во всех остальных случаях на '#' гарантированно сбрасываем контекст в system-view
+        # Во всех остальных случаях на "#" гарантированно сбрасываем контекст в system-view
         send_cmd("return", wait=0.08)
         send_cmd("system-view", wait=0.08)
         in_bgp = False
@@ -199,13 +249,11 @@ reset_cisco() {
   local pass=$(echo "$creds" | cut -d':' -f2)
 
   if docker inspect "${container}" > /dev/null 2>&1; then
-    docker exec -i "${container}" python3 -W ignore -c '
-import telnetlib, sys, time
-
+    docker exec -i "${container}" python3 -W ignore -c "${RAW_TELNET_PY}"'
 user, pwd, node_name, cfg_name = sys.argv[1:5]
 cfg_lines = [l.strip() for l in sys.stdin.read().splitlines() if l.strip()]
 
-tn = telnetlib.Telnet("127.0.0.1", 5000, timeout=10)
+tn = RawTelnet("127.0.0.1", 5000, timeout=10)
 tn.write(b"\r\n\r\n")
 time.sleep(0.5)
 

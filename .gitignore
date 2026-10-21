@@ -64,3 +64,5 @@ lab/clab-dc-clos-cisco-arista-huawei/
 *.log.gz
 .checkpoints/
 persist/
+.codebase-memory/
+intent/**/*.lock

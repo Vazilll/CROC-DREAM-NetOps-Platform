@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from netops.network import JinjaConfigRenderer
-from netops.services.forecast import record_chaos_event
 
 
 def _push_live_configs(container: Any, hostname: str, lines: list[str]) -> str:
@@ -139,6 +138,8 @@ def _shutdown_interface_in_cfg(content: str, iface_name: str) -> str:
     block = match.group(1)
     if "\n no shutdown\n" in block:
         new_block = block.replace("\n no shutdown\n", "\n shutdown\n")
+    elif "\n undo shutdown\n" in block:
+        new_block = block.replace("\n undo shutdown\n", "\n shutdown\n")
     elif "\n shutdown\n" not in block:
         new_block = block.rstrip("\n") + "\n shutdown\n"
     else:
@@ -146,49 +147,87 @@ def _shutdown_interface_in_cfg(content: str, iface_name: str) -> str:
     return content[: match.start()] + new_block + content[match.end() :]
 
 
-def _scenario_acl_drift(
+def _apply_cfg_replacements(
+    target_cfg: Path,
+    replacements: list[tuple[str, str, str]],
+    fallback_lines: list[str] | None = None,
+) -> None:
+    if not target_cfg.exists():
+        return
+    content = target_cfg.read_text(encoding="utf-8")
+    for anchor, guard_sub, new_text in replacements:
+        if anchor in content:
+            if guard_sub not in content:
+                target_cfg.write_text(content.replace(anchor, new_text), encoding="utf-8")
+            return
+    if fallback_lines and fallback_lines[-1] not in content:
+        suffix = "\n" + "\n ".join(fallback_lines) + "\n"
+        target_cfg.write_text(content.rstrip("\n") + suffix, encoding="utf-8")
+
+
+_ACL_DRIFT_REPLACEMENTS = [
+    ("20 deny ip any any", "15 permit ip any any", "15 permit ip any any\n 20 deny ip any any"),
+    (
+        "20 permit tcp any any eq bgp",
+        "17 permit ip 10.99.0.0 0.0.255.255 any",
+        "17 permit ip 10.99.0.0 0.0.255.255 any\n 20 permit tcp any any eq bgp",
+    ),
+    (
+        "rule 20 deny ip source any destination any",
+        "rule 15 permit ip",
+        "rule 15 permit ip source any destination any\n rule 20 deny ip source any destination any",
+    ),
+    (
+        "rule 20 permit tcp destination-port eq bgp",
+        "rule 17 permit ip source 10.99.0.0",
+        "rule 17 permit ip source 10.99.0.0 0.0.255.255\n rule 20 permit tcp destination-port eq bgp",
+    ),
+]
+
+_HUAWEI_DRIFT_REPLACEMENTS = [
+    (
+        "rule 20 deny ip source any destination any",
+        "rule 15 permit ip source 10.99.0.0",
+        "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any\n rule 20 deny ip source any destination any",
+    ),
+    (
+        "rule 20 permit tcp destination-port eq bgp",
+        "rule 17 permit ip source 10.99.0.0",
+        "rule 17 permit ip source 10.99.0.0 0.0.255.255\n rule 20 permit tcp destination-port eq bgp",
+    ),
+    ("20 deny ip any any", "15 permit ip any any", "15 permit ip any any\n 20 deny ip any any"),
+    (
+        "20 permit tcp any any eq bgp",
+        "17 permit ip 10.99.0.0 0.0.255.255 any",
+        "17 permit ip 10.99.0.0 0.0.255.255 any\n 20 permit tcp any any eq bgp",
+    ),
+]
+
+
+def _execute_acl_drift_chaos(
     container: Any,
     lab_dir: Path,
     *,
-    target_hostname: str | None = None,
-    acl_name: str | None = None,
+    target_hostname: str | None,
+    acl_name: str | None,
+    preferred_platform: str,
+    index: int,
+    replacements: list[tuple[str, str, str]],
+    prefer_leaf3: bool = False,
+    force_huawei_cli: bool = False,
 ) -> dict[str, str]:
     target_host = _pick_target(
         container,
         lab_dir,
         explicit_target=target_hostname,
-        preferred_platform="cisco_iosxe",
-        index=0,
+        preferred_platform=preferred_platform,
+        index=index,
         fallback="leaf-1.croc.lab",
     )
+    if prefer_leaf3 and not target_hostname and (lab_dir / "leaf-3.croc.lab.cfg").exists():
+        target_host = "leaf-3.croc.lab"
     resolved_acl = _resolve_acl_name(container, target_host, acl_name)
-    target_cfg = lab_dir / f"{target_host}.cfg"
-    if target_cfg.exists():
-        content = target_cfg.read_text(encoding="utf-8")
-        if "20 deny ip any any" in content and "15 permit ip any any" not in content:
-            content = content.replace(
-                "20 deny ip any any", "15 permit ip any any\n 20 deny ip any any"
-            )
-            target_cfg.write_text(content, encoding="utf-8")
-        elif (
-            "20 permit tcp any any eq bgp" in content
-            and "17 permit ip 10.99.0.0 0.0.255.255 any" not in content
-        ):
-            content = content.replace(
-                "20 permit tcp any any eq bgp",
-                "17 permit ip 10.99.0.0 0.0.255.255 any\n 20 permit tcp any any eq bgp",
-            )
-            target_cfg.write_text(content, encoding="utf-8")
-        elif (
-            "rule 20 deny ip source any destination any" in content
-            and "rule 15 permit ip" not in content
-        ):
-            content = content.replace(
-                "rule 20 deny ip source any destination any",
-                "rule 15 permit ip source any destination any\n rule 20 deny ip source any destination any",
-            )
-            target_cfg.write_text(content, encoding="utf-8")
-    plat = _device_platform(container, target_host, lab_dir)
+    plat = "huawei_vrp" if force_huawei_cli else _device_platform(container, target_host, lab_dir)
     if plat == "huawei_vrp":
         cli_lines = [
             f"acl name {resolved_acl} advance",
@@ -199,16 +238,11 @@ def _scenario_acl_drift(
             f"ip access-list extended {resolved_acl}",
             "17 permit ip 10.99.0.0 0.0.255.255 any",
         ]
+    _apply_cfg_replacements(
+        lab_dir / f"{target_host}.cfg", replacements, fallback_lines=cli_lines
+    )
     ssh_note = _push_live_configs(container, target_host, cli_lines)
     msg = f"Внедрен несанкционированный ACL ({resolved_acl}) в {target_host}{ssh_note}"
-    record_chaos_event(
-        scenario="acl_drift",
-        target_hostnames=[target_host, target_host.split(".")[0]],
-        title="Chaos: Внедрение несанкционированного ACL",
-        description=msg,
-        severity="warning",
-        lab_dir=lab_dir,
-    )
     return {"status": "ok", "message": msg}
 
 
@@ -232,152 +266,110 @@ def _scenario_port_down(
     if target_cfg.exists():
         content = target_cfg.read_text(encoding="utf-8")
         updated = _shutdown_interface_in_cfg(content, resolved_iface)
-        if updated == content and resolved_iface != "GE1/0/1":
+        if updated == content and not interface_name and resolved_iface != "GE1/0/1":
             updated = _shutdown_interface_in_cfg(content, "GE1/0/1")
+        if updated == content and f"interface {resolved_iface}" not in content:
+            updated = content.rstrip("\n") + f"\ninterface {resolved_iface}\n shutdown\n"
         target_cfg.write_text(updated, encoding="utf-8")
     cli_lines = [f"interface {resolved_iface}", "shutdown"]
     ssh_note = _push_live_configs(container, target_host, cli_lines)
-    record_chaos_event(
-        scenario="port_down",
-        target_hostnames=[target_host, target_host.split(".")[0]],
-        title=f"Chaos: Отключение Uplink-интерфейса на {target_host}",
-        description=f"Uplink-интерфейс {resolved_iface} на {target_host} переведен в shutdown{ssh_note}",
-        severity="critical",
-        lab_dir=lab_dir,
-    )
     return {
         "status": "ok",
         "message": f"Интерфейс {resolved_iface} на {target_host} переведен в shutdown{ssh_note}",
     }
 
 
-def _scenario_huawei_drift(
+def _make_acl_drift_scenario(**spec: Any) -> Any:
+    def _scenario(
+        container: Any,
+        lab_dir: Path,
+        *,
+        target_hostname: str | None = None,
+        acl_name: str | None = None,
+    ) -> dict[str, str]:
+        return _execute_acl_drift_chaos(
+            container, lab_dir, target_hostname=target_hostname, acl_name=acl_name, **spec
+        )
+
+    return _scenario
+
+
+_scenario_acl_drift = _make_acl_drift_scenario(
+    preferred_platform="cisco_iosxe", index=0, replacements=_ACL_DRIFT_REPLACEMENTS
+)
+_scenario_huawei_drift = _make_acl_drift_scenario(
+    preferred_platform="huawei_vrp",
+    index=1,
+    replacements=_HUAWEI_DRIFT_REPLACEMENTS,
+    prefer_leaf3=True,
+    force_huawei_cli=True,
+)
+
+
+def _inject_ai_chaos(
     container: Any,
     lab_dir: Path,
     *,
-    target_hostname: str | None = None,
-    acl_name: str | None = None,
+    target_hostname: str | None,
+    index: int,
+    fallback: str,
+    anomaly_kind: str,
+    message_tpl: str,
 ) -> dict[str, str]:
+    from netops.services.ai_guard import AiTelemetryGuard
+
     target_host = _pick_target(
         container,
         lab_dir,
         explicit_target=target_hostname,
-        preferred_platform="huawei_vrp",
-        index=1,
-        fallback="leaf-1.croc.lab",
+        index=index,
+        fallback=fallback,
     )
-    if not target_hostname and (lab_dir / "leaf-3.croc.lab.cfg").exists():
-        target_host = "leaf-3.croc.lab"
-    resolved_acl = _resolve_acl_name(container, target_host, acl_name)
-    target_cfg = lab_dir / f"{target_host}.cfg"
-    if target_cfg.exists():
-        content = target_cfg.read_text(encoding="utf-8")
-        if (
-            "rule 20 deny ip source any destination any" in content
-            and "rule 15 permit ip source 10.99.0.0" not in content
-        ):
-            content = content.replace(
-                "rule 20 deny ip source any destination any",
-                "rule 15 permit ip source 10.99.0.0 0.0.255.255 destination any\n rule 20 deny ip source any destination any",
-            )
-            target_cfg.write_text(content, encoding="utf-8")
-        elif (
-            "rule 20 permit tcp destination-port eq bgp" in content
-            and "rule 17 permit ip source 10.99.0.0" not in content
-        ):
-            content = content.replace(
-                "rule 20 permit tcp destination-port eq bgp",
-                "rule 17 permit ip source 10.99.0.0 0.0.255.255\n rule 20 permit tcp destination-port eq bgp",
-            )
-            target_cfg.write_text(content, encoding="utf-8")
-    ssh_note = _push_live_configs(
-        container,
-        target_host,
-        [f"acl name {resolved_acl} advance", "rule 17 permit ip source 10.99.0.0 0.0.255.255"],
-    )
-    record_chaos_event(
-        scenario="huawei_drift",
-        target_hostnames=[target_host, target_host.split(".")[0]],
-        title="Chaos: Внедрение несанкционированного правила в Huawei VRP",
-        description=f"Внедрен дрейф ACL ({resolved_acl}) rule 17 в {target_host}{ssh_note}",
-        severity="warning",
-        lab_dir=lab_dir,
-    )
+    AiTelemetryGuard.inject_anomaly(target_host, anomaly_kind)  # type: ignore[arg-type]
     return {
         "status": "ok",
-        "message": f"Внедрен несанкционированный ACL ({resolved_acl}) в {target_host}{ssh_note}",
+        "message": message_tpl.format(host=target_host),
     }
 
 
 def _scenario_ai_blackhole(
     container: Any, lab_dir: Path, *, target_hostname: str | None = None
 ) -> dict[str, str]:
-    from netops.services.ai_guard import AiTelemetryGuard
-
-    target_host = _pick_target(
+    return _inject_ai_chaos(
         container,
         lab_dir,
-        explicit_target=target_hostname,
+        target_hostname=target_hostname,
         index=1,
         fallback="leaf-2.croc.lab",
+        anomaly_kind="blackhole",
+        message_tpl="Смоделирована 'тихая авария' на {host} (мониторинг телеметрии обнаружит дроп)",
     )
-    AiTelemetryGuard.inject_anomaly(target_host, "blackhole")
-    record_chaos_event(
-        scenario="ai_blackhole",
-        target_hostnames=[target_host, target_host.split(".")[0]],
-        title="Chaos: Моделирование 'тихой аварии' (Blackhole / 0 трафика)",
-        description=f"Имитация падения трафика на {target_host} при статусе портов up/up",
-        severity="critical",
-        lab_dir=lab_dir,
-    )
-    return {
-        "status": "ok",
-        "message": f"Смоделирована 'тихая авария' на {target_host} (мониторинг телеметрии обнаружит дроп)",
-    }
 
 
 def _scenario_ai_storm(
     container: Any, lab_dir: Path, *, target_hostname: str | None = None
 ) -> dict[str, str]:
-    from netops.services.ai_guard import AiTelemetryGuard
-
-    target_host = _pick_target(
+    return _inject_ai_chaos(
         container,
         lab_dir,
-        explicit_target=target_hostname,
+        target_hostname=target_hostname,
         index=0,
         fallback="leaf-1.croc.lab",
+        anomaly_kind="storm",
+        message_tpl="Смоделирован шторм трафика на {host} (мониторинг телеметрии обнаружит аномалию)",
     )
-    AiTelemetryGuard.inject_anomaly(target_host, "storm")
-    record_chaos_event(
-        scenario="ai_storm",
-        target_hostnames=[target_host, target_host.split(".")[0]],
-        title="Chaos: Моделирование шторма нагрузки / петли маршрутизации",
-        description=f"Имитация аномального всплеска трафика и CPU на {target_host}",
-        severity="critical",
-        lab_dir=lab_dir,
-    )
-    return {
-        "status": "ok",
-        "message": f"Смоделирован шторм трафика на {target_host} (мониторинг телеметрии обнаружит аномалию)",
-    }
 
 
 def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
     from netops.services.ai_guard import AiTelemetryGuard
     from netops.services.state import get_state_manager
 
-    state_mgr = get_state_manager()
-    with state_mgr._lock:
-        state_mgr._local_locks.clear()
-    client = state_mgr._get_redis()
-    if client:
-        try:
-            keys = list(client.scan_iter("netops:sync_lock:*"))
-            if keys:
-                client.delete(*keys)
-        except Exception:
-            pass
+    state = get_state_manager()
+    state.clear_sync_locks()
+    state.delete("netops:topology:link_overrides")
+    state.delete("netops:topology:drained_nodes")
+    AiTelemetryGuard.clear_all_injections()
+    lab_dir.mkdir(parents=True, exist_ok=True)
 
     renderer = JinjaConfigRenderer(container.settings.templates_path)
     snapshot = container.intents.load()
@@ -398,6 +390,7 @@ def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
                     dev.hostname,
                     [
                         f"acl name {acl_name} advance",
+                        "undo rule 15",
                         "undo rule 17",
                         "quit",
                         f"interface {uplink}",
@@ -410,6 +403,7 @@ def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
                     dev.hostname,
                     [
                         f"ip access-list extended {acl_name}",
+                        "no 15",
                         "no 17",
                         "exit",
                         f"interface {uplink}",
@@ -422,14 +416,6 @@ def _scenario_reset_lab(container: Any, lab_dir: Path) -> dict[str, str]:
                     dev.hostname,
                     [f"interface {uplink}", "no shutdown"],
                 )
-    record_chaos_event(
-        scenario="reset_lab",
-        target_hostnames=["*"],
-        title="Chaos: Сброс фабрики к Git SoT",
-        description="Устройства успешно сброшены к чистому эталону Git SoT",
-        severity="info",
-        lab_dir=lab_dir,
-    )
     return {
         "status": "ok",
         "message": f"Все устройства ({len(snapshot.inventory.devices)}) успешно сброшены к чистому эталону Git SoT",
@@ -449,7 +435,7 @@ def execute_chaos_scenario(
         return _scenario_acl_drift(
             container, lab_dir, target_hostname=target_hostname, acl_name=acl_name
         )
-    if scenario == "port_down":
+    if scenario in ("port_down", "link_flap", "link_down"):
         return _scenario_port_down(
             container, lab_dir, target_hostname=target_hostname, interface_name=interface_name
         )
@@ -457,19 +443,11 @@ def execute_chaos_scenario(
         return _scenario_huawei_drift(
             container, lab_dir, target_hostname=target_hostname, acl_name=acl_name
         )
-    if scenario == "ai_blackhole":
+    if scenario in ("ai_blackhole", "bgp_drop", "blackhole"):
         return _scenario_ai_blackhole(container, lab_dir, target_hostname=target_hostname)
-    if scenario == "ai_storm":
+    if scenario in ("ai_storm", "storm"):
         return _scenario_ai_storm(container, lab_dir, target_hostname=target_hostname)
-    if scenario == "reset_lab":
+    if scenario in ("reset_lab", "reset"):
         return _scenario_reset_lab(container, lab_dir)
 
-    record_chaos_event(
-        scenario=scenario,
-        target_hostnames=["*"],
-        title=f"Chaos: {scenario}",
-        description=f"Неизвестный сценарий: {scenario}",
-        severity="info",
-        lab_dir=lab_dir,
-    )
     return {"status": "ok", "message": "Неизвестный сценарий"}

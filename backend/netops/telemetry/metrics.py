@@ -28,11 +28,15 @@ SERVER_MEMORY_UTIL = "netops_server_memory_utilization_percent"
 SERVER_DISK_UTIL = "netops_server_disk_utilization_percent"
 SERVER_NETWORK_RATE = "netops_server_network_rate_mbps"
 SERVER_LOAD_1M = "netops_server_load_1m"
+SERVER_TCP_RETRANSMITS = "netops_server_tcp_retransmits_total"
+SERVER_CONNTRACK_UTIL = "netops_server_conntrack_utilization_percent"
 
-# Алиасы и именованные метрики сетевых коммутаторов для Grafana NOC (R4)
+# Алиасы и именованные метрики сетевых коммутаторов и L2-хабов для Grafana NOC (R4)
 DEVICE_CPU_UTIL = "netops_device_cpu_utilization_percent"
 DEVICE_MEMORY_UTIL = "netops_device_memory_utilization_percent"
 DEVICE_UPLINK_UTIL = "netops_device_uplink_utilization_percent"
+INTERFACE_ERRORS = "netops_interface_errors_total"
+FDB_MAC_COUNT = "netops_fdb_mac_entries_total"
 DRIFT_DEVICES_TOTAL = "netops_drift_devices_total"
 
 HELP: Mapping[str, str] = MappingProxyType(
@@ -54,11 +58,15 @@ HELP: Mapping[str, str] = MappingProxyType(
         DEVICE_CPU_UTIL: "Загрузка CPU сетевого коммутатора, проценты",
         DEVICE_MEMORY_UTIL: "Загрузка RAM сетевого коммутатора, проценты",
         DEVICE_UPLINK_UTIL: "Загрузка аплинка сетевого коммутатора, проценты",
+        INTERFACE_ERRORS: "Суммарное число ошибок CRC/drop на интерфейсах коммутатора или хаба",
+        FDB_MAC_COUNT: "Число изученных MAC-адресов в таблице коммутации (FDB)",
         SERVER_CPU_UTIL: "Загрузка CPU серверов и стендовых приложений, проценты",
         SERVER_MEMORY_UTIL: "Загрузка RAM серверов и стендовых приложений, проценты",
         SERVER_DISK_UTIL: "Загрузка дискового пространства серверов, проценты",
         SERVER_NETWORK_RATE: "Сетевой трафик серверов, Мбит/с",
         SERVER_LOAD_1M: "Средняя загрузка сервера за 1 минуту (Load Average 1m)",
+        SERVER_TCP_RETRANSMITS: "Количество повторных передач TCP-сегментов на сервере",
+        SERVER_CONNTRACK_UTIL: "Заполнение таблицы отслеживания соединений ядра (conntrack), проценты",
         COLLECTED_AT: "Время последнего сбора метрик",
     }
 )
@@ -72,13 +80,18 @@ class Sample:
 
 
 def render(samples: list[Sample], collected_at: datetime | None) -> str:
+    from collections import defaultdict
+
     lines: list[str] = []
     if collected_at is not None:
         samples = [*samples, Sample(COLLECTED_AT, collected_at.timestamp())]
-    for name in sorted({sample.name for sample in samples}):
+    by_name: dict[str, list[Sample]] = defaultdict(list)
+    for sample in samples:
+        by_name[sample.name].append(sample)
+    for name in sorted(by_name):
         lines.append(f"# HELP {name} {HELP.get(name, name)}")
         lines.append(f"# TYPE {name} gauge")
-        lines.extend(_line(sample) for sample in samples if sample.name == name)
+        lines.extend(_line(sample) for sample in by_name[name])
     return "\n".join(lines) + "\n" if lines else ""
 
 

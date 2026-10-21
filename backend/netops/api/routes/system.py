@@ -236,6 +236,9 @@ class BootstrapConfigureRequest(BaseModel):
     websocket_enabled: bool | None = None
     github_repo_url: str | None = None
     github_branch: str | None = None
+    repo_url: str | None = None
+    branch: str | None = None
+    pat: str | None = None
     auto_commit_on_diff: bool | None = None
     github_pat: str | None = None
     github_webhook_secret: str | None = None
@@ -269,6 +272,7 @@ class ServerDiscoverRequest(BaseModel):
     switch_password_huawei: str = ""
     switch_password_arista: str = ""
     switch_password_cisco: str = ""
+    fabric_id: str | None = None
 
 
 @api_router.get(
@@ -395,6 +399,7 @@ def unfreeze(
     tags=["system"],
     summary="Матрёшка: публичный статус первичной инициализации кластера и всех 4 слоёв",
 )
+@api_router.get("/system/settings", tags=["system"], include_in_schema=False)
 def get_bootstrap_status(
     request: Request,
     session: SessionDep,
@@ -456,6 +461,9 @@ def recover_owner_access(
     tags=["system"],
     summary="Шаг 2 и 3 Матрёшки: сохранить и проверить GitHub SoT, Telegram-бота и ИИ-ключи в общем томе Docker",
 )
+@api_router.post("/system/bootstrap/apply", tags=["system"], include_in_schema=False)
+@api_router.post("/system/settings", tags=["system"], include_in_schema=False)
+@api_router.post("/system/git/connect", tags=["system"], include_in_schema=False)
 def configure_bootstrap_layers(
     req: BootstrapConfigureRequest,
     container: ContainerDep,
@@ -470,6 +478,7 @@ def configure_bootstrap_layers(
     tags=["system"],
     summary="Шаг 4 Матрёшки: автономная разведка и распаковка опорного сервера по SSH (контейнеры, свитчи, БД)",
 )
+@api_router.post("/system/bootstrap/discover", tags=["system"], include_in_schema=False)
 def discover_and_attach_server(
     req: ServerDiscoverRequest,
     session: SessionDep,
@@ -477,8 +486,10 @@ def discover_and_attach_server(
     _: Owner,
 ) -> dict[str, Any]:
     if req.mode == "ssh" and not req.host.strip():
-        if container.settings.clab_host:
-            req.host = container.settings.clab_host
+        rt = container.settings.apply_runtime_overlay()
+        host_fallback = str(rt.get("clab_host") or container.settings.clab_host or "").strip()
+        if host_fallback:
+            req.host = host_fallback
         else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -28,6 +28,24 @@ def start_scan(
     device_ids = request.device_ids if request is not None else None
     fabric_id = request.fabric_id if request is not None else None
     site = request.site if request is not None else None
+    if user.allowed_system:
+        from sqlalchemy import select
+
+        from netops.api.routes.devices import (
+            assert_device_allowed,
+            assert_stand_allowed,
+            device_allowed,
+        )
+        from netops.models import Device
+
+        if fabric_id or site:
+            assert_stand_allowed(fabric_id or "", site, user.allowed_system)
+        if device_ids:
+            for dev in service._session.scalars(select(Device).where(Device.id.in_(device_ids))):
+                assert_device_allowed(dev, user.allowed_system)
+        elif not fabric_id and not site:
+            all_devs = service._session.scalars(select(Device).order_by(Device.hostname)).all()
+            device_ids = [d.id for d in all_devs if device_allowed(d, user.allowed_system)]
     job = service.create_drift_scan(
         device_ids, fabric_id=fabric_id, site=site, requested_by=user.username
     )
@@ -48,7 +66,10 @@ def drift_report(
     fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
     site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
 ) -> list[DriftReportItem]:
-    from netops.api.routes.devices import device_allowed
+    from netops.api.routes.devices import assert_stand_allowed, device_allowed
+
+    if principal.allowed_system and (fabric_id or site):
+        assert_stand_allowed(fabric_id or "", site, principal.allowed_system)
 
     records = latest_drift_records(
         session,
@@ -119,18 +140,23 @@ def regular_report(
     session: SessionDep,
     principal: Viewer,
     fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+    site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
 ) -> dict[str, object]:
     from sqlalchemy import select
 
-    from netops.api.routes.devices import device_allowed
+    from netops.api.routes.devices import assert_stand_allowed, device_allowed
     from netops.enums import DeviceStatus
     from netops.models import Device
+
+    stand = fabric_id or site
+    if principal.allowed_system and stand:
+        assert_stand_allowed(fabric_id or "", site, principal.allowed_system)
 
     devices = [
         d
         for d in session.scalars(select(Device)).all()
         if device_allowed(d, principal.allowed_system)
-        and (fabric_id is None or fabric_id in {d.fabric_id, d.site})
+        and (stand is None or stand in {d.fabric_id, d.site})
     ]
     total = len(devices)
     in_sync = sum(1 for d in devices if d.status == DeviceStatus.IN_SYNC)

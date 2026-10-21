@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
   X,
-  Activity,
   Network,
   FileCode,
   Play,
@@ -10,8 +9,9 @@ import {
 } from 'lucide-react';
 import { api } from '../../api';
 import type { CollectorDevicePlan, DeviceDetail, UserRole } from '../../api';
-import { StatusBadge, Sparkline } from '../layout/ui';
+import { StatusBadge } from '../layout/ui';
 import { PLATFORM_NAMES } from '../../constants';
+import { DeviceDrawerMetricsTab } from './device_drawer/DeviceDrawerMetricsTab';
 
 interface DeviceDrawerProps {
   deviceId: number | null;
@@ -97,6 +97,21 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
       // noop
     } finally {
       setDryRunLoading(false);
+    }
+  };
+
+  const handleProtocolChange = async (val: 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli') => {
+    if (!device) return;
+    setProtoSaving(true);
+    try {
+      const updated = await api.setDeviceCollectorProtocol(device.hostname, val);
+      if (updated?.devices?.[device.hostname]) {
+        setCollectorPlan(updated.devices[device.hostname]);
+      }
+    } catch {
+      // noop
+    } finally {
+      setProtoSaving(false);
     }
   };
 
@@ -281,6 +296,16 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                                 <span className="text-[10px] text-zinc-500 uppercase px-1.5 py-0.2 rounded bg-white/[0.04]">
                                   {iface.mode}
                                 </span>
+                                {iface.access_vlan && (
+                                  <span className="text-[10px] text-amber-300 px-1.5 py-0.2 rounded bg-amber-500/10 border border-amber-500/20">
+                                    VLAN {iface.access_vlan}
+                                  </span>
+                                )}
+                                {iface.ospf_area !== null && iface.ospf_area !== undefined && (
+                                  <span className="text-[10px] text-emerald-300 px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                                    OSPF {iface.ospf_area}
+                                  </span>
+                                )}
                               </div>
                               <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
                                 {iface.ipv4_address || 'Unnumbered / L2'} {iface.description ? `— ${iface.description}` : ''}
@@ -308,7 +333,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                     </h3>
                     {device.intent?.bgp ? (
                       <div className="space-y-3">
-                        <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] grid grid-cols-2 gap-2 text-xs font-mono">
+                        <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] grid grid-cols-3 gap-2 text-xs font-mono">
                           <div>
                             <span className="text-zinc-500">Локальный ASN:</span>
                             <div className="text-white font-bold text-sm mt-0.5">AS{device.intent.bgp.asn}</div>
@@ -316,6 +341,14 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                           <div>
                             <span className="text-zinc-500">Router ID:</span>
                             <div className="text-cyan-300 font-bold text-sm mt-0.5">{device.intent.bgp.router_id}</div>
+                          </div>
+                          <div>
+                            <span className="text-zinc-500">EVPN / VXLAN:</span>
+                            <div className="text-purple-300 font-bold text-sm mt-0.5">
+                              {device.intent.bgp.evpn
+                                ? `VNI ${device.intent.bgp.vxlan_vni || 'L2/L3'}`
+                                : 'eBGP IPv4'}
+                            </div>
                           </div>
                         </div>
 
@@ -387,128 +420,13 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
 
                 {/* TAB 4: METRICS */}
                 {activeTab === 'metrics' && (
-                  <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.08] space-y-3">
-                      <div className="flex items-center justify-between text-xs">
-                        <span className="font-semibold text-white flex items-center gap-1.5">
-                          <Activity className="w-3.5 h-3.5 text-cyan-400" />
-                          <span>Нагрузка на аплинк ({device.sparkline?.length || 24} точек замера)</span>
-                        </span>
-                        <span className="font-mono text-[11px] text-zinc-400">
-                          {device.sparkline && device.sparkline.length > 0
-                            ? `Текущая: ${device.sparkline[device.sparkline.length - 1]}%`
-                            : 'Сбор данных...'}
-                        </span>
-                      </div>
-
-                      {device.sparkline && device.sparkline.length > 0 ? (
-                        <div className="pt-2">
-                          <Sparkline
-                            points={device.sparkline}
-                            width={420}
-                            height={64}
-                            fullWidth
-                            showValue={false}
-                          />
-                        </div>
-                      ) : (
-                        <div className="h-16 flex items-center justify-center text-xs text-zinc-500 font-mono">
-                          Ожидание опроса телеметрии...
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Protocol Capabilities Matrix & Scenario Selector (PostgreSQL system_state) */}
-                    <div className="p-4 rounded-xl bg-white/[0.02] border border-white/[0.08] space-y-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <div className="text-xs font-semibold text-white font-mono">
-                            Сценарий сбора метрик и триггеры стенда
-                          </div>
-                          <div className="text-[11px] text-zinc-400 font-mono mt-0.5">
-                            Активный канал:{' '}
-                            <span className="text-cyan-300 font-semibold uppercase">
-                              {collectorPlan?.protocol || 'ssh_cli'}
-                            </span>
-                            {collectorPlan?.port ? ` (:${collectorPlan.port})` : ''}
-                            {collectorPlan?.verified_by ? ` · ${collectorPlan.verified_by}` : ''}
-                          </div>
-                        </div>
-                        <select
-                          disabled={isViewer || protoSaving}
-                          value={collectorPlan?.selected_mode || 'auto'}
-                          onChange={async (e) => {
-                            const val = e.target.value as 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli';
-                            setProtoSaving(true);
-                            try {
-                              const updated = await api.setDeviceCollectorProtocol(device.hostname, val);
-                              if (updated?.devices?.[device.hostname]) {
-                                setCollectorPlan(updated.devices[device.hostname]);
-                              }
-                            } catch {
-                              // noop
-                            } finally {
-                              setProtoSaving(false);
-                            }
-                          }}
-                          className="px-2.5 py-1.5 rounded-lg bg-[#07080c] border border-white/[0.12] text-xs font-mono text-zinc-200 focus:outline-none focus:border-cyan-400 disabled:opacity-50"
-                        >
-                          <option value="auto">Авто (Каскад триггеров)</option>
-                          <option value="gnmi">gNMI (Streaming)</option>
-                          <option value="snmp">SNMP v2c/v3 (UDP)</option>
-                          <option value="prometheus_exporter">Node Exporter (HTTP)</option>
-                          <option value="ssh_cli">Кастомный SSH CLI (Пул)</option>
-                        </select>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-2 pt-1">
-                        {([
-                          { key: 'gnmi', label: 'gNMI Stream', desc: 'CLI + gRPC Capabilities' },
-                          { key: 'snmp', label: 'SNMP v2c/v3', desc: 'UDP BER sysDescr.0' },
-                          { key: 'prometheus_exporter', label: 'Node Exporter', desc: 'HTTP /metrics' },
-                          { key: 'ssh_cli', label: 'Custom SSH CLI', desc: 'Пул 1 сессии + YAML парсер' },
-                        ] as const).map((p) => {
-                          const info = collectorPlan?.supported_protocols?.[p.key];
-                          const isSupported = p.key === 'ssh_cli' ? true : Boolean(info?.supported);
-                          const isActive = (collectorPlan?.protocol || 'ssh_cli') === p.key;
-                          return (
-                            <div
-                              key={p.key}
-                              className={`p-2.5 rounded-lg border text-[11px] font-mono ${
-                                isActive
-                                  ? 'bg-cyan-500/10 border-cyan-500/30 text-white'
-                                  : 'bg-white/[0.015] border-white/[0.06] text-zinc-400'
-                              }`}
-                            >
-                              <div className="flex items-center justify-between">
-                                <span className="font-semibold text-zinc-200">{p.label}</span>
-                                <span
-                                  className={`text-[10px] px-1.5 py-0.5 rounded ${
-                                    isSupported
-                                      ? 'bg-emerald-500/15 text-emerald-300'
-                                      : 'bg-zinc-500/15 text-zinc-400'
-                                  }`}
-                                >
-                                  {isSupported ? 'Доступен' : 'Откл'}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-zinc-500 mt-1 truncate">
-                                {info?.port ? `Порт :${info.port} · ` : ''}
-                                {info?.verified_by || p.desc}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    <div className="p-3.5 rounded-xl border border-white/[0.06] bg-white/[0.02] space-y-1.5 text-xs text-zinc-400">
-                      <span className="text-zinc-300 font-medium font-mono text-[11px]">Аппаратные спецификации:</span>
-                      <p className="font-mono text-[11px]">
-                        {device.hardware_specs || `${device.platform} · ${device.management_ip}:${device.management_port} · Портов в Intent: ${device.intent?.interfaces?.length ?? 0}`}
-                      </p>
-                    </div>
-                  </div>
+                  <DeviceDrawerMetricsTab
+                    device={device}
+                    collectorPlan={collectorPlan}
+                    protoSaving={protoSaving}
+                    isViewer={isViewer}
+                    onProtocolChange={handleProtocolChange}
+                  />
                 )}
               </>
             )}

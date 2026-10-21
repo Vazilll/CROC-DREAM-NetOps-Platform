@@ -12,7 +12,7 @@ import {
   resolveShareBaseUrl,
   type PublicConsoleUrls,
 } from './auth';
-import { NetOpsHttpClient } from './http';
+import { NetOpsDeviceJobClient } from './deviceJobApi';
 import type {
   AiGuardResponse,
   BootstrapConfigureRequest,
@@ -21,24 +21,11 @@ import type {
   BootstrapStatusResponse,
   CollectorPlanResponse,
   CopilotReplyWithAction,
-  Device,
-  DeviceDetail,
-  DeviceEmergencyAction,
-  DeviceProbeRequest,
-  DeviceProbeResult,
-  DriftReportItem,
   EmergencyAuditLog,
-  Forecast,
-  ForecastAlert,
   GitStatusInfo,
   IntentSaveResult,
   IntentSource,
   IntegrationsStatus,
-  JobDetail,
-  JobDiff,
-  JobLog,
-  JobStatus,
-  JobSummary,
   RecoverOwnerResponse,
   RiskExplanation,
   ServerDiscoveryResponse,
@@ -47,137 +34,15 @@ import type {
   UserRole,
 } from './types';
 
-export class NetOpsApiClient extends NetOpsHttpClient {
+export interface StaticViewerStatus {
+  enabled: boolean;
+  token: string;
+  username: string;
+  role: string;
+  allowed_system?: string | null;
+}
 
-  async getDevices(): Promise<Device[]> {
-    return this.request<Device[]>('/devices');
-  }
-
-  async getTopology(): Promise<Device[]> {
-    return this.getDevices();
-  }
-
-  async getDevice(id: number): Promise<DeviceDetail> {
-    return this.request<DeviceDetail>(`/devices/${id}`);
-  }
-
-  async probeDevice(data: DeviceProbeRequest): Promise<DeviceProbeResult> {
-    return this.request<DeviceProbeResult>('/devices/probe', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async createDevice(
-    data: Partial<Device> & {
-      auth_profile?: string;
-      username?: string;
-      password?: string;
-      proxy_jump?: string | null;
-      hardware_specs?: string | null;
-    }
-  ): Promise<Device> {
-    return this.request<Device>('/devices', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async promoteDevice(id: number): Promise<Device> {
-    return this.request<Device>(`/devices/${id}/promote`, {
-      method: 'POST',
-    });
-  }
-
-  async deviceEmergencyAction(id: number, data: DeviceEmergencyAction): Promise<{ status: string; message: string }> {
-    return this.request<{ status: string; message: string }>(`/devices/${id}/emergency-action`, {
-      method: 'POST',
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteDevice(id: number): Promise<void> {
-    return this.request<void>(`/devices/${id}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async syncInventory(): Promise<{ created: string[]; updated: string[]; unchanged: string[] }> {
-    return this.request('/inventory/sync', { method: 'POST' });
-  }
-
-  async createDryRun(deviceIds: number[]): Promise<{ job_id: string; status: JobStatus }> {
-    return this.request('/jobs/dry-run', {
-      method: 'POST',
-      body: JSON.stringify({ device_ids: deviceIds, intent_source: 'git_main' }),
-    });
-  }
-
-  async runDryRun(deviceIds: number[]): Promise<{ job_id: string; status: JobStatus }> {
-    return this.createDryRun(deviceIds);
-  }
-
-  async createDeploy(jobId: string, confirmedBy: string = 'operator'): Promise<{ job_id: string; status: JobStatus }> {
-    return this.request('/jobs/deploy', {
-      method: 'POST',
-      body: JSON.stringify({ job_id: jobId, confirmed_by: confirmedBy }),
-    });
-  }
-
-  async deployConfig(jobId: string, confirmedBy: string = 'operator'): Promise<{ job_id: string; status: JobStatus }> {
-    return this.createDeploy(jobId, confirmedBy);
-  }
-
-  async getJobs(limit = 20): Promise<JobSummary[]> {
-    return this.request<JobSummary[]>(`/jobs?limit=${limit}`);
-  }
-
-  async getJob(id: string): Promise<JobDetail> {
-    return this.request<JobDetail>(`/jobs/${id}`);
-  }
-
-  async getJobLogs(id: string, afterId = 0): Promise<JobLog[]> {
-    return this.request<JobLog[]>(`/jobs/${id}/logs?after_id=${afterId}`);
-  }
-
-  async getJobDiff(id: string): Promise<JobDiff> {
-    return this.request<JobDiff>(`/jobs/${id}/diff`);
-  }
-
-  async scanDrift(deviceIds?: number[]): Promise<{ job_id: string; status: JobStatus }> {
-    const validIds = deviceIds && deviceIds.length > 0 ? deviceIds : null;
-    return this.request('/drift/scan', {
-      method: 'POST',
-      body: JSON.stringify({ device_ids: validIds }),
-    });
-  }
-
-  async getDriftReport(): Promise<DriftReportItem[]> {
-    return this.request<DriftReportItem[]>('/drift/report');
-  }
-
-  async remediateDrift(deviceId: number): Promise<{ job_id: string; status: JobStatus }> {
-    return this.request('/drift/remediate', {
-      method: 'POST',
-      body: JSON.stringify({ device_id: deviceId }),
-    });
-  }
-
-  // --------------------------------------------------------------------------
-  // Intent Linting & Chaos Simulation
-  // --------------------------------------------------------------------------
-
-  async lintIntent(): Promise<{ issues: Array<{ source: string; field: string; message: string; severity?: string }> }> {
-    return this.request('/intent/lint');
-  }
-
-  async injectChaos(scenario: string): Promise<{ status: string; message: string }> {
-    return this.request('/system/chaos', {
-      method: 'POST',
-      body: JSON.stringify({ scenario }),
-    });
-  }
-
+export class NetOpsApiClient extends NetOpsDeviceJobClient {
   // --------------------------------------------------------------------------
   // AI Copilot & Risk Assessment
   // --------------------------------------------------------------------------
@@ -187,14 +52,6 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     return this.request<RiskExplanation>(`/jobs/${jobId}/explain${query}`, {
       method: 'POST',
     });
-  }
-
-  async getForecast(deviceId: number, metric: string, horizon = 72): Promise<Forecast> {
-    return this.request<Forecast>(`/devices/${deviceId}/forecast?metric=${metric}&horizon=${horizon}`);
-  }
-
-  async getForecastAlerts(): Promise<ForecastAlert[]> {
-    return this.request<ForecastAlert[]>('/forecast/alerts');
   }
 
   async askCopilot(message: string, deviceId?: number | null, screen?: string | null): Promise<CopilotReplyWithAction> {
@@ -434,10 +291,6 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     });
   }
 
-  async unlinkOwnerTelegram(): Promise<{ unlinked: boolean }> {
-    return this.request<{ unlinked: boolean }>('/system/owner/telegram/unlink', { method: 'POST' });
-  }
-
   async recoverOwnerAccess(data: {
     action: 'request_telegram_code' | 'verify';
     recovery_key?: string;
@@ -515,6 +368,45 @@ export class NetOpsApiClient extends NetOpsHttpClient {
     });
   }
 
+  async unlinkOwnerTelegram(): Promise<{ unlinked: boolean }> {
+    return this.request<{ unlinked: boolean }>('/system/owner/telegram/unlink', { method: 'POST' });
+  }
+
+  async connectGitRepo(data: {
+    repo_url: string;
+    branch?: string;
+    pat?: string;
+    cluster_name?: string;
+    exposure_mode?: 'local_only' | 'public_tunnel';
+    webhook_public_url?: string;
+  }): Promise<BootstrapConfigureResponse> {
+    return this.configureBootstrapLayers({
+      github_repo_url: data.repo_url,
+      github_branch: data.branch || 'main',
+      github_pat: data.pat,
+      cluster_name: data.cluster_name,
+      exposure_mode: data.exposure_mode,
+      webhook_public_url: data.webhook_public_url,
+    });
+  }
+
+  async getStaticViewerStatus(): Promise<StaticViewerStatus> {
+    return this.request<StaticViewerStatus>('/users/static-viewer');
+  }
+
+  async toggleStaticViewer(enabled: boolean): Promise<StaticViewerStatus> {
+    return this.request<StaticViewerStatus>('/users/static-viewer', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async rotateStaticViewer(): Promise<StaticViewerStatus> {
+    return this.request<StaticViewerStatus>('/users/static-viewer/rotate', {
+      method: 'POST',
+    });
+  }
+
   async getIntentSource(deviceId: number): Promise<IntentSource> {
     return this.request<IntentSource>(`/devices/${deviceId}/intent-source`);
   }
@@ -545,6 +437,12 @@ export class NetOpsApiClient extends NetOpsHttpClient {
       method: 'POST',
     });
   }
+
+  emitGitRefresh(): void {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('netops:git-refresh'));
+    }
+  }
 }
 
 export const api = new NetOpsApiClient();
@@ -552,4 +450,3 @@ export const api = new NetOpsApiClient();
 export function startApiSession(): void {
   api.setReady(bootstrapAuthSession((token) => api.login(token)));
 }
-

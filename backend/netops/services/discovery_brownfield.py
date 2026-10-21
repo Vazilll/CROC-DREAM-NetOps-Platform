@@ -56,16 +56,39 @@ def _parse_acl_endpoint(tokens: list[str], idx: int) -> tuple[str, int]:
     return "any", idx + 1
 
 
+_RE_ACL_HEAD = re.compile(
+    r"^(?:ip\s+access-list\s+(?:extended\s+)?(\S+)|acl\s+name\s+(\S+)\s+advance)",
+    re.IGNORECASE,
+)
+_RE_ACL_SECTION_END = re.compile(
+    r"^(?:interface|router|bgp|ospf|line|snmp-server)\b",
+    re.IGNORECASE,
+)
+_RE_ACL_HW_RULE = re.compile(
+    r"^rule\s+(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\b(.*)$",
+    re.IGNORECASE,
+)
+_RE_ACL_HW_SRC = re.compile(r"source\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)")
+_RE_ACL_HW_DST = re.compile(r"destination\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)")
+_RE_ACL_HW_SPORT = re.compile(r"source-port\s+eq\s+(\S+)")
+_RE_ACL_HW_DPORT = re.compile(r"destination-port\s+eq\s+(\S+)")
+_RE_ACL_CISCO_RULE = re.compile(
+    r"^(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\s+(.+)$",
+    re.IGNORECASE,
+)
+
+
+def _parse_port_token(raw: str) -> int | str:
+    low = raw.lower()
+    return int(low) if low.isdigit() else low
+
+
 def _parse_running_acls(cfg: str) -> list[dict[str, Any]]:
     acls: list[dict[str, Any]] = []
     cur_acl: dict[str, Any] | None = None
     for raw_line in cfg.splitlines():
         line = raw_line.strip()
-        m_head = re.match(
-            r"^(?:ip\s+access-list\s+(?:extended\s+)?(\S+)|acl\s+name\s+(\S+)\s+advance)",
-            line,
-            re.IGNORECASE,
-        )
+        m_head = _RE_ACL_HEAD.match(line)
         if m_head:
             if cur_acl and cur_acl["rules"]:
                 acls.append(cur_acl)
@@ -73,18 +96,12 @@ def _parse_running_acls(cfg: str) -> list[dict[str, Any]]:
             continue
         if cur_acl is None:
             continue
-        if line.startswith(("!", "#")) or re.match(
-            r"^(?:interface|router|bgp|ospf|line|snmp-server)\b", line, re.IGNORECASE
-        ):
+        if line.startswith(("!", "#")) or _RE_ACL_SECTION_END.match(line):
             if cur_acl["rules"]:
                 acls.append(cur_acl)
             cur_acl = None
             continue
-        m_hw = re.match(
-            r"^rule\s+(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\b(.*)$",
-            line,
-            re.IGNORECASE,
-        )
+        m_hw = _RE_ACL_HW_RULE.match(line)
         if m_hw:
             seq, act, proto, rest = (
                 int(m_hw.group(1)),
@@ -92,40 +109,25 @@ def _parse_running_acls(cfg: str) -> list[dict[str, Any]]:
                 m_hw.group(3).lower(),
                 m_hw.group(4),
             )
-            src, dst = "any", "any"
-            m_src = re.search(r"source\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", rest)
-            if m_src:
-                src = _wildcard_to_cidr(m_src.group(1), m_src.group(2))
-            m_dst = re.search(r"destination\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", rest)
-            if m_dst:
-                dst = _wildcard_to_cidr(m_dst.group(1), m_dst.group(2))
+            m_src = _RE_ACL_HW_SRC.search(rest)
+            m_dst = _RE_ACL_HW_DST.search(rest)
             rule: dict[str, Any] = {
                 "sequence": seq,
                 "action": act,
                 "protocol": proto,
-                "source": src,
-                "destination": dst,
+                "source": _wildcard_to_cidr(m_src.group(1), m_src.group(2)) if m_src else "any",
+                "destination": _wildcard_to_cidr(m_dst.group(1), m_dst.group(2)) if m_dst else "any",
             }
-            m_sp = re.search(r"source-port\s+eq\s+(\S+)", rest)
+            m_sp = _RE_ACL_HW_SPORT.search(rest)
             if m_sp:
-                sp_raw = m_sp.group(1).lower()
-                rule["src_port"] = _PORT_MAP.get(sp_raw) or (
-                    int(sp_raw) if sp_raw.isdigit() else None
-                )
-            m_dp = re.search(r"destination-port\s+eq\s+(\S+)", rest)
+                rule["src_port"] = _parse_port_token(m_sp.group(1))
+            m_dp = _RE_ACL_HW_DPORT.search(rest)
             if m_dp:
-                dp_raw = m_dp.group(1).lower()
-                rule["dst_port"] = _PORT_MAP.get(dp_raw) or (
-                    int(dp_raw) if dp_raw.isdigit() else None
-                )
+                rule["dst_port"] = _parse_port_token(m_dp.group(1))
             cur_acl["rules"].append(rule)
             continue
 
-        m_cisco = re.match(
-            r"^(\d+)\s+(permit|deny)\s+(ip|tcp|udp|icmp|ospf)\s+(.+)$",
-            line,
-            re.IGNORECASE,
-        )
+        m_cisco = _RE_ACL_CISCO_RULE.match(line)
         if m_cisco:
             seq, act, proto = (
                 int(m_cisco.group(1)),
@@ -136,14 +138,12 @@ def _parse_running_acls(cfg: str) -> list[dict[str, Any]]:
             src, idx = _parse_acl_endpoint(toks, 0)
             src_port = None
             if idx + 1 < len(toks) and toks[idx].lower() == "eq":
-                sp_raw = toks[idx + 1].lower()
-                src_port = _PORT_MAP.get(sp_raw) or (int(sp_raw) if sp_raw.isdigit() else None)
+                src_port = _parse_port_token(toks[idx + 1])
                 idx += 2
             dst, idx = _parse_acl_endpoint(toks, idx)
             dst_port = None
             if idx + 1 < len(toks) and toks[idx].lower() == "eq":
-                dp_raw = toks[idx + 1].lower()
-                dst_port = _PORT_MAP.get(dp_raw) or (int(dp_raw) if dp_raw.isdigit() else None)
+                dst_port = _parse_port_token(toks[idx + 1])
             rule = {
                 "sequence": seq,
                 "action": act,
@@ -302,51 +302,131 @@ def _persist_custom_auth(settings: Any, profile_name: str, username: str, passwo
         state.set_db_state("custom_auth_profiles", existing_profiles, database_url=db_url)
 
 
-def _sot_inventory_upsert(device: Device, settings: Any) -> None:
+@contextlib.contextmanager
+def _locked_inventory_file(
+    intent_repo_path: Path, rel_path: str = "inventory.yaml", *, create_if_missing: bool = False
+) -> Any:
     with _SOT_INV_LOCK:
-        inv_path = settings.intent_repo_path / "inventory.yaml"
+        inv_path = intent_repo_path / rel_path
         if not inv_path.is_file():
-            return
+            if not create_if_missing:
+                yield None, None
+                return
+            inv_path.parent.mkdir(parents=True, exist_ok=True)
+            inv_path.write_text("devices: []\n", encoding="utf-8")
         with contextlib.suppress(Exception), open(
             inv_path.with_suffix(".lock"), "a+", encoding="utf-8"
         ) as lf:
             fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
                 raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-                dev_list = raw_inv.get("devices") or []
-                if not any(d.get("hostname") == device.hostname for d in dev_list):
-                    default_fab = _resolve_fabric_id(settings)
-                    dev_fabric = getattr(device, "fabric_id", default_fab) or default_fab
-                    dev_list.append({
-                        "hostname": device.hostname,
-                        "management_ip": str(device.management_ip),
-                        "management_port": int(device.management_port),
-                        "platform": device.platform.value,
-                        "role": device.role.value,
-                        "auth_profile": device.auth_profile,
-                        "fabric_id": dev_fabric,
-                        "site": getattr(device, "site", None) or dev_fabric,
-                    })
-                    raw_inv["devices"] = dev_list
-                    inv_path.write_text(
-                        yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
-                        encoding="utf-8",
-                    )
+                yield inv_path, raw_inv
             finally:
                 fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
 
 
+def _upsert_device_in_list(
+    dev_list: list[dict[str, Any]], entry: dict[str, Any], default_fab: str
+) -> list[dict[str, Any]]:
+    target_host = str(entry["hostname"]).lower()
+    target_key = (
+        str(entry.get("fabric_id") or default_fab),
+        str(entry["management_ip"]),
+        int(entry.get("management_port") or 22),
+    )
+    updated = False
+    result: list[dict[str, Any]] = []
+    for d in dev_list:
+        if not isinstance(d, dict):
+            continue
+        d_host = str(d.get("hostname") or "").lower()
+        d_fab = str(d.get("fabric_id") or d.get("site") or default_fab)
+        d_key = (d_fab, str(d.get("management_ip") or ""), int(d.get("management_port") or 22))
+        if d_host == target_host or d_key == target_key:
+            if not updated:
+                result.append({**d, **entry})
+                updated = True
+        else:
+            result.append(d)
+    if not updated:
+        result.append(entry)
+    return result
+
+
+def _device_to_inv_entry(device: Device, dev_fabric: str) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "hostname": device.hostname,
+        "management_ip": str(device.management_ip),
+        "management_port": int(device.management_port),
+        "platform": device.platform.value,
+        "role": device.role.value,
+        "auth_profile": device.auth_profile,
+        "fabric_id": dev_fabric,
+        "site": getattr(device, "site", None) or dev_fabric,
+    }
+    if getattr(device, "rack", None):
+        entry["rack"] = device.rack
+    if getattr(device, "unit", None) is not None:
+        entry["unit"] = int(device.unit)
+    return entry
+
+
+def _sot_inventory_upsert(device: Device, settings: Any) -> None:
+    default_fab = _resolve_fabric_id(settings)
+    dev_fabric = str(getattr(device, "fabric_id", default_fab) or default_fab).strip()
+    entry = _device_to_inv_entry(device, dev_fabric)
+    mip, mport = entry["management_ip"], entry["management_port"]
+    repo_path = Path(settings.intent_repo_path)
+    has_declarative_intent = (repo_path / "devices" / f"{device.hostname}.yaml").is_file() or not (
+        repo_path.parent / "lab" / "running"
+    ).is_dir()
+    cross_fabric_conflict = False
+    with _locked_inventory_file(repo_path) as (inv_path, raw_inv):
+        if inv_path is not None and raw_inv is not None:
+            dev_list = list(raw_inv.get("devices") or [])
+            cross_fabric_conflict = any(
+                isinstance(d, dict)
+                and str(d.get("fabric_id") or d.get("site") or default_fab) != dev_fabric
+                and str(d.get("management_ip") or "") == mip
+                and int(d.get("management_port") or 22) == mport
+                for d in dev_list
+            )
+            if not cross_fabric_conflict and has_declarative_intent:
+                raw_inv["devices"] = _upsert_device_in_list(dev_list, entry, default_fab)
+                inv_path.write_text(
+                    yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True), encoding="utf-8"
+                )
+
+    stand_dir = repo_path / "stands" / dev_fabric
+    if (
+        (dev_fabric != default_fab and stand_dir.is_dir())
+        or cross_fabric_conflict
+        or not has_declarative_intent
+    ):
+        with _locked_inventory_file(
+            repo_path, f"stands/{dev_fabric}/inventory.yaml", create_if_missing=True
+        ) as (s_path, s_raw):
+            if s_path is not None and s_raw is not None:
+                s_raw["devices"] = _upsert_device_in_list(
+                    list(s_raw.get("devices") or []), entry, dev_fabric
+                )
+                s_path.write_text(
+                    yaml.safe_dump(s_raw, sort_keys=False, allow_unicode=True), encoding="utf-8"
+                )
+
+
 def _sot_inventory_remove(hostname: str, intent_repo_path: Path) -> None:
-    with _SOT_INV_LOCK:
-        inv_path = intent_repo_path / "inventory.yaml"
-        if not inv_path.is_file():
-            return
-        with contextlib.suppress(Exception), open(
-            inv_path.with_suffix(".lock"), "a+", encoding="utf-8"
-        ) as lf:
-            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
-            try:
-                raw_inv = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+    targets = ["inventory.yaml"]
+    stands_dir = intent_repo_path / "stands"
+    if stands_dir.is_dir():
+        targets.extend(
+            f"stands/{d.name}/inventory.yaml"
+            for d in sorted(stands_dir.iterdir())
+            if d.is_dir() and (d / "inventory.yaml").is_file()
+        )
+    for rel_path in targets:
+        with _locked_inventory_file(intent_repo_path, rel_path) as (inv_path, raw_inv):
+            if inv_path is not None and raw_inv is not None:
                 dev_list = raw_inv.get("devices") or []
                 filtered = [d for d in dev_list if d.get("hostname") != hostname]
                 if len(filtered) != len(dev_list):
@@ -355,5 +435,46 @@ def _sot_inventory_remove(hostname: str, intent_repo_path: Path) -> None:
                         yaml.safe_dump(raw_inv, sort_keys=False, allow_unicode=True),
                         encoding="utf-8",
                     )
-            finally:
-                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+def sync_stand_inventory_and_devices(
+    session: Any,
+    container: Any,
+    stand: Any,
+    pmap: dict[str, str],
+    *,
+    seed_default_pod: bool = False,
+) -> list[dict[str, str]]:
+    """Synchronize stand devices and YAML inventory with (fabric_id, ip, port) deduplication."""
+    from netops.services.discovery_profiles import _is_protected_repo_path
+    from netops.services.stand_sync import sync_stand_nodes_from_sot_or_portmap
+
+    subpath = stand.intent_subpath or f"stands/{stand.slug}"
+    repo_path = Path(container.settings.intent_repo_path)
+    stand_inv_path = repo_path / subpath / "inventory.yaml"
+    nodes = sync_stand_nodes_from_sot_or_portmap(
+        session, container, stand, pmap, seed_default_pod=seed_default_pod
+    )
+    stand_devs = (
+        session.query(Device)
+        .filter((Device.fabric_id == stand.slug) | (Device.site == stand.slug))
+        .limit(5000)
+        .all()
+    )
+    if stand_devs and not _is_protected_repo_path(repo_path) and (
+        (repo_path / subpath).is_dir() or stand_inv_path.is_file()
+    ):
+        with contextlib.suppress(OSError), _locked_inventory_file(
+            repo_path, f"{subpath}/inventory.yaml", create_if_missing=True
+        ) as (s_path, s_raw):
+            if s_path is not None and s_raw is not None:
+                s_devs = list(s_raw.get("devices") or [])
+                for dev in stand_devs:
+                    s_devs = _upsert_device_in_list(
+                        s_devs, _device_to_inv_entry(dev, stand.slug), stand.slug
+                    )
+                s_raw["devices"] = s_devs
+                s_path.write_text(
+                    yaml.safe_dump(s_raw, sort_keys=False, allow_unicode=True), encoding="utf-8"
+                )
+    return nodes

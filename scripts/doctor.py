@@ -83,13 +83,11 @@ def main() -> int:
     print(f"\n{BOLD}2. Database Health & Storage:{RESET}")
     try:
         from netops.db import build_engine, build_session_factory
+        from netops.settings import get_settings
         from sqlalchemy import text
 
         db_path = BACKEND_DIR / "netops_local.db"
-        default_pg = "postgresql+psycopg://netops:netops@127.0.0.1:5433/netops"
-        db_url = os.environ.get("NETOPS_DATABASE_URL") or (
-            default_pg if check_tcp_port("127.0.0.1", 5433, timeout=0.5)[0] else f"sqlite:///{db_path}"
-        )
+        db_url = os.environ.get("NETOPS_DATABASE_URL") or get_settings().database_url or f"sqlite:///{db_path}"
         engine = build_engine(db_url)
         factory = build_session_factory(engine)
 
@@ -106,12 +104,13 @@ def main() -> int:
     # 3. Intent Repository (Git SoT)
     print(f"\n{BOLD}3. Git Source-of-Truth (Intent Repository):{RESET}")
     intent_dir = REPO_ROOT / "intent"
+    inv_devices = []
     try:
         from netops.intent.repository import IntentRepository
         inv_file = "inventory.yaml"
         repo = IntentRepository(intent_dir, inventory_file=inv_file)
         snapshot = repo.load()
-        inv_devices = snapshot.inventory.devices
+        inv_devices = list(snapshot.inventory.devices)
         print(f"   • Path:           {GREEN}✔ Valid{RESET} ({intent_dir}/{inv_file})")
         print(f"   • Snapshot:       {len(inv_devices)} intended device(s) defined in YAML")
         for dev in inv_devices:
@@ -120,23 +119,19 @@ def main() -> int:
         print(f"   • Repository:     {RED}✖ Failed to load intent: {exc}{RESET}")
         overall_healthy = False
 
-    # 4. Live Lab Connectivity Probe (198.51.100.10)
-    print(f"\n{BOLD}4. Multi-Vendor Lab Network Probe (198.51.100.10):{RESET}")
+    # 4. Live Lab Connectivity Probe (from Git SoT Inventory)
+    print(f"\n{BOLD}4. Multi-Vendor Lab Network Probe (from Git SoT):{RESET}")
     nodes = [
-        ("spine-1.croc.lab", 2211, "Cisco C8000v"),
-        ("spine-2.croc.lab", 2212, "Arista cEOS"),
-        ("leaf-1.croc.lab", 2221, "Huawei CE12800"),
-        ("leaf-2.croc.lab", 2222, "Huawei CE12800"),
-        ("host-a.croc.lab", 2231, "Alpine Linux"),
-        ("host-b.croc.lab", 2232, "Alpine Linux"),
+        (str(d.hostname), str(d.management_ip), int(d.management_port), str(d.platform.value))
+        for d in inv_devices
     ]
 
     print(f"   {'Node':<18} | {'Port':<5} | {'Vendor Platform':<16} | {'Status':<10} | {'Latency':<9} | {'SSH Banner'}")
     print("   " + "-" * 88)
 
     lab_reachable_count = 0
-    for hostname, port, vendor in nodes:
-        ok, latency, banner = check_tcp_port("198.51.100.10", port, timeout=2.5)
+    for hostname, host_ip, port, vendor in nodes:
+        ok, latency, banner = check_tcp_port(host_ip, port, timeout=2.5)
         if ok:
             lab_reachable_count += 1
             status_str = f"{GREEN}OPEN{RESET}"
@@ -154,13 +149,10 @@ def main() -> int:
 
     # 5. Diagnostic Advice & Filigree Verdict
     print(f"\n{BOLD}5. Diagnostic Findings & System Status:{RESET}")
-    if lab_reachable_count >= 5:
-        print(f"   {GREEN}✔ Fast-Fail SSH Guard active: Scrapli driver drops hanging containers (leaf-2) in 6.0s{RESET}")
-        print(f"   {GREEN}✔ Continuous GitOps In-process Beat sync active (every 120s or instant trigger){RESET}")
-        print(f"   {GREEN}✔ Unmodeled server nodes (srv-*) safely skipped during drift scans{RESET}")
-        print(f"   {GREEN}✔ Dual-theme (Obsidian Dark / Crisp Light) & RU/EN i18n fully validated{RESET}")
+    if nodes and lab_reachable_count == len(nodes):
+        print(f"   {GREEN}✔ Multi-vendor lab connectivity verified ({lab_reachable_count}/{len(nodes)} ports open){RESET}")
     else:
-        print(f"   {YELLOW}⚠ Notice: External lab host 198.51.100.10 has limited connectivity ({lab_reachable_count}/{len(nodes)}). Check VPN or firewall.{RESET}")
+        print(f"   {YELLOW}⚠ Notice: Lab hosts have limited connectivity ({lab_reachable_count}/{len(nodes)}). Check VPN or containerlab state.{RESET}")
 
     print(f"\n{BOLD}Doctor Verdict:{RESET} {'[SYSTEM READY FOR PRODUCTION / DEMO]' if overall_healthy else '[ATTENTION REQUIRED]'}\n")
     return 0 if overall_healthy else 1

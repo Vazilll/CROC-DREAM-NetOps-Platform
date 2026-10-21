@@ -61,14 +61,17 @@ flowchart TD
 
 Все 6 узлов проброшены через Docker port mapping на внешний IP-адрес сервера `198.51.100.10`:
 
-| Нода Containerlab | Роль | Вендор & ОС | Внутренний IP (OOB) | Внешний SSH Порт | Учетные данные |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **`spine-1-a`** | Spine 1 | Arista cEOS 4.32.0F | `172.20.20.11` | `198.51.100.10:2211` | `admin` / `admin` |
-| **`spine-2-a`** | Spine 2 | Arista cEOS 4.32.0F | `172.20.20.12` | `198.51.100.10:2212` | `admin` / `admin` |
-| **`leaf-1-c`** | Leaf 1 | Cisco C8000V 17.03.08a | `172.20.20.21` | `198.51.100.10:2221` | `admin` / `admin` |
-| **`leaf-2-c`** | Leaf 2 | Cisco C8000V 17.03.08a | `172.20.20.22` | `198.51.100.10:2222` | `admin` / `admin` |
-| **`leaf-3-h`** | Leaf 3 | Huawei CE12800 8.180 | `172.20.20.31` | `198.51.100.10:2231` | `admin` / `admin` |
-| **`leaf-4-h`** | Leaf 4 | Huawei CE12800 8.180 | `172.20.20.32` | `198.51.100.10:2232` | `admin` / `admin` |
+| Нода Containerlab | Роль | Вендор & ОС | Внутренний IP (OOB) | Внешний SSH Порт |
+| :--- | :--- | :--- | :--- | :--- |
+| **`spine-1-a`** | Spine 1 | Arista cEOS 4.32.0F | `172.20.20.11` | `198.51.100.10:2211` |
+| **`spine-2-a`** | Spine 2 | Arista cEOS 4.32.0F | `172.20.20.12` | `198.51.100.10:2212` |
+| **`leaf-1-c`** | Leaf 1 | Cisco C8000V 17.03.08a | `172.20.20.21` | `198.51.100.10:2221` |
+| **`leaf-2-c`** | Leaf 2 | Cisco C8000V 17.03.08a | `172.20.20.22` | `198.51.100.10:2222` |
+| **`leaf-3-h`** | Leaf 3 | Huawei CE12800 8.180 | `172.20.20.31` | `198.51.100.10:2231` |
+| **`leaf-4-h`** | Leaf 4 | Huawei CE12800 8.180 | `172.20.20.32` | `198.51.100.10:2232` |
+
+> Учётные данные устройств в репозиторий не кладём: профиль `lab` задаётся в
+> `backend/.env` через `NETOPS_AUTH_PROFILES`.
 
 > **Параметры подключения к серверу управления**:  
 > `ssh -p 221 crocdream@198.51.100.10`  
@@ -141,94 +144,94 @@ flowchart TD
 
 ## 6. Подключение платформы NetOps к живому стенду
 
-Платформа поддерживает бесшовное переключение между офлайн-эмуляцией и живым стендом.
+Инвентарь стенда лежит отдельно от офлайн-демо: `intent-live/` (6 узлов, те же порты, что в
+таблице выше) против `intent/` (4 узла на файловой эмуляции). Переключение — это выбор
+инвентаря и драйвера, код не меняется.
 
-### Шаг 1: Конфигурация инвентаря
-Файл `intent/inventory.live.yaml` содержит публичные адреса и порты стенда:
-```yaml
-devices:
-  - hostname: spine-1.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2211
-    platform: arista_eos
-    role: spine
-    auth_profile: lab
-  - hostname: spine-2.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2212
-    platform: arista_eos
-    role: spine
-    auth_profile: lab
-  - hostname: leaf-1.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2221
-    platform: cisco_iosxe
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-2.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2222
-    platform: cisco_iosxe
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-3.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2231
-    platform: huawei_vrp
-    role: leaf
-    auth_profile: lab
-  - hostname: leaf-4.croc.lab
-    management_ip: 198.51.100.10
-    management_port: 2232
-    platform: huawei_vrp
-    role: leaf
-    auth_profile: lab
+### Запуск на машине со стендом
+
+```bash
+cp backend/.env.example backend/.env   # и вписать пароль профиля lab
+docker compose -f docker-compose.yml -f docker-compose.lab.yml up -d --build
 ```
 
-### Шаг 2: Настройка переменных окружения (`backend/.env`)
-Для активации живого драйвера укажите в файле `backend/.env`:
+Оверлей `docker-compose.lab.yml` делает три вещи:
+
+- подключает `snmp-exporter` к сети Containerlab `clab_mgmt`, чтобы опрашивать устройства;
+- переключает API, воркер, Beat и бота на `NETOPS_NETWORK_DRIVER=scrapli`;
+- монтирует `intent-live/` как источник правды.
+
+### Запуск с другой машины
+
+Если платформа поднята не на сервере со стендом, сеть `clab_mgmt` недоступна — оверлей не
+нужен, достаточно переменных:
+
 ```bash
-# Драйвер работы с сетью: scrapli
 NETOPS_NETWORK_DRIVER=scrapli
-
-# Файл живого инвентаря
-NETOPS_INVENTORY_FILE=inventory.live.yaml
-
-# Учетные данные для стенда
-NETOPS_AUTH_PROFILES='{"lab": {"username": "admin", "password": "admin"}}'
+NETOPS_INTENT_REPO_PATH=/data/intent-live
+NETOPS_AUTH_PROFILES='{"lab": {"username": "admin", "password": "<пароль>"}}'
 ```
 
-### Шаг 3: Автоматический кроссплатформенный SSH-адаптер и Мультиплексирование Jump-хоста
-В модули `backend/netops/network/scrapli_driver.py` и `backend/netops/network/ssh_pool.py` интегрирован адаптер `_ParamikoConnAdapter`:
-- В Linux с установленным Scrapli используется нативный `scrapli` транспорт.
-- В средах без PTY или при работе через SSH Bastion/Jump-хост (`NETOPS_CLAB_HOST`) адаптер прозрачно использует пул сессий `_SESSION_POOL` и мультиплексирует `direct-tcpip` каналы через единое SSH-соединение `_SHARED_JUMP_CLIENTS` (исключая переполнение `MaxStartups` на Jump-сервере при параллельном опросе фабрики):
-  - Автоматическая проверка реального `SSH-` баннера в `_check_tcp_endpoint` и маршрутизация внутренних адресов Containerlab (`172.16.0.0/12`) через Jump-туннель.
-  - Каскадный подбор профильных и лабораторных учётных данных (`build_candidate_passwords`) с защитой общих сокетов при переключении на `keyboard-interactive`.
-  - Автоматическое отключение пагинации (`terminal length 0` / `screen-length 0 temporary`) и повышение привилегий (`enable`).
-  - Поддержка сессионных коммитов Arista EOS (`configure session NETOPS_DEPLOY`), двухфазных транзакций Cisco IOS-XE (`commit confirmed`) и транзакций Huawei VRP (`system-view` -> `commit`).
+Узлы доступны по внешним портам `198.51.100.10:22xx`, поэтому SSH до них есть и снаружи.
 
-### Шаг 4: Запуск верификатора связности
-Для проверки подключения ко всем 6 узлам выполните из корня репозитория:
+### Как подключается драйвер
+
+Драйвер выбирает фабрика Scrapli по имени платформы: Cisco IOS-XE и Arista EOS из ядра,
+Huawei VRP и Eltex ESR — из `scrapli-community`. В образ добавлены `openssh-client` (Scrapli
+ходит через системный ssh), `scrapli`, `scrapli-community` и `paramiko`. Если в окружении
+Scrapli нет, драйвер сам переходит на обычную shell-сессию через paramiko.
+
+### Что уже работает и что нет
+
+| Операция | Cisco IOS-XE | Arista EOS | Huawei VRP | Eltex ESR |
+| :--- | :--- | :--- | :--- | :--- |
+| Сбор `running-config`, дрейф, dry-run | да | да | да | да |
+| Снимок состояния для post-check | да | да | да | да |
+| Транзакционное применение | `commit confirmed` | `configure session` | двухэтапный `commit` | **нет** |
+
+На Eltex `apply` возвращает понятную ошибку: тихо «применить» без `commit`/`rollback` нельзя,
+иначе откат не гарантирован. Сбор конфигов и дрейф на нём работают.
+
+**Как устроена транзакция на Huawei.** У VRP нет таймера подтверждения, как `commit confirmed`
+у Cisco, поэтому точку отката снимаем сами:
+
+1. перед изменением читаем `display configuration commit list` и запоминаем текущий `commit-id`;
+2. отправляем команды и фиксируем их `commit` — изменение активно сразу;
+3. если post-check не прошёл, откатываемся: `rollback configuration to commit-id <запомненный>`
+   и снова `commit`. Если `commit-id` снять не удалось, выполняется
+   `rollback configuration last 1`.
+
+Отличие от Cisco: при обрыве связи в середине деплоя устройство **не** вернёт конфиг само —
+откат делает платформа. Поэтому на Huawei важно, чтобы воркер оставался на связи; зависшую
+задачу через `NETOPS_JOB_TIMEOUT_SECONDS` добивает Beat, но откат в этом случае придётся
+запустить вручную (`POST /api/v1/drift/remediate`).
+
+> Последовательность команд покрыта тестами, **но на живом CE12800 не проверена** — стенд был
+> недоступен. Это первое, что нужно прогнать, когда Huawei поднимутся.
+
+Проверить доступность узла до запуска задач: `POST /api/v1/devices/probe` — он смотрит, открыт
+ли SSH-порт, и возвращает баннер.
+
+### Проверка всего стенда одной командой
+
 ```bash
-python scripts/verify_live_lab.py
-```
-**Результат выполнения**:
-```text
---- Live Nodes Connection Report ---
-Hostname             | Platform        | Port   | Status     | Config Size
----------------------------------------------------------------------------
-spine-1.croc.lab     | arista_eos      | 2211   | UP / OK    | 46 lines (931 bytes)
-spine-2.croc.lab     | arista_eos      | 2212   | UP / OK    | 46 lines (931 bytes)
-leaf-1.croc.lab      | cisco_iosxe     | 2221   | UP / OK    | 251 lines (6725 bytes)
-leaf-2.croc.lab      | cisco_iosxe     | 2222   | UP / OK    | 251 lines (6725 bytes)
-leaf-3.croc.lab      | huawei_vrp      | 2231   | UP / OK    | 94 lines (1896 bytes)
-leaf-4.croc.lab      | huawei_vrp      | 2232   | UP / OK    | 94 lines (1896 bytes)
----------------------------------------------------------------------------
-Summary: 6/6 nodes accessible in 2.81s.
-[SUCCESS] All 6 Bare Metal lab nodes are operational and connected to NetOps!
+cd backend && uv run python ../scripts/verify_live_lab.py
 ```
 
----
+Скрипт читает `intent-live/`, учётки берёт из `backend/.env` и по каждому узлу проверяет три
+вещи: открыт ли SSH-порт, снимается ли `running-config`, читается ли состояние (BGP, порты).
+На устройствах ничего не меняет. Ненулевой код возврата — что-то не отвечает.
+
+### Состояние проверки на 15 октября
+
+- **Сеть**: все шесть портов `2211`–`2232` открыты снаружи, узлы доступны.
+- **Транспорт**: внутри образа Scrapli подключается ко всем узлам через системный ssh.
+- **Блокер**: аутентификация. Профиль `lab` в `.env` — заглушка `admin`/`admin`, устройства её
+  не принимают: «password prompt seen more than once, assuming auth failed». Нужен актуальный
+  пароль стенда в `NETOPS_AUTH_PROFILES`.
+- Запуск вне контейнера идёт через paramiko (Scrapli в локальном окружении не установлен). Там
+  обнаружились две особенности, они учтены: cEOS принимает пароль только через
+  `keyboard-interactive`, а Huawei CE отдаёт SSH-баннер не сразу — таймауты увеличены.
 
 ## 7. Инструкция по эксплуатации и сценариям Deploy / Rollback
 

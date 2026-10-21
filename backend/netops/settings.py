@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hmac
 from functools import lru_cache
 from pathlib import Path
@@ -96,10 +97,6 @@ class Settings(BaseSettings):
     # Custom dynamic LLM cascade configs: [{"name": "Groq", "base_url": "...", "model": "...", "api_key": "...", "timeout_seconds": 2.0}]
     llm_cascade: list[dict[str, object]] = Field(default_factory=list)
 
-    # Time-series forecasting (empty URL = built-in statistical linear trend & quantile envelope)
-    forecast_url: str = ""
-    forecast_timeout_seconds: float = Field(default_factory=_c("forecast.timeout_seconds"))
-
     # NetBox as the inventory source (empty URL = inventory.yaml of the intent repository).
     netbox_url: str = ""
     netbox_token: SecretStr | None = None
@@ -111,6 +108,7 @@ class Settings(BaseSettings):
     clab_password: SecretStr | None = None
     clab_key_path: str | None = None
     clab_topology_path: str = ""
+    clab_port_map: dict[str, str] = Field(default_factory=dict)
 
     # Prometheus-compatible query API (Prometheus или VictoriaMetrics; empty URL = falls back to
     # the SSH CLI cache; no data is invented)
@@ -173,7 +171,7 @@ class Settings(BaseSettings):
             try:
                 self.telegram_chat_ids = [int(self.telegram_chat_id.strip())]
             except ValueError:
-                pass
+                _ = None
         elif self.telegram_chat_ids and not self.telegram_chat_id:
             self.telegram_chat_id = str(self.telegram_chat_ids[0])
         import os
@@ -202,75 +200,62 @@ class Settings(BaseSettings):
                                 password=SecretStr(str(creds["password"])),
                             )
             except Exception:
-                pass
+                _ = None
 
         try:
             data = state.get_db_state("runtime_settings", {}, database_url=self.database_url)
             if not isinstance(data, dict) or not data:
                 return {}
-            if data.get("github_repo_url") and "github_repo_url" not in explicit:
-                self.github_repo_url = str(data["github_repo_url"])
             if data.get("network_driver") in ("offline", "scrapli") and "network_driver" not in explicit:
                 self.network_driver = data["network_driver"]
-            if data.get("telegram_bot_token") and "telegram_bot_token" not in explicit:
-                self.telegram_bot_token = SecretStr(str(data["telegram_bot_token"]))
+            for secret_field in ("telegram_bot_token", "clab_password", "groq_api_key", "gemini_api_key"):
+                if data.get(secret_field) and secret_field not in explicit:
+                    setattr(self, secret_field, SecretStr(str(data[secret_field])))
             if data.get("telegram_bot_username") and "telegram_bot_username" not in explicit:
                 self.telegram_bot_username = str(data["telegram_bot_username"]).lstrip("@")
+            raw_cids: list[object] = []
             if data.get("telegram_chat_id") and "telegram_chat_id" not in explicit:
                 self.telegram_chat_id = str(data["telegram_chat_id"])
-                try:
-                    cid = int(self.telegram_chat_id.strip())
+                raw_cids.append(self.telegram_chat_id)
+            if isinstance(data.get("telegram_chat_ids"), list) and "telegram_chat_ids" not in explicit:
+                raw_cids.extend(data["telegram_chat_ids"])
+            for raw_cid in raw_cids:
+                with contextlib.suppress(ValueError):
+                    cid = int(str(raw_cid).strip())
                     if cid not in self.telegram_chat_ids:
                         self.telegram_chat_ids.append(cid)
-                except ValueError:
-                    pass
-            if isinstance(data.get("telegram_chat_ids"), list) and "telegram_chat_ids" not in explicit:
-                for raw_cid in data["telegram_chat_ids"]:
-                    try:
-                        cid = int(str(raw_cid).strip())
-                        if cid not in self.telegram_chat_ids:
-                            self.telegram_chat_ids.append(cid)
-                    except ValueError:
-                        pass
-            if data.get("clab_host") and "clab_host" not in explicit:
-                self.clab_host = str(data["clab_host"])
-            if data.get("clab_port") and "clab_port" not in explicit:
-                try:
-                    self.clab_port = int(data["clab_port"])
-                except ValueError:
-                    pass
-            if data.get("clab_user") and "clab_user" not in explicit:
-                self.clab_user = str(data["clab_user"])
-            if data.get("clab_password") and "clab_password" not in explicit:
-                self.clab_password = SecretStr(str(data["clab_password"]))
-            if data.get("clab_topology_path") and "clab_topology_path" not in explicit:
-                self.clab_topology_path = str(data["clab_topology_path"])
-            for str_field in ("public_web_url", "default_fabric_id", "default_domain"):
+            for str_field in (
+                "github_repo_url",
+                "clab_host",
+                "clab_user",
+                "clab_topology_path",
+                "public_web_url",
+                "default_fabric_id",
+                "default_domain",
+            ):
                 if data.get(str_field) and str_field not in explicit:
                     setattr(self, str_field, str(data[str_field]))
-            if data.get("groq_api_key") and "groq_api_key" not in explicit:
-                self.groq_api_key = SecretStr(str(data["groq_api_key"]))
-            if data.get("gemini_api_key") and "gemini_api_key" not in explicit:
-                self.gemini_api_key = SecretStr(str(data["gemini_api_key"]))
-            if data.get("ollama_url") is not None and "ollama_url" not in explicit:
-                self.ollama_url = str(data["ollama_url"])
-            if data.get("prometheus_url") is not None and "prometheus_url" not in explicit:
-                self.prometheus_url = str(data["prometheus_url"])
+            for nullable_str_field in ("ollama_url", "prometheus_url"):
+                if data.get(nullable_str_field) is not None and nullable_str_field not in explicit:
+                    setattr(self, nullable_str_field, str(data[nullable_str_field]))
+            if isinstance(data.get("clab_port_map"), dict) and "clab_port_map" not in explicit:
+                self.clab_port_map = {
+                    str(k): str(v) for k, v in data["clab_port_map"].items() if k and v
+                }
             if isinstance(data.get("llm_cascade"), list) and "llm_cascade" not in explicit:
                 self.llm_cascade = [
                     item for item in data["llm_cascade"] if isinstance(item, dict)
                 ]
             for int_field in (
+                "clab_port",
                 "metrics_interval_seconds",
                 "drift_scan_interval_seconds",
                 "commit_confirm_timeout_seconds",
                 "frontend_port",
             ):
                 if data.get(int_field) is not None and int_field not in explicit:
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         setattr(self, int_field, int(data[int_field]))
-                    except (TypeError, ValueError):
-                        pass
             min_confirm = int((self.post_check_attempts - 1) * self.post_check_interval_seconds * 2)
             if self.commit_confirm_timeout_seconds < min_confirm:
                 self.commit_confirm_timeout_seconds = max(30, min_confirm)
@@ -278,10 +263,8 @@ class Settings(BaseSettings):
                 data.get("max_ping_loss_percent") is not None
                 and "max_ping_loss_percent" not in explicit
             ):
-                try:
+                with contextlib.suppress(TypeError, ValueError):
                     self.max_ping_loss_percent = float(data["max_ping_loss_percent"])
-                except (TypeError, ValueError):
-                    pass
             return data
         except Exception:
             return {}
@@ -297,6 +280,9 @@ class Settings(BaseSettings):
                 existing[k] = v
         state.set_db_state("runtime_settings", existing, database_url=self.database_url)
         self.apply_runtime_overlay()
+        from netops.services.stands import invalidate_stand_connection_cache
+
+        invalidate_stand_connection_cache()
         return existing
 
     def authenticate(self, token: str) -> ApiPrincipal | None:

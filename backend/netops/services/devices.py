@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any, Literal
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, false, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -28,6 +28,32 @@ _INVENTORY_FIELDS = (
 )
 
 
+def _fabric_or_site(value: str) -> Any:
+    """fabric_id==X OR site==X как UNION двух index-seek веток (ix_devices_fabric_id/site)."""
+    ids = select(Device.id).where(Device.fabric_id == value).union(
+        select(Device.id).where(Device.site == value)
+    )
+    return Device.id.in_(ids)
+
+
+def _allowed_clause(tokens: Sequence[tuple[str, str]]) -> Any:
+    """SQL-эквивалент api.routes.devices.device_allowed (RBAC allowed_system) для пагинации."""
+    plat = cast(Device.platform, String)
+    conds: list[Any] = []
+    for token, target in tokens:
+        names = {token, target}
+        conds += [
+            func.lower(Device.hostname).in_(names),
+            cast(Device.id, String) == token,
+            func.lower(Device.fabric_id).in_(names),
+            func.lower(Device.site).in_(names),
+            func.lower(plat).in_(names),
+        ]
+        if target in ("huawei", "arista", "frr", "server"):
+            conds.append(func.lower(plat).contains(target))
+    return or_(*conds) if conds else false()
+
+
 class DeviceService:
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -42,8 +68,11 @@ class DeviceService:
         site: str | None = None,
         limit: int = 100,
         offset: int = 0,
+        allowed_tokens: Sequence[tuple[str, str]] | None = None,
     ) -> Sequence[Device]:
-        query = select(Device).order_by(Device.hostname).limit(limit).offset(offset)
+        query = select(Device).order_by(Device.hostname, Device.id).limit(limit).offset(offset)
+        if allowed_tokens:
+            query = query.where(_allowed_clause(allowed_tokens))
         if status is not None:
             query = query.where(Device.status == status)
         if role is not None:
@@ -51,9 +80,9 @@ class DeviceService:
         if platform is not None:
             query = query.where(Device.platform == platform)
         if fabric_id is not None:
-            query = query.where((Device.fabric_id == fabric_id) | (Device.site == fabric_id))
+            query = query.where(_fabric_or_site(fabric_id))
         if site is not None:
-            query = query.where((Device.site == site) | (Device.fabric_id == site))
+            query = query.where(_fabric_or_site(site))
         devices = self._session.scalars(query).all()
 
         device_ids = [d.id for d in devices]
@@ -70,8 +99,9 @@ class DeviceService:
             for record in self._session.scalars(drift_query):
                 drifts[record.device_id] = record
 
+        topo_state = self._get_topology_runtime_state()
         for device in devices:
-            self._enrich_device(device, drifts.get(device.id))
+            self._enrich_device(device, drifts.get(device.id), topo_state.get(device.id))
         return devices
 
     def get(self, device_id: int) -> Device:
@@ -84,20 +114,75 @@ class DeviceService:
             .order_by(DriftRecord.checked_at.desc())
             .limit(1)
         ).first()
-        self._enrich_device(device, latest_drift)
+        topo_state = self._get_topology_runtime_state()
+        self._enrich_device(device, latest_drift, topo_state.get(device.id))
         return device
 
     def get_by_hostname(self, hostname: str) -> Device | None:
         return self._session.scalar(select(Device).where(Device.hostname == hostname))
 
-    def _enrich_device(self, device: Device, latest_drift: DriftRecord | None = None) -> Device:
+    def _get_topology_runtime_state(self) -> dict[int, dict[str, str]]:
+        from netops.services.topology_commutation import get_link_overrides
+        from netops.services.topology_resilience import get_drained_nodes
+
+        overrides = get_link_overrides()
+        drained = get_drained_nodes()
+        has_shut = any(v.get("admin_state") == "SHUTDOWN" for v in overrides.values() if isinstance(v, dict))
+        has_drain = any(v.get("drained") for v in drained.values() if isinstance(v, dict))
+        if not has_shut and not has_drain:
+            return {}
+        from netops.services.topology import build_topology_graph
+
+        all_devs = list(self._session.scalars(select(Device)).all())
+        graph = build_topology_graph(all_devs, self._session)
+        return {
+            int(n["id"]): {"status": str(n["status"]), "oper_status": str(n["oper_status"])}
+            for n in graph.get("nodes", [])
+            if n.get("id") is not None
+        }
+
+    def _enrich_device(
+        self,
+        device: Device,
+        latest_drift: DriftRecord | None = None,
+        topo_node: dict[str, str] | None = None,
+    ) -> Device:
+        from sqlalchemy.orm.attributes import set_committed_value
+
         role_str = str(device.role.value if hasattr(device.role, "value") else device.role)
         sparkline = metric_series(device.hostname, role_str, "uplink_util_pct", points=24)
-        if not sparkline:
-            sparkline = metric_series(device.hostname, role_str, "cpu_pct", points=24)
+        if not sparkline or not any(v > 0 for v in sparkline):
+            cpu_series = metric_series(device.hostname, role_str, "cpu_pct", points=24)
+            if cpu_series and (not sparkline or any(v > 0 for v in cpu_series)):
+                sparkline = cpu_series
+        if not sparkline or not any(v > 0 for v in sparkline):
+            mem_series = metric_series(device.hostname, role_str, "memory_pct", points=24)
+            if mem_series and (not sparkline or any(v > 0 for v in mem_series)):
+                sparkline = mem_series
         oper_status = self._derive_oper_status(device, sparkline, latest_drift)
+        if topo_node:
+            t_status = topo_node.get("status")
+            t_oper = topo_node.get("oper_status")
+            if t_status == "UNREACHABLE":
+                set_committed_value(device, "status", DeviceStatus.UNREACHABLE)
+                oper_status = "DOWN"
+            elif t_status == "DRIFT_DETECTED" and device.status == DeviceStatus.IN_SYNC:
+                set_committed_value(device, "status", DeviceStatus.DRIFT_DETECTED)
+                if oper_status == "UP":
+                    oper_status = "DEGRADED"
+            if t_oper in ("DOWN", "DEGRADED") and oper_status == "UP":
+                oper_status = t_oper  # type: ignore[assignment]
+        from netops.services.vitality import evaluate_device_vitality
+
         state_timeline = self._build_state_timeline(oper_status, sparkline)
+        vitality = evaluate_device_vitality(device, oper_status, latest_drift, self._session)
         device.oper_status = oper_status
+        device.vitality_state = vitality["vitality_state"]
+        device.down_reason = vitality["down_reason"]
+        device.ai_diagnosis = vitality["ai_diagnosis"]
+        device.using_backup_fallback = vitality["using_backup_fallback"]
+        device.last_backup_at = vitality["last_backup_at"]
+        device.backup_available = vitality["backup_available"]
         device.sparkline = sparkline
         device.state_timeline = state_timeline
         return device
@@ -107,9 +192,11 @@ class DeviceService:
         device: Device,
         sparkline: list[float],
         latest_drift: DriftRecord | None = None,
-    ) -> Literal["UP", "DOWN", "DEGRADED"]:
+    ) -> Literal["UP", "DOWN", "DEGRADED", "UNKNOWN"]:
         if device.status == DeviceStatus.UNREACHABLE:
             return "DOWN"
+        if device.status == DeviceStatus.UNKNOWN:
+            return "UNKNOWN"
         if latest_drift:
             has_shutdown = any(
                 "shutdown" in line.lower() and "no shutdown" not in line.lower()
@@ -134,12 +221,14 @@ class DeviceService:
             val = sparkline[i] if i < len(sparkline) else None
             if oper_status == "DOWN":
                 timeline.append("DOWN")
+            elif oper_status == "UNKNOWN":
+                timeline.append("UNKNOWN")
             elif oper_status == "DEGRADED" or (val is not None and val >= 85.0):
                 timeline.append("DEGRADED")
             elif val is not None:
                 timeline.append("UP")
             else:
-                timeline.append("UP" if oper_status == "UP" else "UNKNOWN")
+                timeline.append("UNKNOWN")
         return timeline
 
     def create(self, data: DeviceCreate) -> Device:

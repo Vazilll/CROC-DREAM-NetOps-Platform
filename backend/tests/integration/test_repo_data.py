@@ -217,3 +217,14 @@ def test_slide12_extensions(client: TestClient) -> None:
     assert rep.status_code == 200
     assert "compliance_pct" in rep.json()
 
+
+def test_source_files_respect_modularity_line_limit() -> None:
+    oversized: list[str] = []
+    for root in ((REPO_ROOT / "backend" / "netops"), (REPO_ROOT / "frontend" / "src")):
+        for path in [*root.rglob("*.py"), *root.rglob("*.ts"), *root.rglob("*.tsx")]:
+            line_count = len(path.read_text(encoding="utf-8", errors="ignore").splitlines())
+            if line_count > 520:
+                oversized.append(f"{path.relative_to(REPO_ROOT)} ({line_count} lines)")
+    assert oversized == [], f"Файлы превышают строгий лимит модульности 520 строк (AGENTS.md п.4): {oversized}"
+
+

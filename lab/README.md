@@ -9,18 +9,21 @@
 ```
 lab/
 ├── README.md                  # Этот документ
+├── fabric.clab.yaml           # Манифест топологии Containerlab
 ├── reset_lab.sh               # Скрипт принудительного сброса живого стенда Containerlab к эталону
+├── network_audit.sh           # Скрипт быстрой сетевой диагностики контейнеров стенда
 ├── golden_configs/            # Неизменяемые эталонные («золотые») конфиги узлов фабрики
 │   ├── spine1.cfg             # Эталон Cisco IOS-XE (spine-1.croc.lab)
 │   ├── spine2.cfg             # Эталон Arista EOS   (spine-2.croc.lab)
 │   ├── leaf1.cfg              # Эталон Huawei VRP   (leaf-1.croc.lab)
 │   └── leaf2.cfg              # Эталон Huawei VRP   (leaf-2.croc.lab)
+├── backups/                   # Локальное хранилище резервных копий (<stand>/<hostname>_latest.cfg, _prev.cfg) для Primary->Fallback
 └── running/                   # Рабочая директория эмулятора OfflineLab и локального runtime-состояния
     ├── spine-1.croc.lab.cfg   # Текущий running-config узла spine-1 в режиме offline
     ├── spine-2.croc.lab.cfg   # Текущий running-config узла spine-2 в режиме offline
     ├── leaf-1.croc.lab.cfg    # Текущий running-config узла leaf-1 в режиме offline
     ├── leaf-2.croc.lab.cfg    # Текущий running-config узла leaf-2 в режиме offline
-    └── *.json / *.jsonl       # Runtime-кэши (telemetry_cache.json, access_registry.json, emergency_audit.jsonl — в .gitignore)
+    └── *.json / *.jsonl       # Runtime-кэши (в .gitignore)
 ```
 
 ---

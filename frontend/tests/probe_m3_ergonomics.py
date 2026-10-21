@@ -265,8 +265,8 @@ def run_probe():
                 try:
                     payload = json.loads(request.post_data)
                     captured_requests.append(payload)
-                except Exception:
-                    pass
+                except (TypeError, ValueError) as exc:
+                    print(f"      [WARN] Failed to parse copilot chat post_data ({exc!r}): {request.post_data!r}")
             route.continue_()
 
         page.route("**/api/v1/copilot/chat", handle_route)

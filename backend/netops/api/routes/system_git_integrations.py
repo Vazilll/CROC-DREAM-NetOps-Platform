@@ -89,7 +89,12 @@ def sync_git_sot(
     sync_res = DeviceService(session).sync_inventory(inventory)
     dry_run_job_id: str | None = None
     if req and req.trigger_dry_run:
-        all_ids = [d.id for d in DeviceService(session).list_devices(limit=500)]
+        from netops.api.routes.devices import filter_devices_by_system
+
+        allowed_devs = filter_devices_by_system(
+            DeviceService(session).list_devices(limit=5000), user.allowed_system
+        )
+        all_ids = [d.id for d in allowed_devs]
         if all_ids:
             job = JobService(session, container.dispatcher).create_dry_run(
                 all_ids, IntentSource.GIT_MAIN, requested_by=user.username
@@ -122,29 +127,26 @@ def commit_diff_to_git(
     req: GitCommitDiffRequest,
     session: SessionDep,
     container: ContainerDep,
-    _: Operator,
+    user: Operator,
 ) -> dict[str, Any]:
     import uuid as _uuid
+
+    from netops.api.routes.jobs import _assert_job_allowed
+    from netops.pipeline.pipelines import serialize_job_target_diffs
 
     settings = container.settings
     rt = settings.apply_runtime_overlay()
     job_svc = JobService(session, container.dispatcher)
     job = job_svc.get_with_diff(_uuid.UUID(req.job_id))
-    device_diffs = [
-        {
-            "hostname": row.hostname,
-            "remediation_patch": row.remediation_config or "",
-            "intended_config": row.intended_snapshot.content if row.intended_snapshot else "",
-        }
-        for row in job.targets
-    ]
+    _assert_job_allowed(job, user.allowed_system)
+    device_diffs = serialize_job_target_diffs(job)
     res = git_commit_and_push_diff(
         settings.intent_repo_path,
         job_id=str(job.id),
         job_type=str(getattr(job.type, "value", job.type)),
         device_diffs=device_diffs,
         branch=str(rt.get("github_branch") or "main"),
-        remote_url=str(rt.get("github_repo_url") or settings.github_repo_url),
+        remote_url=str(rt.get("github_repo_url") or ""),
     )
     return res
 
@@ -189,7 +191,7 @@ def github_webhook(
     inventory = container.intents.load_inventory()
     sync_res = DeviceService(session).sync_inventory(inventory)
 
-    all_ids = [d.id for d in DeviceService(session).list_devices(limit=500)]
+    all_ids = [d.id for d in DeviceService(session).list_devices(limit=5000)]
     job_id: str | None = None
     if all_ids:
         try:
@@ -198,7 +200,7 @@ def github_webhook(
             )
             job_id = str(job.id)
         except Exception:
-            pass
+            _ = None
 
     send_telegram_message(
         container.settings,
@@ -323,9 +325,9 @@ def get_integrations_status(
                 if settings.telegram_bot_username
                 else ""
             ),
-            "chat_ids": [int(c) for c in tg_targets if str(c).lstrip("-").isdigit()],
-            "chat_ids_count": len(tg_targets),
-            "bindings": list(tg_bindings.values()),
+            "chat_ids": [int(c) for c in tg_targets if str(c).lstrip("-").isdigit()] if is_admin else [],
+            "chat_ids_count": len(tg_targets) if is_admin else 0,
+            "bindings": list(tg_bindings.values()) if is_admin else [],
             "commands": [
                 "/verify",
                 "/start",

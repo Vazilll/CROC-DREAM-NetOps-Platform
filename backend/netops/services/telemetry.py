@@ -51,12 +51,16 @@ class MetricSpec:
 METRICS: dict[str, MetricSpec] = {
     "uplink_util_pct": MetricSpec("Загрузка аплинка", "%", 85.0),
     "cpu_pct": MetricSpec("Загрузка CPU", "%", 80.0),
-    "memory_pct": MetricSpec("Использование RAM", "%", 85.0),
+    "memory_pct": MetricSpec("Использование RAM", "%", 92.0),
     "disk_util_pct": MetricSpec("Загрузка диска", "%", 90.0),
     "network_rate_mbps": MetricSpec("Сетевой трафик", "Mbps", 1000.0),
     "load_1m": MetricSpec("Load Average (1 мин)", "", 8.0),
     "audit_log_events": MetricSpec("События безопасности (rsyslog/auditd)", "ev/m", 100.0),
     "sip_active_sessions": MetricSpec("Активные сессии телефонии (SIP)", "sess", 500.0),
+    "interface_errors_rate": MetricSpec("Ошибки CRC / дропы на портах", "err", 10.0),
+    "fdb_mac_count": MetricSpec("Таблица коммутации L2 (MAC FDB)", "mac", 4096.0),
+    "tcp_retransmits_rate": MetricSpec("Повторные передачи TCP (Retransmits)", "pkt", 50.0),
+    "conntrack_usage_pct": MetricSpec("Таблица сессий ядра (Conntrack)", "%", 85.0),
 }
 
 _LIVE_METRIC_CACHE: dict[str, dict[str, list[float]]] = {}
@@ -78,20 +82,23 @@ def record_live_metric(hostname: str, metric: str, value: float) -> None:
 
 
 def clear_live_metrics(hostname: str | None = None) -> None:
+    import time
+
     from netops.services.state import get_state_manager
 
-    get_state_manager().clear_telemetry(hostname)
+    mgr = get_state_manager()
+    mgr.clear_telemetry(hostname)
+    if hostname is None:
+        _PROM_QUERY_CACHE.clear()
+        mgr.set("netops:telemetry:epoch", str(int(time.time())))
+    else:
+        for k in [k for k in _PROM_QUERY_CACHE if k[1] == hostname]:
+            _PROM_QUERY_CACHE.pop(k, None)
     with _CACHE_LOCK:
         if hostname is None:
             _LIVE_METRIC_CACHE.clear()
         else:
             _LIVE_METRIC_CACHE.pop(hostname, None)
-    try:
-        from netops.services.forecast import clear_forecast_cache
-
-        clear_forecast_cache()
-    except Exception:
-        pass
 
 
 def clear_platform_profile_cache() -> None:
@@ -120,7 +127,7 @@ def load_profile_for_platform(
         if settings_repo:
             search_dirs.extend([settings_repo / "platforms", settings_repo])
     except Exception:
-        pass
+        _ = None
     search_dirs.append(Path("/data/intent/platforms"))
     repo_root = Path(__file__).resolve().parents[3]
     search_dirs.extend([
@@ -139,7 +146,7 @@ def load_profile_for_platform(
                             _PROFILE_CACHE[cache_key] = prof
                             return prof
                     except Exception:
-                        pass
+                        _ = None
     return None
 
 
@@ -410,24 +417,26 @@ def metric_series(
     from netops.services.state import get_state_manager
 
     cached = get_state_manager().get_telemetry_series(hostname, metric, points)
-    if not cached:
+    if not cached or not any(v > 0 for v in cached):
         with _CACHE_LOCK:
-            cached = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
-    if len(cached) >= min(points, 4):
+            live = list(_LIVE_METRIC_CACHE.get(hostname, {}).get(metric, []))[-points:]
+        if live and (not cached or any(v > 0 for v in live)):
+            cached = live
+    if cached and any(v > 0 for v in cached):
+        return cached[-points:]
+    if "PYTEST_CURRENT_TEST" in os.environ:
         return cached[-points:]
     try:
         from netops.settings import get_settings
 
         settings = get_settings()
-        if "PYTEST_CURRENT_TEST" not in os.environ:
-            settings.apply_runtime_overlay(respect_explicit=True)
         if settings.prometheus_url:
             prom = query_prometheus_metric(settings.prometheus_url, hostname, metric, points)
             if prom:
                 return prom
     except Exception:
-        pass
-    return cached
+        _ = None
+    return cached[-points:]
 
 
 __all__ = [

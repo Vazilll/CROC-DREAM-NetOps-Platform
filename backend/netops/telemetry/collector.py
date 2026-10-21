@@ -9,15 +9,12 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from netops.db import utcnow
-from netops.enums import DeviceRole, DeviceStatus, JobStatus, JobType, Platform
+from netops.enums import DeviceRole, DeviceStatus, JobStatus, JobType, Platform, TelemetryProtocol
 from netops.intent import IntentValidationError, InventoryDevice
 from netops.models import Device, Job
 from netops.network.base import HealthExpectations
 from netops.services.state import get_state_manager
-from netops.services.telemetry import (
-    record_live_metric,
-    resolve_device_ports,
-)
+from netops.services.telemetry import record_live_metric, resolve_device_ports
 from netops.telemetry import metrics
 from netops.telemetry.metrics import Sample
 from netops.toolchain import Toolchain
@@ -25,6 +22,8 @@ from netops.toolchain import Toolchain
 logger = logging.getLogger(__name__)
 
 LATEST_SNAPSHOT_KEY = "netops:telemetry:latest"
+HOST_SNAPSHOT_PREFIX = "netops:telemetry:host:"
+FABRIC_SNAPSHOT_PREFIX = "netops:telemetry:fabric:"
 
 
 # Один проход сбора: счётчики из базы и опрос стенда. Все замеры пишутся с одним
@@ -36,12 +35,12 @@ def collect(
     include_fabric_label: bool = False,
     max_workers: int = 16,
 ) -> list[Sample]:
-    try:
+    import contextlib
+
+    with contextlib.suppress(Exception):
         from netops.services.retention import pre_collect_cleanup
 
         pre_collect_cleanup(session)
-    except Exception:
-        pass
     dev_samples = (
         device_samples(
             session,
@@ -57,27 +56,89 @@ def collect(
     return samples
 
 
-# Публикует срез последнего сбора в Redis (StateManager) и пушит ряды напрямую в VictoriaMetrics TSDB.
-# TTL нужен, чтобы /metrics не отдавал «вечно живые» значения, если сборщик остановился.
-def publish(samples: Sequence[Sample], *, ttl_seconds: int | None = None) -> datetime:
+def _decode_snapshot(data: dict[str, Any] | None) -> tuple[list[Sample], datetime | None]:
+    if not data:
+        return [], None
+    samples = [Sample(name, float(value), dict(labels)) for name, value, labels in data["samples"]]
+    return samples, datetime.fromisoformat(data["collected_at"])
+
+
+# Публикует срез последнего сбора в Redis (StateManager), шардирует по хостам/фабрикам и пушит в VictoriaMetrics.
+# merge=True: срез одного шарда (merge_fabric; None — платформенные ряды без fabric_id) заменяет
+# в общем снимке только свои ряды; live_fabrics отбрасывает ряды удалённых стендов.
+def publish(
+    samples: Sequence[Sample],
+    *,
+    ttl_seconds: int | None = None,
+    merge: bool = False,
+    merge_fabric: str | None = None,
+    live_fabrics: set[str] | None = None,
+) -> datetime:
     import os
     import urllib.request
 
     collected_at = utcnow()
-    get_state_manager().set_json(
-        LATEST_SNAPSHOT_KEY,
-        {
-            "collected_at": collected_at.isoformat(),
-            "samples": [[s.name, s.value, dict(s.labels)] for s in samples],
-        },
-        ex=ttl_seconds,
-    )
+    ts_iso = collected_at.isoformat()
+    sm = get_state_manager()
+    by_host: dict[str, list[list[Any]]] = {}
+    by_fabric: dict[str, list[list[Any]]] = {}
+    raw_all: list[list[Any]] = []
+    for s in samples:
+        lbls = dict(s.labels)
+        row = [s.name, s.value, lbls]
+        raw_all.append(row)
+        if host := lbls.get("hostname"):
+            by_host.setdefault(host, []).append(row)
+        if fab := lbls.get("fabric_id"):
+            by_fabric.setdefault(fab, []).append(row)
+
+    if merge:
+        import time
+
+        holder = f"publish:{merge_fabric}"
+        deadline = time.monotonic() + 5.0
+        while not sm.acquire_sync_lock("telemetry:latest", holder, ttl=10) and (
+            time.monotonic() < deadline
+        ):
+            time.sleep(0.05)
+        try:
+            old = (sm.get_json(LATEST_SNAPSHOT_KEY) or {}).get("samples", [])
+            kept = [
+                r
+                for r in old
+                if r[2].get("fabric_id") != merge_fabric
+                and (live_fabrics is None or r[2].get("fabric_id") in live_fabrics | {None})
+            ]
+            sm.set_json(
+                LATEST_SNAPSHOT_KEY,
+                {"collected_at": ts_iso, "samples": kept + raw_all},
+                ex=ttl_seconds,
+            )
+        finally:
+            sm.release_sync_lock("telemetry:latest", holder)
+    else:
+        sm.set_json(
+            LATEST_SNAPSHOT_KEY, {"collected_at": ts_iso, "samples": raw_all}, ex=ttl_seconds
+        )
+    for host, host_rows in by_host.items():
+        sm.set_json(
+            f"{HOST_SNAPSHOT_PREFIX}{host}",
+            {"collected_at": ts_iso, "samples": host_rows},
+            ex=ttl_seconds,
+        )
+    for fab, fab_rows in by_fabric.items():
+        sm.set_json(
+            f"{FABRIC_SNAPSHOT_PREFIX}{fab}",
+            {"collected_at": ts_iso, "samples": fab_rows},
+            ex=ttl_seconds,
+        )
+
     vm_url = os.environ.get("NETOPS_VICTORIAMETRICS_URL", "").strip().rstrip("/")
     if vm_url and "PYTEST_CURRENT_TEST" not in os.environ and samples:
         try:
             body = metrics.render(samples, collected_at).encode("utf-8")
             req = urllib.request.Request(
-                f"{vm_url}/api/v1/import/prometheus",
+                f"{vm_url}/api/v1/import/prometheus?extra_label=job=netops_backend&extra_label=instance=api:8000",
                 data=body,
                 headers={"Content-Type": "text/plain"},
                 method="POST",
@@ -90,11 +151,15 @@ def publish(samples: Sequence[Sample], *, ttl_seconds: int | None = None) -> dat
 
 
 def latest() -> tuple[list[Sample], datetime | None]:
-    data = get_state_manager().get_json(LATEST_SNAPSHOT_KEY)
-    if not data:
-        return [], None
-    samples = [Sample(name, float(value), dict(labels)) for name, value, labels in data["samples"]]
-    return samples, datetime.fromisoformat(data["collected_at"])
+    return _decode_snapshot(get_state_manager().get_json(LATEST_SNAPSHOT_KEY))
+
+
+def latest_for_host(hostname: str) -> tuple[list[Sample], datetime | None]:
+    return _decode_snapshot(get_state_manager().get_json(f"{HOST_SNAPSHOT_PREFIX}{hostname}"))
+
+
+def latest_for_fabric(fabric_id: str) -> tuple[list[Sample], datetime | None]:
+    return _decode_snapshot(get_state_manager().get_json(f"{FABRIC_SNAPSHOT_PREFIX}{fabric_id}"))
 
 
 def platform_samples(session: Session) -> list[Sample]:
@@ -154,18 +219,17 @@ def platform_samples(session: Session) -> list[Sample]:
 _SERVER_METRICS: tuple[tuple[str, str], ...] = (
     ("cpu_pct", metrics.SERVER_CPU_UTIL),
     ("memory_pct", metrics.SERVER_MEMORY_UTIL),
+    ("uplink_util_pct", metrics.DEVICE_UPLINK_UTIL),
     ("disk_util_pct", metrics.SERVER_DISK_UTIL),
     ("network_rate_mbps", metrics.SERVER_NETWORK_RATE),
     ("load_1m", metrics.SERVER_LOAD_1M),
+    ("tcp_retransmits_rate", metrics.SERVER_TCP_RETRANSMITS),
+    ("conntrack_usage_pct", metrics.SERVER_CONNTRACK_UTIL),
 )
 
 
 # Отдаём только то, что сервер реально вернул: пропуск лучше выдуманного значения.
-def _emit_server_samples(
-    health: Any,
-    labels: dict[str, str],
-    hostname: str,
-) -> list[Sample]:
+def _emit_server_samples(health: Any, labels: dict[str, str], hostname: str) -> list[Sample]:
     res: list[Sample] = []
     for attr, metric_name in _SERVER_METRICS:
         raw = getattr(health, attr, None)
@@ -174,6 +238,10 @@ def _emit_server_samples(
         val = float(raw)
         record_live_metric(hostname, attr, val)
         res.append(Sample(metric_name, val, labels))
+        if attr == "cpu_pct":
+            res.append(Sample(metrics.DEVICE_CPU_UTIL, val, labels))
+        elif attr == "memory_pct":
+            res.append(Sample(metrics.DEVICE_MEMORY_UTIL, val, labels))
     return res
 
 
@@ -198,6 +266,15 @@ def _emit_switch_samples(
         res.append(Sample(metrics.UPLINK_UTIL, val, labels))
         res.append(Sample(metrics.DEVICE_UPLINK_UTIL, val, labels))
         record_live_metric(hostname, "uplink_util_pct", val)
+    for attr, m_name in (
+        ("interface_errors_rate", metrics.INTERFACE_ERRORS),
+        ("fdb_mac_count", metrics.FDB_MAC_COUNT),
+    ):
+        raw_val = getattr(health, attr, None)
+        if raw_val is not None:
+            fval = float(raw_val)
+            res.append(Sample(m_name, fval, labels))
+            record_live_metric(hostname, attr, fval)
 
     for peer, session_state in health.bgp_sessions.items():
         peer_labels = labels | {"peer": peer, "state": session_state.state}
@@ -248,7 +325,7 @@ def _build_probe_tasks(
         expectations = (
             HealthExpectations.from_intent(intent)
             if intent is not None
-            else HealthExpectations(interfaces={}, bgp_peers=frozenset())
+            else HealthExpectations(interfaces={}, bgp_peers=())
         )
         labels = {"hostname": device.hostname}
         if include_fabric_label:
@@ -272,8 +349,9 @@ def device_samples(
     session: Session,
     toolchain: Toolchain,
     *,
-    max_workers: int = 16,
+    max_workers: int = 4,
     include_fabric_label: bool = False,
+    fabric_id: str | None = None,
 ) -> list[Sample]:
     from concurrent.futures import ThreadPoolExecutor
 
@@ -285,11 +363,16 @@ def device_samples(
             "Intent содержит предупреждения (%s) — продолжаем сбор базовой телеметрии", exc
         )
 
-    devices = list(session.scalars(select(Device).order_by(Device.hostname)).all())
+    query = select(Device).order_by(Device.hostname)
+    if fabric_id is not None:
+        query = query.where(Device.fabric_id == fabric_id)
+    devices = list(session.scalars(query).all())
     if not devices:
         return []
 
     probe_tasks = _build_probe_tasks(devices, snapshot, toolchain, include_fabric_label)
+    # Закрываем транзакцию до SSH-прохода: не держим idle in transaction (expire_on_commit=False).
+    session.commit()
 
     def _run_probe(
         item: tuple[
@@ -299,22 +382,9 @@ def device_samples(
         dev, lbls, exp, tgt, prep_err, ports = item
         if prep_err is not None or tgt is None:
             return dev, lbls, None, prep_err, ports
-        if (
-            toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
-            and _is_server_device(dev)
-        ):
-            from netops.network.base import HealthSnapshot
-            from netops.telemetry import targets
-
-            if targets.is_externally_collected(dev.hostname):
-                return (
-                    dev,
-                    lbls,
-                    HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}),
-                    None,
-                    ports,
-                )
         try:
+            if toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver":
+                exp = HealthExpectations(bgp_peers=(), interfaces=exp.interfaces)
             snap = toolchain.health_probe.snapshot(tgt, exp)
             hw_json: str | None = None
             from netops.services.discovery_parsers import _needs_hardware_specs
@@ -347,11 +417,52 @@ def device_samples(
                             },
                             ensure_ascii=False,
                         )
-                except Exception:
-                    pass
+                except Exception as hw_exc:
+                    logger.debug("Hardware specs probe skipped for %s: %s", dev.hostname, hw_exc)
             return dev, lbls, snap, None, ports, hw_json
-        except Exception as exc:
-            return dev, lbls, None, exc, ports, None
+        except Exception as ssh_exc:
+            if (
+                toolchain.health_probe.__class__.__name__ == "ScrapliNetworkDriver"
+                and _is_server_device(dev)
+            ):
+                from netops.network.base import HealthSnapshot
+                from netops.services import protocol_probe
+                from netops.telemetry import targets
+
+                if targets.is_externally_collected(dev.hostname):
+                    plan = targets.last_collector_plan() or {}
+                    dev_info = (plan.get("devices") or {}).get(dev.hostname, {})
+                    proto = dev_info.get("protocol")
+                    port = dev_info.get("port")
+                    host = tgt.host or dev.management_ip
+                    try:
+                        if proto == TelemetryProtocol.PROMETHEUS_EXPORTER.value:
+                            path = dev_info.get("path") or "/metrics"
+                            ok = protocol_probe.prometheus_exporter_ok(
+                                host, int(port or 9100), path, timeout=1.5
+                            )
+                        elif proto == TelemetryProtocol.GNMI.value:
+                            ok = protocol_probe.tcp_open(host, int(port or 6030), timeout=1.5)
+                        elif proto == TelemetryProtocol.SNMP.value:
+                            ok = bool(
+                                protocol_probe.snmp_agent_versions(
+                                    host, int(port or 161), timeout=1.5
+                                )
+                            )
+                        else:
+                            ok = protocol_probe.tcp_open(host, int(tgt.port or 22), timeout=1.5)
+                        if ok:
+                            return (
+                                dev,
+                                lbls,
+                                HealthSnapshot(bgp_sessions={}, interfaces={}, ping_loss_percent={}),
+                                None,
+                                ports,
+                                None,
+                            )
+                    except Exception as fb_exc:
+                        logger.debug("Fallback probe failed for %s: %s", dev.hostname, fb_exc)
+            return dev, lbls, None, ssh_exc, ports, None
 
     workers = max(1, min(max_workers, len(probe_tasks)))
     if workers == 1:
@@ -369,7 +480,7 @@ def device_samples(
             from netops.services.telemetry import clear_live_metrics
 
             logger.info("Телеметрия с %s не снята: %s", device.hostname, err)
-            if device.status not in (DeviceStatus.UNREACHABLE, DeviceStatus.UNKNOWN):
+            if device.status != DeviceStatus.UNREACHABLE:
                 device.status = DeviceStatus.UNREACHABLE
                 status_changed = True
             clear_live_metrics(device.hostname)
@@ -377,6 +488,11 @@ def device_samples(
             continue
 
         if device.status == DeviceStatus.UNREACHABLE:
+            device.status = (
+                DeviceStatus.IN_SYNC if _is_server_device(device) else DeviceStatus.UNKNOWN
+            )
+            status_changed = True
+        elif _is_server_device(device) and device.status == DeviceStatus.UNKNOWN:
             device.status = DeviceStatus.IN_SYNC
             status_changed = True
         if hw_json:

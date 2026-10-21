@@ -86,11 +86,33 @@ def test_device_samples_come_from_the_lab(
 
 def test_publish_replaces_snapshot_and_respects_ttl() -> None:
     collector.publish([Sample(metrics.DRIFT_DEVICES, 9)])
-    collected_at = collector.publish([Sample(metrics.DRIFT_DEVICES, 1, {"fabric_id": "dc1"})])
+    collected_at = collector.publish(
+        [
+            Sample(metrics.DRIFT_DEVICES, 1, {"fabric_id": "dc1"}),
+            Sample(
+                metrics.DEVICE_CPU_UTIL,
+                23.5,
+                {"hostname": "spine-1.croc.lab", "fabric_id": "dc1"},
+            ),
+        ]
+    )
 
     samples, latest_at = collector.latest()
     assert latest_at == collected_at
-    assert samples == [Sample(metrics.DRIFT_DEVICES, 1.0, {"fabric_id": "dc1"})]
+    assert len(samples) == 2
+
+    host_samples, host_at = collector.latest_for_host("spine-1.croc.lab")
+    assert host_at == collected_at
+    assert host_samples == [
+        Sample(
+            metrics.DEVICE_CPU_UTIL,
+            23.5,
+            {"hostname": "spine-1.croc.lab", "fabric_id": "dc1"},
+        )
+    ]
+    fab_samples, fab_at = collector.latest_for_fabric("dc1")
+    assert fab_at == collected_at
+    assert len(fab_samples) == 2
 
     # Истёкший срез не должен отдаваться как «живой».
     collector.publish([Sample(metrics.DRIFT_DEVICES, 2)], ttl_seconds=60)

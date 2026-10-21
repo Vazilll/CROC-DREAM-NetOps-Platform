@@ -177,7 +177,7 @@ def test_huawei_apply_disconnect_during_commit_list_raises_and_leaves_dict_clean
     failing_conn = ScriptableMockConnection(
         fail_on_command={HUAWEI_COMMIT_LIST: ConnectionResetError("SSH connection reset by peer")}
     )
-    driver._get_connection = lambda target: failing_conn  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: failing_conn  # type: ignore[method-assign]
     target = _target("huawei-leaf-1")
 
     with pytest.raises(ConnectionResetError, match="SSH connection reset by peer"):
@@ -195,7 +195,7 @@ def test_huawei_rollback_after_apply_disconnect_falls_back_to_last_1() -> None:
     """
     driver = ScrapliNetworkDriver()
     conn = ScriptableMockConnection()
-    driver._get_connection = lambda target: conn  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: conn  # type: ignore[method-assign]
     target = _target("huawei-leaf-1")
 
     # Driver has no recorded commit ID for target
@@ -218,7 +218,7 @@ def test_huawei_apply_empty_commit_list_falls_back_to_last_1_on_rollback() -> No
     conn = ScriptableMockConnection(
         command_responses={HUAWEI_COMMIT_LIST: "Info: No commit history found.\n"}
     )
-    driver._get_connection = lambda target: conn  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: conn  # type: ignore[method-assign]
     target = _target("huawei-leaf-2")
 
     driver.apply(target, PLAN, confirm_timeout=180)
@@ -235,7 +235,7 @@ def test_huawei_double_rollback_safety() -> None:
     conn = ScriptableMockConnection(
         command_responses={HUAWEI_COMMIT_LIST: "CommitId 1000000050 admin\n"}
     )
-    driver._get_connection = lambda target: conn  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: conn  # type: ignore[method-assign]
     target = _target("huawei-leaf-3")
 
     driver.apply(target, PLAN, confirm_timeout=180)
@@ -262,7 +262,7 @@ def test_huawei_confirm_then_rollback() -> None:
     conn = ScriptableMockConnection(
         command_responses={HUAWEI_COMMIT_LIST: "CommitId 1000000060 admin\n"}
     )
-    driver._get_connection = lambda target: conn  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: conn  # type: ignore[method-assign]
     target = _target("huawei-leaf-4")
 
     driver.apply(target, PLAN, confirm_timeout=180)
@@ -306,7 +306,7 @@ def test_concurrency_across_100_devices() -> None:
         connections[dev.hostname] = conn
 
     # Dynamic connection resolver based on target hostname
-    driver._get_connection = lambda target: connections[target.hostname]  # type: ignore[method-assign]
+    driver._get_connection = lambda target, **_kw: connections[target.hostname]  # type: ignore[method-assign]
 
     # Step 1: Concurrently apply changes across all 100 devices
     def run_apply(dev: DeviceTarget) -> None:

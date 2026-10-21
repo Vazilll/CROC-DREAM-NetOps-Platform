@@ -112,7 +112,6 @@ groups:
       - alert: HighInterfaceDiscards
         expr: >-
           (rate(ifInDiscards[1m]) + rate(ifOutDiscards[1m])) > 5
-          or rate(ifInDiscards[1m]) > 5
           or rate(gnmi_interfaces_interface_state_counters_in_discards[1m]) > 5
         for: 30s
         labels:
@@ -144,7 +143,7 @@ groups:
 
       # 7. Высокая загрузка CPU (> 85%)
       - alert: HighCpuLoad
-        expr: netops_device_cpu_utilization_percent > 85 or avg by (hostname) (hrProcessorLoad) > 85
+        expr: netops_device_cpu_utilization_percent > 85
         for: 1m
         labels:
           severity: warning

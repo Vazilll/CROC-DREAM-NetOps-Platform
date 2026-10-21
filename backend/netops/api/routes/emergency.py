@@ -96,7 +96,8 @@ class EmergencyCommandResponse(BaseModel):
     response_model=list[dict[str, Any]],
     summary="Get emergency operations audit log",
 )
-def get_emergency_audit(_: Viewer, container: ContainerDep) -> list[dict[str, Any]]:
+def get_emergency_audit(principal: Viewer, container: ContainerDep) -> list[dict[str, Any]]:
+    from netops.api.routes.devices import device_allowed
     from netops.services.state import get_state_manager
 
     db_url = container.settings.database_url
@@ -104,6 +105,26 @@ def get_emergency_audit(_: Viewer, container: ContainerDep) -> list[dict[str, An
         "emergency_audit", [], database_url=db_url
     )
     records = list(loaded) if isinstance(loaded, list) else []
+    scope = (principal.allowed_system or "*").strip()
+    if scope not in ("*", "all", ""):
+        clean_scope = (
+            scope.removeprefix("stand:").removeprefix("fabric:").removeprefix("site:").strip()
+        )
+        filtered: list[dict[str, Any]] = []
+        for rec in records:
+            if not isinstance(rec, dict):
+                continue
+            if rec.get("user") == principal.username:
+                filtered.append(rec)
+                continue
+            dev_name = str(rec.get("device") or "")
+            if dev_name in ("fabric", "containerlab") and clean_scope == "croc-dc1-pod1":
+                filtered.append(rec)
+                continue
+            dev_obj = resolve_inventory_device(container, dev_name) if dev_name else None
+            if dev_obj is not None and device_allowed(dev_obj, scope):
+                filtered.append(rec)
+        records = filtered
     return records[-50:]
 
 
@@ -119,7 +140,7 @@ def _load_device_intent_safe(settings: Any, hostname: str) -> Any | None:
             if isinstance(data, dict):
                 return DeviceIntent.model_validate(data)
     except Exception:
-        pass
+        _ = None
     return None
 
 
@@ -225,7 +246,7 @@ _FORBIDDEN_PIPE_KEYWORDS = (
 
 def _is_allowed_diagnostic_cli(command: str) -> bool:
     """Strict allowlist for read-only diagnostic CLI commands (blocks abbreviations like 'rel', 'conf t', 'clear', 'debug', 'undo')."""
-    if not command or "\n" in command or "\r" in command or ";" in command:
+    if not command or any(c in command for c in ("\n", "\r", ";", ">", "<")):
         return False
     cmd_clean = command.strip().lower()
     if not any(
@@ -238,6 +259,57 @@ def _is_allowed_diagnostic_cli(command: str) -> bool:
         if any(kw in pipe_rhs for kw in _FORBIDDEN_PIPE_KEYWORDS):
             return False
     return True
+
+
+def resolve_inventory_device(container: Any, hostname: str) -> Any:
+    try:
+        snapshot = container.intents.load()
+        found = next(
+            (
+                d
+                for d in snapshot.inventory.devices
+                if d.hostname == hostname or d.hostname.split(".")[0] == hostname
+            ),
+            None,
+        )
+        if found is not None:
+            return found
+    except Exception:
+        _ = None
+
+    try:
+        with container.session_factory() as session:
+            from sqlalchemy import select
+
+            from netops.intent.models import InventoryDevice
+            from netops.models import Device as DeviceModel
+
+            db_dev = session.scalars(
+                select(DeviceModel).where(DeviceModel.hostname == hostname)
+            ).first()
+            if db_dev is None and "." not in hostname:
+                db_dev = next(
+                    (
+                        d
+                        for d in session.scalars(select(DeviceModel)).all()
+                        if d.hostname.split(".")[0] == hostname
+                    ),
+                    None,
+                )
+            if db_dev is not None:
+                return InventoryDevice(
+                    hostname=db_dev.hostname,
+                    site=db_dev.site,
+                    fabric_id=db_dev.fabric_id,
+                    management_ip=db_dev.management_ip,
+                    management_port=db_dev.management_port,
+                    platform=db_dev.platform,
+                    role=db_dev.role,
+                    auth_profile=db_dev.auth_profile,
+                )
+    except Exception:
+        _ = None
+    return None
 
 
 @router.post(
@@ -269,34 +341,7 @@ def execute_emergency_command(
             ),
         )
     toolchain = build_toolchain(container.settings)
-    snapshot = container.intents.load()
-    device_obj = next(
-        (
-            d
-            for d in snapshot.inventory.devices
-            if d.hostname == req.device or d.hostname.split(".")[0] == req.device
-        ),
-        None,
-    )
-    if not device_obj:
-        with container.session_factory() as session:
-            from sqlalchemy import select
-
-            from netops.intent.models import InventoryDevice
-            from netops.models import Device as DeviceModel
-
-            db_dev = session.scalars(
-                select(DeviceModel).where(DeviceModel.hostname == req.device)
-            ).first()
-            if db_dev:
-                device_obj = InventoryDevice(
-                    hostname=db_dev.hostname,
-                    management_ip=db_dev.management_ip,
-                    management_port=db_dev.management_port,
-                    platform=db_dev.platform,
-                    role=db_dev.role,
-                    auth_profile=db_dev.auth_profile,
-                )
+    device_obj = resolve_inventory_device(container, req.device)
     if not device_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

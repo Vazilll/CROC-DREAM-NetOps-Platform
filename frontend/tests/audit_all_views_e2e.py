@@ -71,11 +71,11 @@ def run_e2e_audit():
         page.wait_for_timeout(1000)
 
         # Verify DevicePage header / tabs
-        assert page.locator('button:has-text("SSH Терминал")').is_visible(), "SSH tab missing in DevicePage"
+        assert page.locator('button:text-is("SSH")').is_visible(), "SSH tab missing in DevicePage"
         print("   DevicePage passport loaded successfully.")
 
         # Switch to SSH tab
-        page.locator('button:has-text("SSH Терминал")').click()
+        page.locator('button:text-is("SSH")').click()
         page.wait_for_timeout(800)
 
         # Check terminal console area
@@ -90,16 +90,11 @@ def run_e2e_audit():
 
         # Check for output stream in terminal pre/div
         terminal_output = page.locator('pre, div.font-mono').all_text_contents()
-        has_output = any("display version" in line or "VRP" in line or "huawei" in line.lower() or "leaf" in line.lower() for line in terminal_output)
+        has_output = any("vrp" in line.lower() or "huawei" in line.lower() for line in terminal_output)
         print(f"   SSH live command executed, response received: {has_output}")
         assert has_output, "Expected terminal command output to appear in live session"
         results["live_ssh_terminal"] = True
 
-        # Test 'Прогноз и What-If' tab on DevicePage
-        page.locator('button:has-text("Прогноз и What-If")').click()
-        page.wait_for_timeout(800)
-        assert page.locator('svg path, h3:has-text("Прогноз")').first.is_visible()
-        print("   Forecast & What-If tab renders telemetry chart.")
         results["device_page"] = True
 
         # Navigate to DiffViewer (Monaco Diff & AI Guard)

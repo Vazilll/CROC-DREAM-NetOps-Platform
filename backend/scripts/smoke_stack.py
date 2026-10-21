@@ -165,11 +165,15 @@ class StackSmoke:
         deadline = time.monotonic() + self._beat_timeout
         while time.monotonic() < deadline:
             for job in self._api.get("/api/v1/jobs?type=DRIFT_SCAN&limit=100"):
-                fresh = datetime.fromisoformat(job["created_at"]) >= self._started
-                if job["created_by"] != "scheduler" or not fresh or job["status"] not in FINISHED:
+                created = datetime.fromisoformat(job["created_at"])
+                if created.tzinfo is None:
+                    # API мог отдать время без пояса: считаем его тем же поясом, что и self._started (UTC)
+                    created = created.replace(tzinfo=self._started.tzinfo)
+                fresh = created >= self._started
+                if job.get("created_by") != "scheduler" or not fresh or job["status"] not in FINISHED:
                     continue
                 if job["status"] != "SUCCESS":
-                    raise SmokeError(f"плановый скан {job['id']} упал: {job['error']}")
+                    raise SmokeError(f"плановый скан {job['id']} упал: {job.get('error')}")
                 return f"Beat поставил скан, воркер его выполнил ({job['id']})"
             time.sleep(3)
         raise SmokeError(f"за {self._beat_timeout:g} с Beat не поставил ни одного скана")

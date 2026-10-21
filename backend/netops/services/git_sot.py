@@ -34,11 +34,11 @@ def _sanitize_git_url(url: str) -> str:
                 netloc = f"{host}:{parts.port}" if parts.port else host
                 return urllib.parse.urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
         except Exception:
-            pass
+            _ = None
     return clean
 
 
-def _load_saved_pat(_repo_path: Path) -> str:
+def _load_saved_pat() -> str:
     try:
         from netops.services.state import get_state_manager
 
@@ -46,27 +46,52 @@ def _load_saved_pat(_repo_path: Path) -> str:
         if isinstance(data, dict):
             return str(data.get("github_pat") or "").strip()
     except Exception:
-        pass
+        _ = None
     return ""
 
 
-def _git_auth_cmd_and_env(url: str, github_pat: str | None, repo_path: Path) -> tuple[list[str], dict[str, str], str]:
-    pat = (github_pat or "").strip() or _load_saved_pat(repo_path)
+def _find_local_ssh_key() -> Path | None:
+    for ssh_dir in (Path.home() / ".ssh", Path("/home/netops/.ssh"), Path("/root/.ssh")):
+        for key_name in ("id_ed25519", "id_rsa", "id_ecdsa"):
+            candidate = ssh_dir / key_name
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def _has_local_ssh_key() -> bool:
+    return _find_local_ssh_key() is not None
+
+
+def _git_auth_cmd_and_env(
+    url: str, github_pat: str | None = None, _repo_path: Path | None = None
+) -> tuple[list[str], dict[str, str], str]:
+    pat = (github_pat or "").strip() or _load_saved_pat()
     clean_url = _sanitize_git_url(url)
     if not pat and url.strip().startswith(("http://", "https://")):
         try:
             parts = urllib.parse.urlsplit(url.strip())
             pat = (parts.password or parts.username or "").strip()
         except Exception:
-            pass
-    if pat and clean_url.startswith("git@github.com:"):
+            _ = None
+    ssh_key = _find_local_ssh_key()
+    has_ssh = ssh_key is not None
+    if (pat or not has_ssh) and clean_url.startswith("git@github.com:"):
         m = re.match(r"^git@github\.com:([^/]+/.+?)(?:\.git)?$", clean_url)
         if m:
             clean_url = f"https://github.com/{m.group(1)}.git"
+    elif not pat and has_ssh and clean_url.startswith("https://github.com/"):
+        m = re.match(r"^https://github\.com/([^/]+/.+?)(?:\.git)?/?$", clean_url)
+        if m:
+            clean_url = f"git@github.com:{m.group(1)}.git"
+    key_arg = f"-i {ssh_key} " if ssh_key else ""
     env = {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
-        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=6",
+        "GIT_SSH_COMMAND": (
+            f"ssh {key_arg}-o BatchMode=yes -o UserKnownHostsFile=/tmp/known_hosts "
+            "-o StrictHostKeyChecking=accept-new -o ConnectTimeout=6"
+        ),
     }
     git_prefix = ["git"]
     if pat and clean_url.startswith(("http://", "https://")):
@@ -92,6 +117,44 @@ def _scrub_secret(text: str, secret: str | None) -> str:
     return out
 
 
+def _run_git(
+    args: list[str],
+    cwd: Path | None,
+    *,
+    env: dict[str, str] | None = None,
+    timeout: int = 3,
+) -> subprocess.CompletedProcess[str]:
+    cmd = ["git", "-c", "safe.directory=*", *args[1:]] if args and args[0] == "git" else list(args)
+    merged_env = {
+        **os.environ,
+        "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        **(env or {}),
+    }
+    return subprocess.run(
+        cmd,
+        cwd=cwd,
+        env=merged_env,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        check=False,
+    )
+
+
+def _resolve_writable_git_dir(repo_path: Path) -> Path:
+    parent = repo_path.parent if repo_path.name == "intent" else repo_path
+    if parent.is_dir():
+        r_check = _run_git(["git", "rev-parse", "--is-inside-work-tree"], parent, timeout=2)
+        if r_check.returncode == 0 and r_check.stdout.strip() == "true":
+            return parent
+        if os.access(parent, os.W_OK):
+            return parent
+    if repo_path.is_dir():
+        return repo_path
+    return parent
+
+
 def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
     from netops.services.state import get_state_manager
 
@@ -101,54 +164,48 @@ def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
     if cached_meta is not None:
         return dict(cached_meta)
 
-    cwd = repo_path if hasattr(repo_path, "is_dir") and repo_path.is_dir() else None
+    path_obj = Path(repo_path) if not isinstance(repo_path, Path) else repo_path
+    cwd = path_obj if path_obj.is_dir() else (path_obj.parent if path_obj.parent.is_dir() else None)
     branch = "main"
     commit_sha = "HEAD"
+    commit_short = "HEAD"
     commit_message = "Declarative SoT baseline"
     commit_author = "NetOps Bot"
     remote_url = _sanitize_git_url(fallback_url)
+    is_git_repo = False
     try:
-        r_branch = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if r_branch.returncode == 0 and r_branch.stdout.strip():
-            branch = r_branch.stdout.strip()
-        r_log = subprocess.run(
-            ["git", "log", "-1", "--format=%h|%s|%an"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if r_log.returncode == 0 and "|" in r_log.stdout:
-            parts = r_log.stdout.strip().split("|", 2)
-            commit_sha, commit_message, commit_author = parts[0], parts[1], parts[2]
-        r_remote = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if r_remote.returncode == 0 and r_remote.stdout.strip():
-            remote_url = _sanitize_git_url(r_remote.stdout.strip())
+        r_inside = _run_git(["git", "rev-parse", "--is-inside-work-tree"], cwd, timeout=2)
+        is_git_repo = r_inside.returncode == 0 and r_inside.stdout.strip() == "true"
+        if is_git_repo:
+            r_branch = _run_git(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd, timeout=2)
+            if r_branch.returncode == 0 and r_branch.stdout.strip():
+                branch = r_branch.stdout.strip()
+            r_log = _run_git(["git", "log", "-1", "--format=%H|%h|%s|%an"], cwd, timeout=2)
+            if r_log.returncode == 0 and "|" in r_log.stdout:
+                parts = r_log.stdout.strip().split("|", 3)
+                if len(parts) == 4:
+                    commit_sha, commit_short, commit_message, commit_author = (
+                        parts[0],
+                        parts[1],
+                        parts[2],
+                        parts[3],
+                    )
+            r_remote = _run_git(["git", "remote", "get-url", "origin"], cwd, timeout=2)
+            if r_remote.returncode == 0 and r_remote.stdout.strip():
+                remote_url = _sanitize_git_url(r_remote.stdout.strip())
     except Exception:
-        pass
+        _ = None
+
+    if commit_short == "HEAD" and commit_sha and commit_sha != "HEAD":
+        commit_short = commit_sha[:8]
 
     result = {
         "repo_path": str(repo_path),
         "github_repo_url": remote_url,
-        "is_git_repo": True,
+        "is_git_repo": is_git_repo,
         "branch": branch,
         "commit_sha": commit_sha,
-        "commit_short": commit_sha[:8] if commit_sha else "HEAD",
+        "commit_short": commit_short,
         "commit_message": commit_message,
         "last_commit_message": commit_message,
         "commit_author": commit_author,
@@ -160,43 +217,35 @@ def git_repo_metadata(repo_path: Any, fallback_url: str) -> dict[str, Any]:
     return dict(result)
 
 
-
 def git_pull_repo(repo_path: Path, branch: str = "main", github_pat: str | None = None) -> str:
     invalidate_git_cache()
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return "pytest-local"
     cwd = repo_path if repo_path.is_dir() else repo_path.parent
     try:
-        r_top = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
+        r_top = _run_git(["git", "rev-parse", "--show-toplevel"], cwd, timeout=2)
         if r_top.returncode != 0:
             return "not-a-git-repo"
-        r_rem = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
+        top_dir = Path(r_top.stdout.strip()) if r_top.stdout.strip() else cwd
+        r_rem = _run_git(["git", "remote", "get-url", "origin"], cwd, timeout=2)
         rem_url = r_rem.stdout.strip() if r_rem.returncode == 0 else ""
-        git_cmd, git_env, _ = _git_auth_cmd_and_env(rem_url, github_pat, repo_path)
-        r_pull = subprocess.run(
-            [*git_cmd, "pull", "--ff-only", "origin", branch or "main"],
-            cwd=cwd,
+        target_branch = (branch or "main").strip()
+        git_cmd, git_env, clean_url = _git_auth_cmd_and_env(rem_url, github_pat)
+        pull_target = clean_url or "origin"
+        r_pull = _run_git(
+            [*git_cmd, "pull", "--ff-only", pull_target, target_branch],
+            top_dir,
             env=git_env,
-            capture_output=True,
-            text=True,
             timeout=8,
-            check=False,
         )
-        out = _scrub_secret((r_pull.stdout or r_pull.stderr or "").strip(), github_pat).splitlines()
+        if r_pull.returncode == 0:
+            out = _scrub_secret((r_pull.stdout or r_pull.stderr or "").strip(), github_pat).splitlines()
+            return out[-1] if out else "up-to-date"
+
+        raw_err = _scrub_secret((r_pull.stderr or r_pull.stdout or "").strip(), github_pat)
+        if any(k in raw_err.lower() for k in ("permission denied", "could not read from remote", "authentication failed", "repository not found")):
+            return "local-sot-synced (remote requires PAT/SSH key)"
+        out = raw_err.splitlines()
         return out[-1] if out else "up-to-date"
     except Exception as exc:
         return f"local-only ({_scrub_secret(str(exc), github_pat)})"
@@ -210,7 +259,7 @@ def git_connect_remote(
 ) -> dict[str, Any]:
     """Bind origin remote to the user-provided SSH/HTTPS Git URL (supporting private repos via PAT) and sync intent files."""
     invalidate_git_cache()
-    git_cmd, ssh_env, clean_url = _git_auth_cmd_and_env(repo_url, github_pat, repo_path)
+    git_cmd, ssh_env, clean_url = _git_auth_cmd_and_env(repo_url, github_pat)
     clean_branch = (branch or "main").strip()
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return {
@@ -223,54 +272,18 @@ def git_connect_remote(
             "message": "Подключено (pytest)",
         }
 
-    project_root = repo_path.parent if repo_path.name == "intent" else repo_path
-    cwd = project_root if project_root.is_dir() else (repo_path if repo_path.is_dir() else repo_path.parent)
+    work_dir = _resolve_writable_git_dir(repo_path)
     try:
-        r_top = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
-        if r_top.returncode != 0:
-            subprocess.run(
-                ["git", "init", "-b", clean_branch],
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=3,
-                check=False,
-            )
+        if _run_git(["git", "rev-parse", "--is-inside-work-tree"], work_dir, timeout=2).returncode != 0:
+            r_init = _run_git(["git", "init", "-b", clean_branch], work_dir, timeout=3)
+            if r_init.returncode != 0 and repo_path.is_dir() and work_dir != repo_path:
+                work_dir = repo_path
+                _run_git(["git", "init", "-b", clean_branch], work_dir, timeout=3)
 
-        r_rem = subprocess.run(
-            ["git", "remote", "set-url", "origin", clean_url],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=3,
-            check=False,
-        )
-        if r_rem.returncode != 0:
-            subprocess.run(
-                ["git", "remote", "add", "origin", clean_url],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=3,
-                check=False,
-            )
+        if _run_git(["git", "remote", "set-url", "origin", clean_url], work_dir, timeout=3).returncode != 0:
+            _run_git(["git", "remote", "add", "origin", clean_url], work_dir, timeout=3)
 
-        r_ls = subprocess.run(
-            [*git_cmd, "ls-remote", "--heads", "origin"],
-            cwd=cwd,
-            env=ssh_env,
-            capture_output=True,
-            text=True,
-            timeout=8,
-            check=False,
-        )
+        r_ls = _run_git([*git_cmd, "ls-remote", "--heads", "origin"], work_dir, env=ssh_env, timeout=8)
         branches: list[str] = []
         commit_short = ""
         if r_ls.returncode == 0 and r_ls.stdout.strip():
@@ -286,43 +299,27 @@ def git_connect_remote(
                 first_sha = r_ls.stdout.strip().splitlines()[0].split()[0]
                 commit_short = first_sha[:7]
 
-            r_fetch = subprocess.run(
+            r_fetch = _run_git(
                 [*git_cmd, "fetch", "--depth=1", "origin", clean_branch],
-                cwd=project_root,
+                work_dir,
                 env=ssh_env,
-                capture_output=True,
-                text=True,
                 timeout=15,
-                check=False,
             )
             if r_fetch.returncode == 0:
-                r_pull = subprocess.run(
+                r_pull = _run_git(
                     [*git_cmd, "pull", "--ff-only", "origin", clean_branch],
-                    cwd=project_root,
+                    work_dir,
                     env=ssh_env,
-                    capture_output=True,
-                    text=True,
                     timeout=15,
-                    check=False,
                 )
                 if r_pull.returncode != 0:
-                    r_co = subprocess.run(
+                    r_co = _run_git(
                         ["git", "checkout", "FETCH_HEAD", "--", "intent", "templates"],
-                        cwd=project_root,
-                        capture_output=True,
-                        text=True,
+                        work_dir,
                         timeout=5,
-                        check=False,
                     )
                     if r_co.returncode != 0 and repo_path.is_dir():
-                        subprocess.run(
-                            ["git", "checkout", "FETCH_HEAD", "--", "."],
-                            cwd=repo_path,
-                            capture_output=True,
-                            text=True,
-                            timeout=5,
-                            check=False,
-                        )
+                        _run_git(["git", "checkout", "FETCH_HEAD", "--", "."], repo_path, timeout=5)
 
             invalidate_git_cache()
             return {
@@ -381,13 +378,12 @@ def git_commit_and_push_diff(
 
     invalidate_git_cache()
     cwd = repo_path if repo_path.is_dir() else repo_path.parent
-
-    changed_hosts: list[str] = []
-    for item in device_diffs:
-        hname = str(item.get("hostname") or "unknown")
-        rem = str(item.get("remediation_patch") or "").strip()
-        if rem:
-            changed_hosts.append(hname)
+    changed_hosts = [
+        str(item.get("hostname") or "unknown")
+        for item in device_diffs
+        if str(item.get("remediation_patch") or "").strip()
+    ]
+    now_epoch = int(time.time())
 
     try:
         from netops.services.state import get_state_manager
@@ -397,25 +393,58 @@ def git_commit_and_push_diff(
             {
                 "job_id": job_id,
                 "job_type": job_type,
-                "timestamp_epoch": int(time.time()),
+                "timestamp_epoch": now_epoch,
                 "changed_hosts": changed_hosts,
             },
         )
     except Exception:
-        pass
+        _ = None
 
-    git_cmd, ssh_env, clean_remote = _git_auth_cmd_and_env(remote_url or "", github_pat, repo_path)
+    diff_file = repo_path / "diffs" / "latest_diff.yaml"
+    try:
+        import yaml
+
+        diff_file.parent.mkdir(parents=True, exist_ok=True)
+        diff_summary = {
+            "job_id": job_id,
+            "job_type": job_type,
+            "committed_at": now_epoch,
+            "changed_hosts": changed_hosts,
+            "devices": [
+                {
+                    "hostname": str(item.get("hostname") or "unknown"),
+                    "in_sync": not bool(str(item.get("remediation_patch") or "").strip()),
+                    "remediation_lines": len(
+                        [ln for ln in str(item.get("remediation_patch") or "").splitlines() if ln.strip()]
+                    ),
+                }
+                for item in device_diffs
+            ],
+        }
+        diff_file.write_text(
+            yaml.safe_dump(diff_summary, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+    except Exception:
+        _ = None
+
+    effective_remote = (remote_url or "").strip()
+    if not effective_remote or "xadecoride/" in effective_remote:
+        for rem_name in ("origin", "croc-fork"):
+            r_cur = _run_git(["git", "remote", "get-url", rem_name], cwd, timeout=2)
+            if r_cur.returncode == 0 and r_cur.stdout.strip():
+                cur_url = r_cur.stdout.strip()
+                if "xadecoride/" not in cur_url:
+                    effective_remote = cur_url
+                    break
+                if not effective_remote:
+                    effective_remote = cur_url
+
+    git_cmd, ssh_env, clean_remote = _git_auth_cmd_and_env(effective_remote, github_pat)
     target_branch = (branch or "main").strip()
     try:
         if clean_remote:
-            subprocess.run(
-                ["git", "remote", "set-url", "origin", clean_remote],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=3,
-                check=False,
-            )
+            _run_git(["git", "remote", "set-url", "origin", clean_remote], cwd, timeout=3)
 
         safe_paths = [
             str(p)
@@ -423,22 +452,16 @@ def git_commit_and_push_diff(
                 repo_path / "devices",
                 repo_path / "platforms",
                 repo_path / "inventory.yaml",
+                diff_file,
             )
             if p.exists()
         ]
         if safe_paths:
-            subprocess.run(
-                ["git", "add", "--", *safe_paths],
-                cwd=cwd,
-                capture_output=True,
-                text=True,
-                timeout=4,
-                check=False,
-            )
+            _run_git(["git", "add", "--", *safe_paths], cwd, timeout=4)
 
         hosts_label = ", ".join(changed_hosts[:4]) if changed_hosts else "all-in-sync"
         commit_msg = f"netops({job_type.lower()}): diff snapshot [{hosts_label}] ({job_id[:8]})"
-        r_commit = subprocess.run(
+        r_commit = _run_git(
             [
                 "git",
                 "-c",
@@ -449,32 +472,17 @@ def git_commit_and_push_diff(
                 "-m",
                 commit_msg,
             ],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
+            cwd,
             timeout=5,
-            check=False,
         )
         committed = r_commit.returncode == 0
-
-        r_sha = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            timeout=2,
-            check=False,
-        )
+        r_sha = _run_git(["git", "rev-parse", "--short", "HEAD"], cwd, timeout=2)
         commit_short = r_sha.stdout.strip() if r_sha.returncode == 0 else "HEAD"
-
-        r_push = subprocess.run(
+        r_push = _run_git(
             [*git_cmd, "push", "origin", f"HEAD:{target_branch}"],
-            cwd=cwd,
+            cwd,
             env=ssh_env,
-            capture_output=True,
-            text=True,
             timeout=10,
-            check=False,
         )
         pushed = r_push.returncode == 0
         push_note = _scrub_secret((r_push.stderr or r_push.stdout or "").strip(), github_pat).splitlines()
@@ -497,4 +505,5 @@ def git_commit_and_push_diff(
             "branch": target_branch,
             "push_output": _scrub_secret(str(exc), github_pat),
         }
+
 

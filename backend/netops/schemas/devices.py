@@ -7,7 +7,14 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from netops.enums import DeviceRole, DeviceStatus, Platform
-from netops.intent.models import DeviceIntent, Hostname, Identifier
+from netops.intent.models import (
+    DeviceIntent,
+    Hostname,
+    Identifier,
+)
+from netops.intent.models import (
+    normalize_stand_dict as _normalize_stand_dict,
+)
 from netops.schemas.common import PartialUpdate
 from netops.schemas.intent import IntentIssueRead
 
@@ -31,15 +38,7 @@ class DeviceCreate(BaseModel):
     proxy_jump: str | None = None
     hardware_specs: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_stand(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if data.get("site") and not data.get("fabric_id"):
-                data["fabric_id"] = data["site"]
-            elif data.get("fabric_id") and not data.get("site"):
-                data["site"] = data["fabric_id"]
-        return data
+    _normalize_stand = model_validator(mode="before")(_normalize_stand_dict)
 
     @field_validator("hostname", mode="before")
     @classmethod
@@ -73,15 +72,7 @@ class DeviceUpdate(PartialUpdate):
     proxy_jump: str | None = None
     hardware_specs: str | None = None
 
-    @model_validator(mode="before")
-    @classmethod
-    def _normalize_stand(cls, data: Any) -> Any:
-        if isinstance(data, dict):
-            if data.get("site") and not data.get("fabric_id"):
-                data["fabric_id"] = data["site"]
-            elif data.get("fabric_id") and not data.get("site"):
-                data["site"] = data["fabric_id"]
-        return data
+    _normalize_stand = model_validator(mode="before")(_normalize_stand_dict)
 
 
 class DeviceRead(BaseModel):
@@ -102,7 +93,13 @@ class DeviceRead(BaseModel):
     unit: int | None = None
     proxy_jump: str | None = None
     hardware_specs: str | None = None
-    oper_status: Literal["UP", "DOWN", "DEGRADED"] = "UP"
+    oper_status: Literal["UP", "DOWN", "DEGRADED", "UNKNOWN"] = "UNKNOWN"
+    vitality_state: Literal["UP", "DOWN"] = "UP"
+    down_reason: str | None = None
+    ai_diagnosis: str | None = None
+    using_backup_fallback: bool = False
+    last_backup_at: str | None = None
+    backup_available: bool = True
     sparkline: list[float] = Field(default_factory=list)
     state_timeline: list[str] = Field(default_factory=list)
     last_checked_at: datetime | None

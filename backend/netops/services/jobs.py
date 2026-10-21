@@ -79,12 +79,15 @@ class JobService:
             query = query.where(Job.status == status)
         return self._session.scalars(query).all()
 
-    def has_active(self, job_type: JobType) -> bool:
-        return bool(
-            self._session.scalar(
-                select(exists().where(Job.type == job_type, Job.status.in_(_ACTIVE_STATUSES)))
+    def has_active(self, job_type: JobType, fabric_id: str | None = None) -> bool:
+        cond = [Job.type == job_type, Job.status.in_(_ACTIVE_STATUSES)]
+        if fabric_id is not None:
+            cond.append(
+                Job.id.in_(
+                    select(JobTarget.job_id).join(Device).where(Device.fabric_id == fabric_id)
+                )
             )
-        )
+        return bool(self._session.scalar(select(exists().where(*cond))))
 
     def create_dry_run(
         self, device_ids: Sequence[int], intent_source: IntentSource, *, requested_by: str
@@ -199,12 +202,14 @@ class JobService:
         return self._submit(job)
 
     # Плановый скан из Celery Beat пропускаем, пока идёт предыдущий.
-    def schedule_drift_scan(self) -> Job | None:
-        if self.has_active(JobType.DRIFT_SCAN):
+    def schedule_drift_scan(self, fabric_id: str | None = None) -> Job | None:
+        if self.has_active(JobType.DRIFT_SCAN, fabric_id):
             logger.info("Skipping scheduled drift scan: a scan is already in progress")
             return None
         try:
-            return self.create_drift_scan(None, requested_by=SCHEDULER_USER)
+            return self.create_drift_scan(
+                None, fabric_id=fabric_id, requested_by=SCHEDULER_USER
+            )
         except ConflictError as exc:
             logger.info("Skipping scheduled drift scan: %s", exc)
             return None
@@ -243,7 +248,10 @@ class JobService:
         self._session.add(job)
         self._session.commit()
         try:
-            self._dispatcher.dispatch(job.id)
+            try:
+                self._dispatcher.dispatch(job.id, job.type)  # type: ignore[call-arg]
+            except TypeError:
+                self._dispatcher.dispatch(job.id)
         except Exception as exc:
             logger.exception("Cannot enqueue job %s", job.id)
             JobRecorder(self._session, job).fail(f"Could not enqueue the job: {exc}")

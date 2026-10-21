@@ -1,29 +1,12 @@
-job_id: 65e4933a-5f67-4f78-a237-4243aee385ec
+job_id: 997db32c-459e-40d5-b687-5a13ce606a28
 job_type: DRIFT_SCAN
-committed_at: 1792605868
-changed_hosts: []
+committed_at: 1792608692
+changed_hosts:
+- spine-2.croc.lab
 devices:
-- hostname: leaf-1.croc.lab
-  in_sync: true
-  remediation_lines: 0
-- hostname: leaf-2.croc.lab
-  in_sync: true
-  remediation_lines: 0
-- hostname: leaf-3.croc.lab
-  in_sync: true
-  remediation_lines: 0
-- hostname: leaf-4.croc.lab
-  in_sync: true
-  remediation_lines: 0
 - hostname: spine-1.croc.lab
   in_sync: true
   remediation_lines: 0
 - hostname: spine-2.croc.lab
-  in_sync: true
-  remediation_lines: 0
-- hostname: spine-3.croc.lab
-  in_sync: true
-  remediation_lines: 0
-- hostname: srv-rocky-1.croc.lab
-  in_sync: true
-  remediation_lines: 0
+  in_sync: false
+  remediation_lines: 34

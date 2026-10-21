@@ -33,20 +33,12 @@ class UserBatchCreate(BaseModel):
 
 
 class UserUpdate(PartialUpdate):
+    _nullable_fields = frozenset({"allowed_system", "expires_in_minutes"})
+
     role: UserRole | None = None
     is_active: bool | None = None
     allowed_system: str | None = Field(default=None, max_length=128)
     expires_in_minutes: int | None = Field(default=None, ge=0, le=525600)
-
-    def _reject_nulls(self) -> UserUpdate:
-        nulls = sorted(
-            name
-            for name in self.model_fields_set
-            if name not in ("allowed_system", "expires_in_minutes") and getattr(self, name) is None
-        )
-        if nulls:
-            raise ValueError(f"Fields cannot be null: {', '.join(nulls)}")
-        return self
 
 
 class UserRead(BaseModel):

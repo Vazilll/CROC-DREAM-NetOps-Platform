@@ -20,11 +20,12 @@ dry-run → deploy с откатом и движок дрейфа по расп�
 | Нормализация конфигов по правилам Ани: сравниваются только управляемые секции, служебные строки и хэши паролей отбрасываются | `netops/network/normalization.py`, `netops/network/diff_filters.yaml` |
 | Post-check по правилам Health-Check: заявленные BGP-соседи в Established с префиксами, порты up/up, потери ping ≤ 20 %, ожидание сходимости BGP | `netops/network/health.py`, `netops/pipeline/deployment.py` |
 | Живой SSH-драйвер (`Scrapli` + `Paramiko` fallback, мультиплексирование `direct-tcpip` через единый SSH Jump-туннель) и файловый эмулятор (`OfflineLab`) | `netops/network/scrapli_driver.py`, `netops/network/ssh_pool.py`, `netops/network/offline.py` |
-| Предиктивная аналитика временных рядов (Statistical Forecast), `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/forecast.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
+| `AI Pre-Flight Guard`, `Chaos Lab` и `NetOps Copilot` | `netops/api/routes/insights.py`, `netops/services/ai_guard.py`, `netops/services/llm.py` |
 | Аварийный пульт (`Emergency Hub`: прямой CLI, экстренный патч, Soft/Hard Reset, `Factory Freeze`) | `netops/api/routes/emergency.py`, `netops/services/freeze.py` |
-| 5-слойный визард инициализации «Матрёшка» (вкл. `5. Сервер` — авто-импорт Containerlab по SSH), GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket-стриминг с одноразовыми билетами | `netops/api/routes/system.py`, `netops/services/bootstrap_discovery.py`, `netops/services/notifier.py` |
-| RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами и областями доступа (`allowed_scopes`) | `netops/api/deps.py`, `netops/services/users.py` |
-| Общий docker-compose: бэкенд, фронтенд, PostgreSQL, Redis, миграции, воркер, Beat, Prometheus, Telegram-бот | `../docker-compose.yml` |
+| 5-слойный визард инициализации «Матрёшка» (вкл. `5. Сервер` — авто-импорт Containerlab по SSH), GitHub SoT (`Pull`/`Push`/Webhook) и WebSocket/SSE-стриминг | `netops/api/routes/system.py`, `netops/services/bootstrap_discovery.py`, `netops/services/notifier.py` |
+| Мульти-стендовая оркестрация (`Stands`), интерактивная L1–L3 коммутация топологии (`Topology`) и двухсостоянийная живучесть (`Vitality` + авто-бэкапы `lab/backups/`) | `netops/api/routes/stands.py`, `netops/api/routes/topology.py`, `netops/services/stands.py`, `netops/services/topology*.py`, `netops/services/vitality.py` |
+| RBAC: `viewer` / `operator` / `admin` / `owner`, управление пользователями, TTL-токенами (`crk_*`), статическим QR-кодом для жюри (`inv_*`) и областями доступа (`allowed_system`) | `netops/api/deps.py`, `netops/services/users.py`, `netops/services/static_viewer.py` |
+| Общий docker-compose: бэкенд, фронтенд, PostgreSQL, Redis, миграции, воркер, Beat, Prometheus, VictoriaMetrics, Grafana, Telegram-бот | `../docker-compose.yml` |
 | CI/CD: линтеры и тесты, сборка образа, smoke-тест всего стека, публикация образа в GHCR | `../.github/workflows/ci-cd.yml`, `scripts/smoke_stack.py` |
 | OpenAPI/Swagger | `/docs`, `/openapi.json` |
 
@@ -39,58 +40,61 @@ backend/
 ├── Dockerfile                       # Контейнерный образ бэкенда и воркеров (uvicorn / celery, offline-resilient)
 ├── pyproject.toml                   # Зависимости проекта и настройки ruff / black / mypy / pytest
 ├── alembic.ini                      # Конфигурация миграций БД
-├── migrations/                      # Версии схемы базы данных Alembic
+├── migrations/                      # Версии схемы базы данных Alembic (0001..0011)
 ├── scripts/
 │   └── smoke_stack.py               # Сквозной smoke-тест Docker-стека
-├── tools/
-│   └── Statistical Forecast_server.py            # Микросервер инференса временных рядов Statistical Forecast
-├── tests/                           # 626 модульных и интеграционных тестов (unit / integration / api)
+├── tests/                           # 677 модульных и интеграционных тестов (unit / integration)
 └── netops/
     ├── main.py                      # Точка входа ASGI (uvicorn netops.main:app)
     ├── settings.py                  # Типизированная конфигурация Pydantic Settings (NETOPS_*) + Runtime Overlay
     ├── constants.py                 # Чтение единых констант и портов из config/constants.yaml
     ├── enums.py                     # Перечисления домена (Platform, DeviceRole, DeviceStatus, JobType, JobStatus, UserRole)
     ├── errors.py                    # Иерархия доменных исключений
-    ├── security.py                  # Хэширование токенов (SHA-256) и криптографические утилиты
+    ├── security.py                  # Хэширование токенов (SHA-256), шифрование паролей стендов и криптографические утилиты
     ├── toolchain.py                 # Фабрика сетевого драйвера: собирает OfflineLab или Scrapli по NETOPS_NETWORK_DRIVER
     ├── api/                         # Слой HTTP / WebSocket контроллеров FastAPI
     │   ├── app.py                   # Фабрика create_app(), CORS, роутеры, /healthz, /readyz, /metrics
     │   ├── deps.py                  # DI-контейнер, аутентификация Bearer/Session, RBAC-гарды и изоляция allowed_system
     │   ├── errors.py                # Глобальные обработчики исключений → JSON (404, 409, 422, 503)
     │   └── routes/
-    │       ├── auth.py              # Вход по сессиям, инвайтам, 6-значным кодам и local-owner-console
+    │       ├── auth.py              # Вход по сессиям, инвайтам (crk_*, inv_*), 6-значным кодам и local-owner-console
     │       ├── config.py            # Публичная конфигурация ролевых портов консолей
-    │       ├── devices.py           # CRUD узлов, /devices/probe, снапшоты, quick-action, reset-golden
-    │       ├── jobs.py              # Запуск dry-run и deploy, лог шагов, вычисление diff
-    │       ├── drift.py             # Внеочередной скан дрейфа, отчёт и авто-ремедиация (remediate)
+    │       ├── devices.py           # CRUD узлов, /devices/probe, снапшоты, бэкапы, quick-action, reset-golden
+    │       ├── intent_edit.py       # Интерактивное чтение и сохранение YAML-интентов узлов с Pre-Flight Lint
+    │       ├── stands.py            # CRUD стендов (/stands), активация, SSH-пробинг, синхронизация и резервное копирование
+    │       ├── topology.py          # Граф L1–L3 топологии (/topology/graph), коммутация линков, чекпоинты и симуляция отказа
+    │       ├── jobs.py              # Запуск dry-run и deploy, SSE-стрим логов (/stream), вычисление diff
+    │       ├── drift.py             # Внеочередной скан дрейфа, отчёт, regular-report и авто-ремедиация (remediate)
     │       ├── telemetry.py         # Единое API телеметрии (/telemetry/series, /collect, /collectors, HTTP SD /sd/snmp и /sd/exporter)
-    │       ├── insights.py          # Прогноз Statistical Forecast (/forecast), гибридный RRF-поиск и сводка по фабрике
-    │       ├── insights_copilot.py  # AI Pre-Flight Guard (/ai-guard), NetOps Copilot (/copilot/chat) и Telegram-сводка
+    │       ├── insights.py          # Гибридный RRF-поиск и сводка по фабрике
+    │       ├── insights_copilot.py  # AI Pre-Flight Guard (/ai-guard), NetOps Copilot (/copilot) и Telegram-сводка
     │       ├── emergency.py         # Аварийный пульт: диагностический CLI (/emergency/command) и журнал аудита (/emergency/audit)
     │       ├── emergency_reset.py   # Экстренный патч (/emergency/patch), Soft Reset и Hard Reset
+    │       ├── owner_telegram.py    # Привязка и верификация Telegram-чата Владельца
     │       ├── system.py            # Визард «Матрёшка» (/system/bootstrap/*), /healthz, /readyz, /metrics, /system/freeze
     │       ├── system_git_integrations.py # GitHub SoT (/git/status, /git/sync, /git/commit-diff, /git/webhook) и статус интеграций
-    │       └── users.py             # Управление пользователями, ролями, TTL-токенами и областями allowed_system
+    │       └── users.py             # Управление пользователями, ролями, TTL-токенами, статическим QR-кодом и allowed_system
     ├── db/                          # Слой подключения к СУБД
     │   ├── base.py                  # Декларативная база SQLAlchemy 2.0
     │   └── session.py               # Движок и фабрика транзакционных сессий
     ├── models/                      # ORM-таблицы базы данных
     │   ├── device.py                # Устройство фабрики (Device)
+    │   ├── stand.py                 # Лабораторный/боевой стенд (Stand) с зашифрованным паролем Jump-хоста
     │   ├── job.py                   # Задача (Job), цели (JobTarget) и лог шагов (JobLog)
     │   ├── snapshot.py              # Снимок конфигурации (ConfigSnapshot)
     │   ├── drift.py                 # Запись обнаруженного дрейфа (DriftRecord)
     │   ├── user.py                  # Пользователь, роль, allowed_system и срок действия токена (User)
     │   └── system_state.py          # Таблица ключ-значение SystemState для Runtime Overlay и аудита
     ├── schemas/                     # Контракты запросов и ответов Pydantic v2
-    │   ├── common.py, devices.py, drift.py, intent.py, jobs.py, users.py
+    │   ├── common.py, devices.py, drift.py, intent.py, jobs.py, stands.py, users.py
     ├── intent/                      # Работа с Git Source of Truth и валидация YAML
-    │   ├── models.py                # Строгие схемы инвентаря, интерфейсов, BGP и ACL (Pydantic)
+    │   ├── models.py                # Строгие схемы инвентаря, платформ, интерфейсов, BGP и ACL (Pydantic)
     │   ├── repository.py            # Чтение и запись файлов в каталоге intent/
     │   ├── lint.py                  # Межузловая проверка фабрики (пересечения IP/подсетей, дубли Router ID и ASN)
     │   └── netbox.py                # Экспорт/импорт топологии в формат NetBox
     ├── network/                     # Сетевые драйверы, пул SSH-сессий, парсеры таблиц и нормализация CLI
     │   ├── base.py                  # Протоколы ConfigCollector, ConfigDeployer, HealthProbe
-    │   ├── ssh_pool.py              # Пул постоянных SSH-сессий (_SESSION_POOL), мьютексы (_DEVICE_LOCKS) и опциональный Jump-канал
+    │   ├── ssh_pool.py              # Пул постоянных SSH-сессий (_SESSION_POOL), мьютексы (_DEVICE_LOCKS) и мультиплексированный Jump-канал
     │   ├── table_parsers.py         # Единый парсер таблиц BGP, интерфейсов и потерь ping по платформам
     │   ├── scrapli_driver.py        # Транзакционный драйвер (Cisco IOS-XE, Arista EOS, Huawei VRP, Eltex, Linux)
     │   ├── offline.py               # Файловый эмулятор сети (OfflineLab) поверх каталога lab/running/
@@ -104,38 +108,30 @@ backend/
     │   ├── planning.py              # Логика DRY_RUN (lint → render → collect → normalize → diff)
     │   ├── deployment.py            # Логика DEPLOY (pre-check → apply commit confirmed → post-check → confirm/rollback)
     │   ├── pipelines.py             # Логика DRIFT_SCAN и DRIFT_REMEDIATE
-    │   └── recorder.py              # Запись прогресса и шагов выполнения в БД
-    ├── services/                    # Прикладные доменные сервисы (все модули < 500 строк)
+    │   └── recorder.py              # Запись прогресса и шагов выполнения в БД + SSE-стрим
+    ├── services/                    # Прикладные доменные сервисы
     │   ├── devices.py, jobs.py, drift.py, users.py, sessions.py
+    │   ├── stands.py, stand_sync.py # Управление стендами, резолвинг Jump-хостов и синхронизация узлов стенда
+    │   ├── static_viewer.py         # Управление многопользовательским статическим QR-токеном для жюри (inv_*)
+    │   ├── vitality.py              # 2-состоянийная живучесть (UP/DOWN), авто-бэкапы в lab/backups/ и ИИ-диагностика причин сбоя
+    │   ├── topology.py, topology_core.py, topology_links.py, topology_commutation.py, topology_resilience.py # L1–L3 граф, коммутация, чекпоинты и SPOF-анализ
     │   ├── retention.py             # Пред-коллекторный чистильщик логов (/var/log/netops/*.log), RAM-кэшей и старых записей БД
     │   ├── state.py                 # Ядро StateManager (Redis + PostgreSQL SystemState + Memory fallback)
     │   ├── state_domains.py         # Доменный миксин StateDomainsMixin (блокировки, кэш телеметрии, шаблонов, Factory Freeze)
-    │   ├── discovery.py             # Оркестратор SSH-зондирования (/devices/probe), онбординга и привязки к Git SoT
-    │   ├── discovery_profiles.py    # Загрузка YAML-профилей платформ (intent/platforms/*.yaml) и детекция баннеров
-    │   ├── discovery_parsers.py     # Парсеры железа, интерфейсов Linux/CLI и соседей LLDP
-    │   ├── discovery_brownfield.py  # Извлечение BGP, ACL и генерация стартового YAML-интента из running-config
-    │   ├── bootstrap.py             # 4-шаговый визард «Матрёшка»
-    │   ├── bootstrap_discovery.py   # Авто-обнаружение узлов стенда (Containerlab / TCP-скан / Offline)
-    │   ├── bootstrap_exposure.py    # Обратный SSH-туннель (ssh -R) для выдачи публичного доступа внешним участникам
-    │   ├── bootstrap_owner.py       # Привязка и восстановление прав Владельца (Owner)
-    │   ├── telemetry.py             # Координатор сбора метрик, резолвинга портов и выбора протокола (gNMI/Exporter/SNMP/SSH)
-    │   ├── telemetry_parsers.py     # Реестр CLI-парсеров PARSER_REGISTRY (CPU, RAM, Uplink, Disk, Load)
-    │   ├── telemetry_prometheus.py  # Прямые запросы временных рядов из Prometheus и VictoriaMetrics
-    │   ├── git_sot.py               # Метаданные Git с 10-секундным TTL-кэшем, git pull и синхронизация
+    │   ├── discovery.py, discovery_profiles.py, discovery_parsers.py, discovery_brownfield.py # Онбординг и извлечение YAML-интента
+    │   ├── bootstrap.py, bootstrap_discovery.py, bootstrap_exposure.py, bootstrap_owner.py # 5-шаговый визард «Матрёшка» и туннели
+    │   ├── protocol_probe.py        # Верификация поддержки протоколов телеметрии (gNMI / SNMP / Exporter / SSH)
+    │   ├── telemetry.py, telemetry_parsers.py, telemetry_prometheus.py # Координатор сбора метрик и реестр парсеров
+    │   ├── git_sot.py               # Метаданные Git с TTL-кэшем, git pull и синхронизация
     │   ├── chaos.py                 # Сценарии Chaos Engineering (инъекция дрейфа, падение портов, сброс к эталону)
-    │   ├── forecast.py              # Расчёт прогнозов временных рядов Statistical Forecast (квантили p10/p50/p90 и ETA отказа)
-    │   ├── ai_guard.py              # Эвристический и ИИ-анализ безопасности патча перед деплоем (Pre-Flight Guard)
-    │   ├── llm.py                   # Интеграция с LLM (OpenRouter / Gemini / локальная эвристика) для объяснения diff и Copilot
-    │   ├── freeze.py                # Глобальный рубильник заморозки изменений (Factory Freeze)
+    │   ├── ai_guard.py, copilot_context.py, llm.py # Эвристический и ИИ-анализ безопасности патча и контекст NetOps Copilot
+    │   ├── freeze.py                # Глобальный и по-стендовый рубильник заморозки изменений (Factory Freeze)
     │   └── notifier.py              # Диспетчер уведомлений в Telegram, реестр доступов и синхронизация токенов
     ├── telemetry/                   # Единый конвейер метрик Prometheus / VictoriaMetrics и Telegram-бот
-    │   ├── collector.py             # Проход сбора (вызывает pre_collect_cleanup -> собирает срезы -> пушит в VictoriaMetrics)
+    │   ├── collector.py             # Проход сбора (pre_collect_cleanup -> шардированный кэш по хостам/фабрикам -> пуш в VictoriaMetrics)
     │   ├── targets.py               # Авто-генерация целей для gnmic, snmp_exporter и node_exporter
     │   ├── metrics.py               # Каталог метрик и сериализация в формат Prometheus
-    │   ├── bot.py                   # Ядро и поллинг Telegram-бота
-    │   ├── bot_auth.py              # Авторизация и привязка чатов Telegram к ролям и стендам
-    │   ├── bot_views.py             # Экраны отчётов (/status, /drift, /jobs, /metrics, /users, /security)
-    │   └── bot_actions.py           # Команды управления (/collect, /scan, /freeze, /ai)
+    │   └── bot.py, bot_auth.py, bot_views.py, bot_actions.py # Поллинг, авторизация и команды Telegram-бота
     └── worker/                      # Конфигурация Celery и периодических задач Beat
         ├── celery_app.py
         └── tasks.py
@@ -246,11 +242,10 @@ python3 backend/scripts/smoke_stack.py
 | GET | `/api/v1/drift/report` | viewer | последняя проверка каждого устройства + число строк отклонений |
 | POST | `/api/v1/drift/remediate` | operator | автоматическое устранение дрейфа (`DRIFT_REMEDIATE`) |
 
-### 3. Предиктивная аналитика Statistical Forecast, AI Guard и Chaos Lab (`routes/insights.py`)
+### 3. AI Guard и Chaos Lab (`routes/insights.py`)
 
 | Метод | URL | Роль | Что делает |
 |---|---|---|---|
-| GET | `/api/v1/forecast` | viewer | прогноз временных рядов Statistical Forecast (`cpu_pct`, `uplink_util_pct`) с квантилями `p10`/`p90` и расчётом времени до пробития SLA (`eta_hours`) |
 | POST | `/api/v1/ai-guard` | viewer | проверка безопасности изменений (`AI Pre-Flight Guard`) перед выкаткой |
 | POST | `/api/v1/chaos` | operator | инъекция тестовых сбоев в стенд (несанкционированный CLI-дрейф, BGP flap, перегрузка линка) |
 | POST | `/api/v1/copilot` | viewer | интерактивный чат с ИИ-ассистентом `NetOps Copilot` с контекстом всей фабрики |
@@ -267,19 +262,27 @@ python3 backend/scripts/smoke_stack.py
 | GET/POST | `/api/v1/emergency/freeze` | viewer/operator | чтение и переключение глобальной блокировки изменений (`Factory Freeze`) |
 | GET | `/api/v1/emergency/audit` | admin | неизменяемый журнал всех аварийных вмешательств (`emergency_audit.jsonl`) |
 
-### 5. Система, Визард «Матрёшка», Git SoT и Пользователи (`routes/system.py`, `routes/users.py`)
+### 5. Стенды, Топология L1–L3, Визард «Матрёшка», Git SoT и Пользователи (`routes/stands.py`, `routes/topology.py`, `routes/system.py`, `routes/users.py`)
 
 | Метод | URL | Роль | Что делает |
 |---|---|---|---|
-| GET | `/api/v1/system/bootstrap/status` | — | статус 4-шагового визарда первичной инициализации («Матрёшка») |
-| POST | `/api/v1/system/bootstrap/step{1..4}` | — | шаги визарда: (1) Telegram Bot + Owner, (2) Режим контура + TCP Probe, (3) Матрица паролей узлов, (4) GitHub SoT |
+| GET/POST | `/api/v1/stands` | viewer/admin | список стендов со статистикой живучести и регистрация нового стенда |
+| PATCH/DELETE | `/api/v1/stands/{slug}` | admin | обновление настроек Jump-хоста/портов и удаление стенда |
+| POST | `/api/v1/stands/{slug}/activate` | admin | переключение активного стенда по умолчанию |
+| POST | `/api/v1/stands/{slug}/discover` | admin | живое SSH-зондирование и авто-синхронизация узлов стенда |
+| POST | `/api/v1/stands/{slug}/backup` | admin | сохранение резервной копии всех узлов стенда на диск (`lab/backups/`) |
+| POST | `/api/v1/stands/sync-all` | admin | полная синхронизация всех стендов с диском и Git SoT |
+| GET | `/api/v1/topology/graph` | viewer | граф L1–L3 топологии стенда с метриками линков и точками отказа (SPOF) |
+| POST | `/api/v1/topology/links` | operator | создание, перекоммутация и отключение линков между портами узлов |
+| GET/POST | `/api/v1/topology/checkpoints` | viewer/operator | контрольные точки топологии и откат графа коммутации |
+| GET | `/api/v1/system/bootstrap/status` | — | статус 5-слойного визарда первичной инициализации («Матрёшка») |
+| POST | `/api/v1/system/bootstrap/configure` | owner | сохранение конфигурации кластера, туннелей, LLM и интервалов опроса |
 | GET | `/api/v1/git/status` | viewer | статус репозитория Intent (ветка, коммит, локальные изменения) |
 | POST | `/api/v1/git/sync` | operator | синхронизация `git pull` / `git push` и автоматический ре-импорт инвентаря |
 | POST | `/api/v1/git/webhook` | — | приёмник GitHub Webhook (`X-Hub-Signature-256`) для авто-запуска `Dry-Run` при `push` |
-| POST | `/api/v1/ws/ticket` | viewer | выдача одноразового криптографического билета (TTL 30 с) для подключения к WebSocket |
-| WS | `/api/v1/ws/stream?ticket=` | viewer | потоковая телеметрия состояния фабрики и задач в реальном времени |
 | GET | `/api/v1/auth/me` | viewer | текущий пользователь, роль, время истечения и разрешённые скоупы |
-| GET/POST/PATCH/DELETE | `/api/v1/users[/{id}]` | admin | управление пользователями, выпуск именных TTL-токенов и привязка к Telegram |
+| GET/POST/PATCH/DELETE | `/api/v1/users[/{id}]` | admin | управление пользователями, выпуск именных TTL-токенов (`crk_*`) и привязка к Telegram |
+| GET/POST | `/api/v1/users/static-viewer[/rotate\|/toggle]` | admin | управление многопользовательским статическим QR-кодом для жюри (`inv_*`) |
 | GET | `/healthz`, `/readyz`, `/metrics` | — | проверки живучести/готовности контейнера и экспорт метрик Prometheus |
 
 ---

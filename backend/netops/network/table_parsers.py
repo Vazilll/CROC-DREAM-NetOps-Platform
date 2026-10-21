@@ -60,26 +60,74 @@ def parse_bgp_table(platform: Platform, output: str) -> dict[str, BgpSessionStat
     return bgp_sessions
 
 
+def _parse_up_down_state(parts: list[str]) -> InterfaceState:
+    status = "up" if parts[2].lower().startswith("up") else "down"
+    proto = "up" if parts[3].lower().startswith("up") else "down"
+    return InterfaceState(status=status, protocol=proto)
+
+
+_HUAWEI_IFACE_PREFIXES = (
+    "GE",
+    "XGigabit",
+    "10GE",
+    "25GE",
+    "40GE",
+    "100GE",
+    "Loop",
+    "Gigabit",
+    "Eth",
+    "Vb",
+    "Vlanif",
+    "Nve",
+)
+_CISCO_IFACE_PREFIXES = (
+    "Gigabit",
+    "TenGigabit",
+    "TwentyFiveGigE",
+    "FortyGigE",
+    "HundredGigE",
+    "Loop",
+    "Port-channel",
+    "Vlan",
+    "Tunnel",
+    "nve",
+)
+_GENERIC_IFACE_PREFIXES = (
+    "ethernet",
+    "loop",
+    "management",
+    "port-channel",
+    "vlan",
+    "vxlan",
+    "gigabit",
+    "tengigabit",
+    "ge-",
+    "xe-",
+    "et-",
+    "lo0",
+    "oob",
+    "bridge",
+)
+
+
 def parse_interface_table(platform: Platform, output: str) -> dict[str, InterfaceState]:
-    """Parse interface brief table from CLI output."""
+    """Parse interface brief table from CLI output across multi-vendor NOS."""
     interfaces: dict[str, InterfaceState] = {}
     if platform == Platform.HUAWEI_VRP:
         for line in output.splitlines():
             parts = line.split()
             if (
                 len(parts) >= 4
-                and parts[0].startswith(("GE", "Loop", "Gigabit", "Eth", "Vb"))
+                and parts[0].startswith(_HUAWEI_IFACE_PREFIXES)
                 and parts[1].lower() != "unassigned"
             ):
-                status = "up" if parts[2].lower().startswith("up") else "down"
-                proto = "up" if parts[3].lower().startswith("up") else "down"
-                interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
+                interfaces[parts[0]] = _parse_up_down_state(parts)
         return interfaces
 
     for line in output.splitlines():
         parts = line.split()
         if platform == Platform.CISCO_IOSXE and len(parts) >= 6:
-            if parts[0].startswith(("Gigabit", "Loop")):
+            if parts[0].startswith(_CISCO_IFACE_PREFIXES):
                 proto = parts[-1].lower()
                 raw_status = " ".join(parts[4:-1]).lower()
                 status = (
@@ -90,10 +138,8 @@ def parse_interface_table(platform: Platform, output: str) -> dict[str, Interfac
                 interfaces[parts[0]] = InterfaceState(
                     status=status, protocol=proto
                 )
-        elif len(parts) >= 4 and parts[0].startswith(("Ethernet", "Loop", "Management")):
-            status = "up" if parts[2].lower().startswith("up") else "down"
-            proto = "up" if parts[3].lower().startswith("up") else "down"
-            interfaces[parts[0]] = InterfaceState(status=status, protocol=proto)
+        elif len(parts) >= 4 and parts[0].lower().startswith(_GENERIC_IFACE_PREFIXES):
+            interfaces[parts[0]] = _parse_up_down_state(parts)
     return interfaces
 
 
@@ -106,6 +152,38 @@ def parse_ping_loss(output: str) -> float:
     return 100.0 if output.strip() else 0.0
 
 
+_LAST_CLI_METRICS_CACHE: dict[str, dict[str, float]] = {}
+
+
+def collect_device_cli_metrics(
+    conn: Any,
+    target: DeviceTarget,
+    *,
+    last_cli_metrics_ts: dict[str, float] | None = None,
+    cli_metrics_dedup_sec: float = 12.0,
+) -> dict[str, float]:
+    """Collect CLI metrics with per-device timestamp deduplication and in-memory caching."""
+    now_ts = time.monotonic()
+    last_m = (last_cli_metrics_ts or {}).get(target.hostname, 0.0)
+    cached_m = _LAST_CLI_METRICS_CACHE.get(target.hostname)
+    if (
+        last_cli_metrics_ts is not None
+        and cached_m is not None
+        and (now_ts - last_m < cli_metrics_dedup_sec)
+    ):
+        return dict(cached_m)
+    if last_cli_metrics_ts is not None:
+        last_cli_metrics_ts[target.hostname] = now_ts
+    cli_metrics = collect_metrics_from_cli(
+        target.hostname,
+        target.platform.value,
+        lambda c: conn.send_command(c).result,
+    )
+    if cli_metrics:
+        _LAST_CLI_METRICS_CACHE[target.hostname] = dict(cli_metrics)
+    return cli_metrics
+
+
 def collect_device_health_tables(
     conn: Any,
     target: DeviceTarget,
@@ -115,32 +193,26 @@ def collect_device_health_tables(
     cli_metrics_dedup_sec: float = 12.0,
 ) -> HealthSnapshot:
     """Collect BGP sessions, interface states, CLI metrics, and ping loss over an open SSH session."""
-    if target.platform == Platform.HUAWEI_VRP:
+    if target.platform == Platform.LINUX_SERVER:
+        bgp_sessions: dict[str, BgpSessionState] = {}
+        interfaces: dict[str, InterfaceState] = {}
+    elif target.platform == Platform.HUAWEI_VRP:
         bgp_out = conn.send_command("display bgp peer").result
         int_out = conn.send_command("display ip interface brief").result
+        bgp_sessions = parse_bgp_table(target.platform, bgp_out)
+        interfaces = parse_interface_table(target.platform, int_out)
     else:
         bgp_out = conn.send_command("show ip bgp summary").result
         int_out = conn.send_command("show ip interface brief").result
+        bgp_sessions = parse_bgp_table(target.platform, bgp_out)
+        interfaces = parse_interface_table(target.platform, int_out)
 
-    bgp_sessions = parse_bgp_table(target.platform, bgp_out)
-    interfaces = parse_interface_table(target.platform, int_out)
-
-    from netops.telemetry.targets import is_externally_collected
-
-    now_ts = time.monotonic()
-    last_m = (last_cli_metrics_ts or {}).get(target.hostname, 0.0)
-    if is_externally_collected(target.hostname) or (
-        last_cli_metrics_ts is not None and (now_ts - last_m < cli_metrics_dedup_sec)
-    ):
-        cli_metrics: dict[str, float] = {}
-    else:
-        if last_cli_metrics_ts is not None:
-            last_cli_metrics_ts[target.hostname] = now_ts
-        cli_metrics = collect_metrics_from_cli(
-            target.hostname,
-            target.platform.value,
-            lambda c: conn.send_command(c).result,
-        )
+    cli_metrics = collect_device_cli_metrics(
+        conn,
+        target,
+        last_cli_metrics_ts=last_cli_metrics_ts,
+        cli_metrics_dedup_sec=cli_metrics_dedup_sec,
+    )
 
     ping_losses: dict[str, float] = {}
     if expected:
@@ -164,4 +236,8 @@ def collect_device_health_tables(
         disk_util_pct=cli_metrics.get("disk_util_pct"),
         network_rate_mbps=cli_metrics.get("network_rate_mbps"),
         load_1m=cli_metrics.get("load_1m"),
+        interface_errors_rate=cli_metrics.get("interface_errors_rate"),
+        fdb_mac_count=cli_metrics.get("fdb_mac_count"),
+        tcp_retransmits_rate=cli_metrics.get("tcp_retransmits_rate"),
+        conntrack_usage_pct=cli_metrics.get("conntrack_usage_pct"),
     )

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from netops.api.deps import ContainerDep, DeviceServiceDep, Operator, SessionDep, Viewer
 from netops.services.telemetry import (
     METRICS,
+    STEP_SECONDS,
     metric_series,
     resolve_device_ports,
 )
@@ -83,16 +84,22 @@ def get_resolved_ports(
 )
 def get_device_telemetry_series(
     hostname: str,
-    _: Viewer,
+    user: Viewer,
+    service: DeviceServiceDep,
     metric: Annotated[str, Query(description="Metric name")] = "cpu_pct",
     points: Annotated[int, Query(ge=1, le=288)] = 24,
     role: Annotated[str, Query(description="Device role")] = "leaf",
 ) -> TelemetrySeriesResponse:
+    from netops.api.routes.devices import assert_device_allowed
+
     if metric not in METRICS:
         raise HTTPException(
             status_code=400,
             detail=f"Unknown metric '{metric}'. Supported: {list(METRICS.keys())}",
         )
+    device = service.get_by_hostname(hostname)
+    if device is not None:
+        assert_device_allowed(device, user.allowed_system)
     data = metric_series(hostname, role, metric, points=points)
     spec = METRICS[metric]
     return TelemetrySeriesResponse(
@@ -105,15 +112,56 @@ def get_device_telemetry_series(
 
 
 @router.get(
+    "/stand-series",
+    summary="Batch telemetry time-series (CPU, RAM, Uplink) for all devices in a stand/fabric",
+)
+def get_stand_telemetry_series(
+    service: DeviceServiceDep,
+    user: Viewer,
+    fabric_id: Annotated[str | None, Query(description="Filter by stand/fabric")] = None,
+    points: Annotated[int, Query(ge=4, le=120)] = 24,
+) -> dict[str, Any]:
+    from netops.api.routes.devices import _iter_allowed_tokens, assert_stand_allowed
+
+    if fabric_id:
+        assert_stand_allowed(fabric_id, fabric_id, user.allowed_system)
+    devices = service.list_devices(
+        limit=5000,
+        fabric_id=fabric_id,
+        allowed_tokens=_iter_allowed_tokens(user.allowed_system),
+    )
+    out: dict[str, dict[str, Any]] = {}
+    for dev in devices:
+        role_str = str(getattr(dev.role, "value", dev.role))
+        plat_str = str(getattr(dev.platform, "value", dev.platform))
+        out[dev.hostname] = {
+            "hostname": dev.hostname,
+            "role": role_str,
+            "platform": plat_str,
+            "fabric_id": dev.fabric_id or "default",
+            "cpu_pct": metric_series(dev.hostname, role_str, "cpu_pct", points=points),
+            "memory_pct": metric_series(dev.hostname, role_str, "memory_pct", points=points),
+            "uplink_util_pct": metric_series(
+                dev.hostname, role_str, "uplink_util_pct", points=points
+            ),
+        }
+    return {"step_seconds": STEP_SECONDS, "devices": out}
+
+
+@router.get(
     "/summary",
     response_model=TelemetrySummaryResponse,
     summary="Overview of telemetry collection status across fabrics",
 )
 def get_telemetry_summary(
     service: DeviceServiceDep,
-    _: Viewer,
+    user: Viewer,
 ) -> TelemetrySummaryResponse:
-    devices = service.list_devices(limit=1000)
+    from netops.api.routes.devices import _iter_allowed_tokens
+
+    devices = service.list_devices(
+        limit=5000, allowed_tokens=_iter_allowed_tokens(user.allowed_system)
+    )
     return TelemetrySummaryResponse(
         active_metrics_count=len(METRICS),
         supported_metrics=sorted(METRICS.keys()),
@@ -128,15 +176,40 @@ def get_telemetry_summary(
 def trigger_telemetry_collection(
     session: SessionDep,
     container: ContainerDep,
-    _: Viewer,
+    user: Viewer,
     include_fabric_label: Annotated[bool, Query()] = True,
+    fabric_id: Annotated[str | None, Query(description="Filter by stand/fabric")] = None,
 ) -> dict[str, Any]:
-    samples = collector.collect(
-        session,
-        toolchain=build_toolchain(container.settings),
-        include_fabric_label=include_fabric_label,
-    )
-    collector.publish(samples, ttl_seconds=container.settings.metrics_interval_seconds * 3)
+    from netops.api.routes.devices import _iter_allowed_tokens, assert_stand_allowed
+
+    if fabric_id:
+        assert_stand_allowed(fabric_id, fabric_id, user.allowed_system)
+    tokens = _iter_allowed_tokens(user.allowed_system)
+    target_fabric = fabric_id
+    if not target_fabric and len(tokens) == 1:
+        target_fabric = tokens[0][1]
+    toolchain = build_toolchain(container.settings)
+    ttl = container.settings.metrics_interval_seconds * 3
+    if target_fabric:
+        dev_samples = collector.device_samples(
+            session,
+            toolchain,
+            max_workers=16,
+            include_fabric_label=include_fabric_label,
+            fabric_id=target_fabric,
+        )
+        collector.publish(
+            dev_samples, ttl_seconds=ttl, merge=True, merge_fabric=target_fabric
+        )
+        samples = collector.platform_samples(session) + dev_samples
+    else:
+        samples = collector.collect(
+            session,
+            toolchain=toolchain,
+            include_fabric_label=include_fabric_label,
+            max_workers=16,
+        )
+        collector.publish(samples, ttl_seconds=ttl)
     return {
         "status": "ok",
         "samples_collected": len(samples),
@@ -152,14 +225,26 @@ class CollectorOverrideRequest(BaseModel):
     "/collectors",
     summary="Last protocol plan: which devices stream via gNMI / SNMP / exporter or stay on SSH",
 )
-def get_collector_plan(service: DeviceServiceDep, _: Viewer) -> dict[str, Any]:
+def get_collector_plan(service: DeviceServiceDep, user: Viewer) -> dict[str, Any]:
+    from netops.api.routes.devices import _iter_allowed_tokens
+
+    tokens = _iter_allowed_tokens(user.allowed_system)
     plan = targets.last_collector_plan()
     overrides = targets.get_protocol_overrides()
     if plan and plan.get("devices"):
+        if tokens:
+            allowed_hosts = {
+                d.hostname
+                for d in service.list_devices(limit=5000, allowed_tokens=tokens)
+            }
+            filtered_devs = {
+                h: v for h, v in plan["devices"].items() if h in allowed_hosts
+            }
+            return {**plan, "devices": filtered_devs, "overrides": overrides}
         return {**plan, "overrides": overrides}
     # Build immediate baseline from DB devices if background refresh hasn't run yet
     devices_map: dict[str, Any] = {}
-    for d in service.list_devices(limit=500):
+    for d in service.list_devices(limit=5000, allowed_tokens=tokens):
         plat = str(getattr(d.platform, "value", d.platform))
         ports = resolve_device_ports(str(d.management_ip), management_port=d.management_port, platform=plat)
         override = overrides.get(d.hostname)

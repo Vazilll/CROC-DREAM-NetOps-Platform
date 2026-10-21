@@ -121,7 +121,7 @@ def _overview_text(session: Session, settings: Settings | None = None) -> str:
     return "\n".join(lines)
 
 
-def _status_text(session: Session, settings: Settings | None = None) -> str:
+def _status_text(session: Session) -> str:
     devices = session.scalars(select(Device).order_by(Device.hostname)).all()
     if not devices:
         return "Устройств в инвентаре нет"
@@ -180,7 +180,7 @@ def _jobs_text(session: Session) -> str:
     return "\n".join(lines)
 
 
-def _metrics_text(session: Session) -> str:
+def _metrics_text() -> str:
     samples, collected_at = collector.latest()
     if collected_at is None:
         return "Метрики ещё не собирались"
@@ -200,7 +200,6 @@ def _summary(samples: Iterable[Sample]) -> list[str]:
     uplinks: list[str] = []
     for sample in samples:
         host = str(sample.labels.get("hostname", ""))
-        peer = f"{host} → {sample.labels.get('peer')}"
         if sample.name == metrics.DEVICES_TOTAL:
             devices += sample.value
         elif sample.name == metrics.DRIFT_DEVICES:
@@ -208,11 +207,11 @@ def _summary(samples: Iterable[Sample]) -> list[str]:
         elif sample.name == metrics.DEVICE_REACHABLE and not sample.value:
             unreachable.append(host)
         elif sample.name == metrics.BGP_SESSION_UP:
-            bgp.append((peer, sample.value))
+            bgp.append((f"{host} → {sample.labels.get('peer')}", sample.value))
         elif sample.name == metrics.INTERFACE_UP:
             ports.append((f"{host} {sample.labels.get('interface')}", sample.value))
         elif sample.name == metrics.PING_LOSS:
-            losses.append((peer, sample.value))
+            losses.append((f"{host} → {sample.labels.get('peer')}", sample.value))
         elif sample.name == metrics.CPU_USAGE:
             cpus.append(f"{host}: {sample.value:g}%")
         elif sample.name == getattr(metrics, "MEMORY_USAGE", "netops_memory_usage_percent"):
@@ -244,7 +243,11 @@ def _ratio(title: str, items: list[tuple[str, float]]) -> str:
         return f"{title}: данных нет"
     down = [name for name, value in items if not value]
     line = f"{title}: {len(items) - len(down)} из {len(items)}"
-    return line + (f", проблемы: {', '.join(down)}" if down else "")
+    if not down:
+        return line
+    shown = ", ".join(down[:20])
+    extra = f" (+{len(down) - 20})" if len(down) > 20 else ""
+    return f"{line}, проблемы: {shown}{extra}"
 
 
 def _users_text(session: Session, settings: Settings | None = None) -> str:

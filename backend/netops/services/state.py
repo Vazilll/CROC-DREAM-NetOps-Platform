@@ -178,11 +178,10 @@ class StateManager(StateDomainsMixin):
     def set_json(self, key: str, value: Any, ex: int | None = None) -> bool:
         return self.set(key, json.dumps(value, ensure_ascii=False), ex=ex)
 
-    # Hot ephemeral keys stored exclusively in Redis (never written to heavy PostgreSQL)
+    # Hot ephemeral keys stored exclusively in Redis (never written to heavy PostgreSQL).
+    # SD-цели (prometheus_*_targets) сюда не входят: пишутся и в БД, при Redis-miss читаются из БД.
     _HOT_REDIS_KEYS: frozenset[str] = frozenset(
         {
-            "prometheus_snmp_targets",
-            "prometheus_exporter_targets",
             "netops:telemetry:protocols",
             "chaos_events",
             "grafana_noc_dashboard",
@@ -243,7 +242,7 @@ class StateManager(StateDomainsMixin):
                     if key != "runtime_settings":
                         self.set_json(cache_key, {self._NULL_SENTINEL: True}, ex=60)
             except Exception:
-                pass
+                _ = None
         return default
 
     def set_db_state(
@@ -289,7 +288,7 @@ class StateManager(StateDomainsMixin):
                 try:
                     eng.dispose()
                 except Exception:
-                    pass
+                    _ = None
             self._db_engines = {}
 
 

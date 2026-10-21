@@ -262,7 +262,15 @@ def _authorize_open_registration_chat(
         if matched_user is None:
             send_fn(
                 chat_id,
-                f"[NetOps Security] Ваш Telegram (ID: {chat_id}) не привязан. Отправьте /verify <КОД>.",
+                f"[NetOps Security] Ваш Telegram (ID: {chat_id}) не привязан и ожидает подтверждения Владельцем. "
+                "Отправьте /verify <6-значный КОД>, выданный Владельцем.",
+            )
+            return False
+
+        if not matched_user.is_active:
+            send_fn(
+                chat_id,
+                f"[NetOps Security] Доступ для {matched_user.username} ожидает подтверждения Владельцем (или заблокирован).",
             )
             return False
 
@@ -281,7 +289,7 @@ def _authorize_open_registration_chat(
     return True
 
 
-def _users_markup(session: Session, settings: Settings | None = None) -> dict[str, Any]:
+def _users_markup(session: Session) -> dict[str, Any]:
     from netops.models import User
 
     rows: list[list[dict[str, str]]] = []
@@ -319,13 +327,20 @@ def _bot_username(settings: Settings | None = None) -> str:
 def _web_urls(settings: Settings | None = None) -> tuple[str, str]:
     host = _public_host(settings)
     owner_port = int(const("console.owner_port"))
-    port = int(getattr(settings, "frontend_port", None) or owner_port) if settings is not None else owner_port
+    local_port = int(getattr(settings, "frontend_port", None) or owner_port) if settings is not None else owner_port
     pub_override = (
         str(getattr(settings, "public_web_url", "") or "").strip().rstrip("/")
         if settings is not None
         else ""
     )
-    return (pub_override or f"http://{host}:{port}"), f"http://127.0.0.1:{port}"
+    if pub_override:
+        pub_url = pub_override
+    elif host not in ("localhost", "127.0.0.1", "::1"):
+        pub_port = int(const("console.role_ports.admin"))
+        pub_url = f"http://{host}:{pub_port}"
+    else:
+        pub_url = f"http://{host}:{local_port}"
+    return pub_url, f"http://127.0.0.1:{local_port}"
 
 
 def _user_card_markup(
@@ -335,7 +350,7 @@ def _user_card_markup(
 
     u = session.scalar(select(User).where(User.username == username))
     if u is None:
-        return _users_markup(session, settings)
+        return _users_markup(session)
     tok = ensure_user_token(session, u, settings)
     pub_base, _ = _web_urls(settings)
     bot_name = _bot_username(settings)
@@ -371,6 +386,13 @@ def _user_card_markup(
     return {"inline_keyboard": rows}
 
 
+def _clear_bound_client_session(session: Session, user: Any) -> None:
+    from netops.services.users import UserService
+
+    UserService._clear_device_binding(user)
+    session.commit()
+
+
 def _answer_verify_or_start(
     session: Session,
     command: str,
@@ -396,11 +418,7 @@ def _answer_verify_or_start(
         settings=settings,
     )
     if is_recover:
-        user.bound_client_id = None
-        user.bound_ip = None
-        user.bound_user_agent = None
-        user.bound_at = None
-        session.commit()
+        _clear_bound_client_session(session, user)
     pub_base, loc_base = _web_urls(settings)
     bot_name = _bot_username(settings)
     return (
@@ -412,9 +430,7 @@ def _answer_verify_or_start(
     )
 
 
-def _answer_recover(
-    session: Session, chat_id: int | None, from_user: dict[str, Any] | None, settings: Any
-) -> str:
+def _answer_recover(session: Session, chat_id: int | None, settings: Any) -> str:
     from netops.models import User
     from netops.services.sessions import issue_invite_code
 
@@ -425,11 +441,7 @@ def _answer_recover(
     )
     if user is None:
         return "Ваш Telegram ещё не привязан к профилю. Сначала выполните /verify <КОД>."
-    user.bound_client_id = None
-    user.bound_ip = None
-    user.bound_user_agent = None
-    user.bound_at = None
-    session.commit()
+    _clear_bound_client_session(session, user)
     role_badge = "owner" if user.username == "owner" else user.role.value
     inv_code = issue_invite_code(user.username)
     pub_base, loc_base = _web_urls(settings)

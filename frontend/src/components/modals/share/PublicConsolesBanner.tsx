@@ -16,15 +16,10 @@ export const PublicConsolesBanner: React.FC<PublicConsolesBannerProps> = ({
   ghostBtnClass,
 }) => (
   <div className="p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-mono">
-    <div className="space-y-0.5 min-w-0">
-      <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
-        <Globe className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-        <span>Единый интернет-шлюз по коду Владельца:</span>
-        <span className="text-emerald-400 truncate">{consoles.publicGateUrl}</span>
-      </div>
-      <div className="text-[10px] text-[var(--text-muted)]">
-        Жюри, операторы и админы заходят по персональной ссылке ниже или вводят выданный вами 6-значный код (1 код = 1 устройство).
-      </div>
+    <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)] min-w-0">
+      <Globe className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+      <span>Шлюз:</span>
+      <span className="text-emerald-400 truncate">{consoles.publicGateUrl}</span>
     </div>
 
     <div className="flex items-center gap-1.5 shrink-0">

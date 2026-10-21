@@ -34,15 +34,16 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
     summary="Холостой прогон: рендер intent, сбор running-config и расчёт диффа",
 )
 def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
-    if user.allowed_system and request.device_ids:
+    if user.allowed_system:
         from sqlalchemy import select
 
         from netops.api.routes.devices import assert_device_allowed
         from netops.models import Device
 
-        for dev in service._session.scalars(
-            select(Device).where(Device.id.in_(request.device_ids))
-        ):
+        stmt = select(Device)
+        if request.device_ids:
+            stmt = stmt.where(Device.id.in_(request.device_ids))
+        for dev in service._session.scalars(stmt):
             assert_device_allowed(dev, user.allowed_system)
     job = service.create_dry_run(
         request.device_ids, request.intent_source, requested_by=user.username
@@ -58,12 +59,8 @@ def start_dry_run(request: DryRunRequest, service: JobServiceDep, user: Operator
 )
 def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator) -> JobAccepted:
     if user.allowed_system:
-        from netops.api.routes.devices import assert_device_allowed
-
         dry_job = service.get(request.job_id)
-        for target in dry_job.targets:
-            if target.device is not None:
-                assert_device_allowed(target.device, user.allowed_system)
+        _assert_job_allowed(dry_job, user.allowed_system)
     job = service.create_deploy(
         request.job_id, confirmed_by=request.confirmed_by, requested_by=user.username
     )
@@ -73,20 +70,60 @@ def start_deploy(request: DeployRequest, service: JobServiceDep, user: Operator)
 @router.get("", response_model=list[JobSummary], summary="История задач")
 def list_jobs(
     service: JobServiceDep,
-    _: Viewer,
+    user: Viewer,
     job_type: Annotated[JobType | None, Query(alias="type")] = None,
     status_filter: Annotated[JobStatus | None, Query(alias="status")] = None,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду/фабрике")] = None,
+    site: Annotated[str | None, Query(description="Фильтр по площадке/стенду")] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[Job]:
-    return list(
+    from netops.api.routes.devices import assert_stand_allowed, device_allowed
+
+    stand = fabric_id or site
+    if user.allowed_system and stand:
+        assert_stand_allowed(fabric_id or "", site, user.allowed_system)
+
+    jobs = list(
         service.list_jobs(job_type=job_type, status=status_filter, limit=limit, offset=offset)
     )
+    if stand:
+        jobs = [
+            j
+            for j in jobs
+            if any(
+                t.device is not None and stand in {t.device.fabric_id, t.device.site}
+                for t in j.targets
+            )
+        ]
+    if user.allowed_system:
+        jobs = [
+            j
+            for j in jobs
+            if j.targets
+            and all(
+                t.device is not None and device_allowed(t.device, user.allowed_system)
+                for t in j.targets
+            )
+        ]
+    return jobs
+
+
+def _assert_job_allowed(job: Job, allowed_system: str | None) -> None:
+    if not allowed_system:
+        return
+    from netops.api.routes.devices import assert_device_allowed
+
+    for target in job.targets:
+        if target.device is not None:
+            assert_device_allowed(target.device, allowed_system)
 
 
 @router.get("/{job_id}", response_model=JobRead, summary="Статус, прогресс и логи задачи")
-def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
-    return service.get(job_id)
+def get_job(job_id: uuid.UUID, service: JobServiceDep, user: Viewer) -> Job:
+    job = service.get(job_id)
+    _assert_job_allowed(job, user.allowed_system)
+    return job
 
 
 @router.get(
@@ -97,10 +134,12 @@ def get_job(job_id: uuid.UUID, service: JobServiceDep, _: Viewer) -> Job:
 def get_job_logs(
     job_id: uuid.UUID,
     service: JobServiceDep,
-    _: Viewer,
+    user: Viewer,
     after_id: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 500,
 ) -> list[JobLog]:
+    if user.allowed_system:
+        _assert_job_allowed(service.get(job_id), user.allowed_system)
     return list(service.logs(job_id, after_id=after_id, limit=limit))
 
 
@@ -111,43 +150,80 @@ def get_job_logs(
 async def stream_job_logs(
     job_id: uuid.UUID,
     service: JobServiceDep,
+    container: ContainerDep,
     request: Request,
-    _: Viewer,
+    user: Viewer,
+    after_id: Annotated[int, Query(ge=0)] = 0,
+    once: Annotated[bool, Query()] = False,
 ) -> StreamingResponse:
-    async def event_generator():
-        last_id = 0
-        first_tick = True
-        while True:
-            if await request.is_disconnected():
-                break
-            if not first_tick:
-                service._session.expire_all()
-            first_tick = False
+    initial_job = service.get(job_id)
+    _assert_job_allowed(initial_job, user.allowed_system)
+    service._session.close()
 
-            job = service.get(job_id)
-            new_logs = list(service.logs(job_id, after_id=last_id, limit=200))
-            for log in new_logs:
-                last_id = max(last_id, log.id)
-                data = {
-                    "id": log.id,
-                    "step": log.step,
-                    "hostname": log.hostname,
-                    "level": log.level.value if hasattr(log.level, "value") else str(log.level),
-                    "message": log.message,
-                    "created_at": log.created_at.isoformat() if log.created_at else None,
-                    "progress": job.progress,
+    def _poll_step(cur_after_id: int) -> tuple[list[tuple[int, dict]], dict | None, dict | None]:
+        from netops.services.jobs import JobService
+
+        with container.session_factory() as poll_session:
+            poll_svc = JobService(poll_session, container.dispatcher)
+            job = poll_svc.get(job_id)
+            new_logs = list(poll_svc.logs(job_id, after_id=cur_after_id, limit=200))
+            items = [
+                (
+                    log.id,
+                    {
+                        "id": log.id,
+                        "step": log.step,
+                        "hostname": log.hostname,
+                        "level": log.level.value if hasattr(log.level, "value") else str(log.level),
+                        "message": log.message,
+                        "created_at": log.created_at.isoformat() if log.created_at else None,
+                        "progress": job.progress,
+                        "status": job.status.value,
+                    },
+                )
+                for log in new_logs
+            ]
+            is_terminal = job.status in {JobStatus.SUCCESS, JobStatus.FAILED}
+            status_ev = (
+                {
+                    "event": "status",
+                    "job_id": str(job.id),
                     "status": job.status.value,
+                    "progress": job.progress,
+                    "error": job.error,
                 }
-                yield f"data: {json.dumps(data)}\n\n"
-
-            if job.status in {JobStatus.SUCCESS, JobStatus.FAILED}:
-                final_data = {
+                if (is_terminal or once)
+                else None
+            )
+            done_ev = (
+                {
                     "event": "done",
                     "status": job.status.value,
                     "progress": job.progress,
                     "error": job.error,
                 }
+                if is_terminal
+                else None
+            )
+            return items, status_ev, done_ev
+
+    async def event_generator():
+        last_id = after_id
+        while True:
+            if await request.is_disconnected():
+                break
+
+            items, status_data, final_data = await asyncio.to_thread(_poll_step, last_id)
+            for log_id, data in items:
+                last_id = max(last_id, log_id)
+                yield f"data: {json.dumps(data)}\n\n"
+
+            if status_data is not None:
+                yield f"event: status\ndata: {json.dumps(status_data)}\n\n"
+            if final_data is not None:
                 yield f"event: done\ndata: {json.dumps(final_data)}\n\n"
+                break
+            if once:
                 break
 
             await asyncio.sleep(0.5)
@@ -169,8 +245,10 @@ async def stream_job_logs(
     summary="Текущий и целевой конфиг, патчи наката и отката",
 )
 def get_job_diff(
-    job_id: uuid.UUID, service: JobServiceDep, container: ContainerDep, _: Viewer
+    job_id: uuid.UUID, service: JobServiceDep, container: ContainerDep, user: Viewer
 ) -> JobDiffRead:
+    job = service.get(job_id)
+    _assert_job_allowed(job, user.allowed_system)
     job = service.get_with_diff(job_id)
     toolchain = None
     devices_out: list[DeviceDiffRead] = []
@@ -191,7 +269,7 @@ def get_job_diff(
                     rendered = toolchain.renderer.render(spec, intent)
                     intended_cfg = toolchain.normalizer.normalize(target.device.platform, rendered)
             except Exception:
-                pass
+                _ = None
         devices_out.append(
             DeviceDiffRead(
                 device_id=target.device_id,
@@ -220,9 +298,11 @@ async def explain_job_diff(
     job_id: uuid.UUID,
     service: JobServiceDep,
     container: ContainerDep,
-    _: Viewer,
+    user: Viewer,
     hostname: Annotated[str | None, Query(description="Filter by specific hostname")] = None,
 ) -> RiskExplanation:
+    job = service.get(job_id)
+    _assert_job_allowed(job, user.allowed_system)
     job = service.get_with_diff(job_id)
     target = None
     if hostname:

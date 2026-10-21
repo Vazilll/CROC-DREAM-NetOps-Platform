@@ -68,7 +68,7 @@ def _parse_ssh_hardware_specs(
                 if cpu_digits:
                     cpu_cores = int(cpu_digits[0])
         except Exception:
-            pass
+            _ = None
 
         ram_gb = None
         try:
@@ -84,7 +84,7 @@ def _parse_ssh_hardware_specs(
                 if m_top:
                     ram_gb = round(float(m_top.group(1)) / 1024, 2)
         except Exception:
-            pass
+            _ = None
 
         disk_gb = None
         try:
@@ -113,7 +113,7 @@ def _parse_ssh_hardware_specs(
                     elif unit == "M":
                         disk_gb = round(val / 1024, 2)
         except Exception:
-            pass
+            _ = None
 
         lines_clean = [
             ln.strip()
@@ -253,7 +253,7 @@ def _parse_linux_interfaces(output: str) -> list[dict[str, Any]]:
                 else:
                     used_nets.append(net)
             except Exception:
-                pass
+                _ = None
         filtered.append(entry)
 
     return filtered
@@ -340,15 +340,20 @@ def _parse_ssh_topology(
             ip_out = _strip_ansi(conn.send_command("ip addr show").result)
             interfaces = [it["name"] for it in _parse_linux_interfaces(ip_out)]
         except Exception:
-            pass
+            _ = None
 
     lldp_cmd = str(cmds.get("lldp_neighbors") or "show lldp neighbors")
     lldp_neighbors: list[dict[str, Any]] = []
     for line in conn.send_command(lldp_cmd).result.splitlines():
         parts = line.split()
         if len(parts) >= 3 and any(p.startswith(lldp_prefixes) for p in parts[:3]):
+            if not parts[0].startswith(lldp_prefixes) and parts[1].startswith(lldp_prefixes):
+                loc_p, nbr = parts[1], parts[0]
+            else:
+                loc_p, nbr = parts[0], parts[1]
+            rem_p = parts[-2] if (len(parts) >= 4 and parts[-1].isdigit()) else parts[-1]
             lldp_neighbors.append(
-                {"local_port": parts[0], "neighbor": parts[1], "remote_port": parts[-1]}
+                {"local_port": loc_p, "neighbor": nbr, "remote_port": rem_p}
             )
     return hostname, interfaces, lldp_neighbors
 
@@ -436,7 +441,7 @@ def _parse_running_interfaces(cfg: str) -> list[dict[str, Any]]:
                         )
                         cur_if["ipv4_address"] = f"{m_mask.group(1)}/{net.prefixlen}"
                     except ValueError:
-                        pass
+                        _ = None
     _flush_parsed_iface(cur_if, parsed_ifaces)
     if has_global_ospf:
         for iface in parsed_ifaces:

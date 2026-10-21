@@ -159,7 +159,7 @@ def parse_linux_load(output: str) -> float | None:
     m = re.search(r"load\s+average[s]?:\s*(\d+(?:\.\d+)?)", output, re.IGNORECASE)
     if m:
         return round(float(m.group(1)), 2)
-    m2 = re.search(r"^\s*(\d+(?:\.\d+)?)\s+\d+(?:\.\d+)?", output)
+    m2 = re.search(r"^\s*(\d+(?:\.\d+)?)\s+\d+(?:\.\d+)?", output, re.MULTILINE)
     if m2:
         return round(float(m2.group(1)), 2)
     return None
@@ -184,7 +184,7 @@ def parse_linux_network_rate(output: str) -> float | None:
 
 def parse_linux_audit_logs(output: str) -> float | None:
     """Parse Linux rsyslog / auditd event count from command output."""
-    m = re.search(r"^\s*(\d+)\s*$", output.strip())
+    m = re.search(r"^\s*(\d+)\s*$", output, re.MULTILINE)
     if m:
         return float(m.group(1))
     lines = [line for line in output.splitlines() if line.strip()]
@@ -196,7 +196,7 @@ def parse_sip_sessions(output: str) -> float | None:
     m = re.search(r"(\d+)\s+active\s+calls?", output, re.IGNORECASE)
     if m:
         return float(m.group(1))
-    m_num = re.search(r"^\s*(\d+)\s*$", output.strip())
+    m_num = re.search(r"^\s*(\d+)\s*$", output, re.MULTILINE)
     if m_num:
         return float(m_num.group(1))
     lines = [
@@ -205,6 +205,63 @@ def parse_sip_sessions(output: str) -> float | None:
         if line.strip() and not line.lower().startswith("state")
     ]
     return float(len(lines))
+
+
+def parse_interface_errors(output: str) -> float | None:
+    """Parse interface CRC/input/output error counters from switch CLI or /proc/net/dev."""
+    nums = [
+        int(m)
+        for m in re.findall(
+            r"(\d+)\s+(?:input\s+errors|output\s+errors|CRC|frame|overrun|dropped)",
+            output,
+            re.IGNORECASE,
+        )
+    ]
+    if nums:
+        return float(sum(nums))
+    m_plain = re.search(r"^\s*(\d+(?:\.\d+)?)\s*$", output, re.MULTILINE)
+    return float(m_plain.group(1)) if m_plain else 0.0
+
+
+def parse_fdb_mac_count(output: str) -> float | None:
+    """Parse learned MAC address count from switch 'show mac address-table' or bridge fdb."""
+    m_tot = re.search(r"Total\s+Mac\s+Addresses.*?:\s*(\d+)", output, re.IGNORECASE)
+    if m_tot:
+        return float(m_tot.group(1))
+    m_plain = re.search(r"^\s*(\d+)\s*$", output, re.MULTILINE)
+    if m_plain:
+        return float(m_plain.group(1))
+    mac_hits = re.findall(r"(?:[0-9a-f]{4}\.[0-9a-f]{4}\.[0-9a-f]{4}|(?:[0-9a-f]{2}:){5}[0-9a-f]{2})", output, re.IGNORECASE)
+    return float(len(mac_hits))
+
+
+def parse_linux_tcp_retransmits(output: str) -> float | None:
+    """Parse TCP RetransSegs from /proc/net/snmp or ss -s output."""
+    m_retrans = re.search(r"retrans:\s*\d+/(\d+)", output, re.IGNORECASE)
+    if m_retrans:
+        return float(m_retrans.group(1))
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip().startswith("Tcp:")]
+    if len(lines) >= 2:
+        headers = lines[0].split()
+        values = lines[1].split()
+        if "RetransSegs" in headers:
+            idx = headers.index("RetransSegs")
+            if idx < len(values):
+                with contextlib.suppress(ValueError):
+                    return float(values[idx])
+    m_plain = re.search(r"^\s*(\d+(?:\.\d+)?)\s*$", output, re.MULTILINE)
+    return float(m_plain.group(1)) if m_plain else 0.0
+
+
+def parse_linux_conntrack(output: str) -> float | None:
+    """Parse Linux nf_conntrack count/max ratio or plain percentage."""
+    line_nums = re.findall(r"^\s*(\d+)\s*$", output, re.MULTILINE)
+    parts = line_nums if line_nums else re.findall(r"\d+", output)
+    if len(parts) >= 2 and int(parts[1]) > 0:
+        return round(min(100.0, (int(parts[0]) / int(parts[1])) * 100.0), 2)
+    if len(parts) == 1:
+        return round(min(100.0, float(parts[0])), 2)
+    return 0.0
 
 
 PARSER_REGISTRY: dict[str, Any] = {
@@ -225,13 +282,17 @@ PARSER_REGISTRY: dict[str, Any] = {
     "parse_linux_network_rate": parse_linux_network_rate,
     "parse_linux_audit_logs": parse_linux_audit_logs,
     "parse_sip_sessions": parse_sip_sessions,
+    "parse_interface_errors": parse_interface_errors,
+    "parse_fdb_mac_count": parse_fdb_mac_count,
+    "parse_linux_tcp_retransmits": parse_linux_tcp_retransmits,
+    "parse_linux_conntrack": parse_linux_conntrack,
     "max_cisco_link_utilization": max_cisco_link_utilization,
-    "max_arista_link_utilization": lambda out: max_percent_column(out, ("Et",)),
+    "max_arista_link_utilization": lambda out: max_percent_column(out, ("Et", "Ma", "Po", "Vl")),
     "max_huawei_link_utilization": lambda out: max_percent_column(
         out, ("GE", "10GE", "25GE", "40GE", "100GE")
     ),
     "max_yadro_link_utilization": lambda out: max_percent_column(out, ("Ethernet", "Eth")),
-    "max_percent_column": lambda out: max_percent_column(out, ("Et", "GE", "Ethernet", "Eth")),
+    "max_percent_column": lambda out: max_percent_column(out, ("Et", "Ma", "GE", "Ethernet", "Eth")),
     "parse_linux_net_util": lambda out: 1.0,
 }
 

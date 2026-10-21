@@ -25,20 +25,56 @@ from netops.schemas.intent import IntentIssueRead
 from netops.services.discovery import (
     bind_device_to_sot,
     execute_device_emergency_action,
-    extract_brownfield_intent,
     remove_device_from_sot,
     run_device_probe,
 )
 
-# Backwards-compatible aliases if imported directly by tests
-_extract_brownfield_intent = extract_brownfield_intent
-_bind_device_to_sot = bind_device_to_sot
-
 router = APIRouter(tags=["devices"])
 
 
-def device_allowed(device: Any, allowed_system: str | None) -> bool:
+def _iter_allowed_tokens(allowed_system: str | None) -> list[tuple[str, str]]:
     if not allowed_system or allowed_system in ("*", "all"):
+        return []
+    tokens: list[tuple[str, str]] = []
+    for raw_token in allowed_system.split(","):
+        token = raw_token.strip().lower()
+        if not token:
+            continue
+        if token in ("*", "all"):
+            return []
+        target = (
+            token.removeprefix("stand:")
+            .removeprefix("fabric:")
+            .removeprefix("site:")
+            .removeprefix("platform:")
+        )
+        tokens.append((token, target))
+    return tokens
+
+
+def stand_allowed(slug: str, site: str | None, allowed_system: str | None) -> bool:
+    tokens = _iter_allowed_tokens(allowed_system)
+    if not tokens:
+        return True
+    slug_l = (slug or "").lower()
+    site_l = (site or "").lower()
+    return any(
+        (slug_l and slug_l in (token, target)) or (site_l and site_l in (token, target))
+        for token, target in tokens
+    )
+
+
+def assert_stand_allowed(slug: str, site: str | None, allowed_system: str | None) -> None:
+    if not stand_allowed(slug, site, allowed_system):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Доступ вашей ссылки ограничен системой {allowed_system}",
+        )
+
+
+def device_allowed(device: Any, allowed_system: str | None) -> bool:
+    tokens = _iter_allowed_tokens(allowed_system)
+    if not tokens:
         return True
     plat = getattr(device, "platform", None)
     plat_str = str(getattr(plat, "value", plat) or "").lower()
@@ -47,11 +83,7 @@ def device_allowed(device: Any, allowed_system: str | None) -> bool:
     fabric = str(getattr(device, "fabric_id", "") or "")
     site = str(getattr(device, "site", "") or "")
 
-    for raw_token in allowed_system.split(","):
-        token = raw_token.strip().lower()
-        if not token or token in ("*", "all"):
-            return True
-        target = token.removeprefix("fabric:").removeprefix("site:").removeprefix("platform:")
+    for token, target in tokens:
         if (
             hostname.lower() == token
             or hostname.lower() == target
@@ -66,6 +98,29 @@ def device_allowed(device: Any, allowed_system: str | None) -> bool:
         ):
             return True
     return False
+
+
+def filter_devices_by_system(devices: Any, allowed_system: str | None) -> list[Any]:
+    items = list(devices)
+    if not allowed_system:
+        return items
+    return [d for d in items if device_allowed(d, allowed_system)]
+
+
+def list_allowed_devices(
+    service: Any,
+    allowed_system: str | None,
+    *,
+    limit: int = 5000,
+    fabric_id: str | None = None,
+) -> list[Device]:
+    """Fetch devices from DB with SQL-level allowed_tokens filter + Python RBAC guard."""
+    rows = service.list_devices(
+        limit=limit,
+        fabric_id=fabric_id,
+        allowed_tokens=_iter_allowed_tokens(allowed_system),
+    )
+    return [d for d in rows if device_allowed(d, allowed_system)]
 
 
 def assert_device_allowed(device: Any, allowed_system: str | None) -> None:
@@ -88,20 +143,17 @@ def list_devices(
     limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[Device]:
-    devices = list(
-        service.list_devices(
-            status=status_filter,
-            role=role,
-            platform=platform,
-            fabric_id=fabric_id,
-            site=site,
-            limit=limit,
-            offset=offset,
-        )
+    devices = service.list_devices(
+        status=status_filter,
+        role=role,
+        platform=platform,
+        fabric_id=fabric_id,
+        site=site,
+        limit=limit,
+        offset=offset,
+        allowed_tokens=_iter_allowed_tokens(principal.allowed_system),
     )
-    if principal.allowed_system:
-        return [d for d in devices if device_allowed(d, principal.allowed_system)]
-    return devices
+    return list(devices)
 
 
 @router.get("/devices/{device_id}", response_model=DeviceDetail, summary="Карточка устройства")
@@ -156,7 +208,7 @@ def get_device(
                 service._session.commit()
                 service._enrich_device(device)
         except Exception:
-            pass
+            _ = None
     detail = DeviceDetail.model_validate(device)
     try:
         detail.intent = container.intents.load_device_intent(device.hostname)
@@ -196,7 +248,8 @@ def create_device(
             raise
         existing = service._session.scalars(
             select(Device).where(
-                (Device.management_ip == str(data.management_ip))
+                (Device.fabric_id == data.fabric_id)
+                & (Device.management_ip == str(data.management_ip))
                 & (Device.management_port == data.management_port)
             )
         ).first() or service._session.scalars(
@@ -294,6 +347,22 @@ def device_emergency_action(
     device = service.get(device_id)
     assert_device_allowed(device, admin.allowed_system)
     return execute_device_emergency_action(device, data, container, admin.username)
+
+
+@router.post(
+    "/devices/{device_id}/restore-backup",
+    summary="Восстановить устройство из последней рабочей резервной копии (.cfg)",
+)
+def restore_device_backup_route(
+    device_id: int,
+    service: DeviceServiceDep,
+    admin: Admin,
+) -> dict[str, Any]:
+    from netops.services.vitality import restore_device_from_backup
+
+    device = service.get(device_id)
+    assert_device_allowed(device, admin.allowed_system)
+    return restore_device_from_backup(device, service._session)
 
 
 @router.post(

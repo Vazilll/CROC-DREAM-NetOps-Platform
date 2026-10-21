@@ -28,15 +28,18 @@ x-backend: &backend
     NETOPS_PROMETHEUS_URL: ${NETOPS_PROMETHEUS_URL:-http://prometheus:9090}
     NETOPS_VICTORIAMETRICS_URL: ${NETOPS_VICTORIAMETRICS_URL:-http://victoriametrics:8428}
     NETOPS_SNMP_COMMUNITY: ${SNMP_COMMUNITY:-}
+    GIT_DISCOVERY_ACROSS_FILESYSTEM: "1"
     # NETOPS_API_TOKENS is intentionally NOT set here: no well-known dev tokens in the stack.
     # Machine API keys (MCP, CI, smoke) go into backend/.env; browsers use HttpOnly cookie sessions.
   volumes:
+    - ./.git:/data/.git
     - ${INTENT_REPO:-./intent}:/data/intent
     - ${TEMPLATES:-./templates}:/data/templates:ro
     - ${OFFLINE_LAB:-./lab/running}:/data/lab
     - ./lab:/app/lab
     - ./monitoring:/data/monitoring:ro
     - ./config:/data/config:ro
+    - ${HOME:-/root}/.ssh:/home/netops/.ssh:ro
   restart: unless-stopped
   depends_on:
     api:
@@ -50,6 +53,7 @@ services:
       POSTGRES_PASSWORD: netops
       POSTGRES_DB: netops
       PGDATA: /var/lib/postgresql/data/pg17
+    command: ["postgres", "-c", "max_connections=300"]
     ports: ["${POSTGRES_PORT:-5433}:5432"]
     volumes: [postgres-data:/var/lib/postgresql/data]
     restart: unless-stopped
@@ -62,7 +66,9 @@ services:
 
   redis:
     image: mirror.gcr.io/library/redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes"]
     ports: ["${REDIS_PORT:-6379}:6379"]
+    volumes: [redis-data:/data]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -86,9 +92,14 @@ services:
       retries: 5
       start_period: 60s
 
-  worker:
+  # Изоляция очередей: деплои/дрифт-ремедиация не ждут телеметрию и фоновые задачи. Порты наружу не пробрасываются.
+  worker-critical:
     <<: *backend
-    command: celery -A netops.worker.tasks worker --loglevel=INFO --concurrency=4
+    command: celery -A netops.worker.tasks worker --loglevel=INFO --concurrency=${WORKER_CRITICAL_CONCURRENCY:-4} -n critical@%h -Q critical,default
+
+  worker-telemetry:
+    <<: *backend
+    command: celery -A netops.worker.tasks worker --loglevel=INFO --concurrency=${WORKER_TELEMETRY_CONCURRENCY:-4} -n telemetry@%h -Q telemetry,background
 
   beat:
     <<: *backend
@@ -125,7 +136,7 @@ services:
 
   # Долговременное хранилище рядов (Prometheus пишет сюда через remote_write).
   victoriametrics:
-    image: mirror.gcr.io/victoriametrics/victoria-metrics:v1.154.0
+    image: mirror.gcr.io/victoriametrics/victoria-metrics:v1.154.1
     command:
       - -storageDataPath=/storage
       - -retentionPeriod=${VM_RETENTION:-12}
@@ -187,6 +198,7 @@ services:
         condition: service_healthy
 
 volumes:
+  redis-data:
   postgres-data:
   prometheus-data:
   vm-data:

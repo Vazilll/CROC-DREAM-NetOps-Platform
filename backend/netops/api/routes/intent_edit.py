@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
 
 import yaml
 from fastapi import APIRouter, HTTPException, status
@@ -105,17 +106,20 @@ def save_intent_source(
             status.HTTP_422_UNPROCESSABLE_ENTITY,
             f"hostname в YAML должен быть {device.hostname!r}",
         )
+    def _failed(items: list[Any]) -> IntentSaveResult:
+        return IntentSaveResult(
+            saved=False,
+            hostname=device.hostname,
+            issues=[IntentIssueOut(source=i.source, field=i.location, message=i.message) for i in items],
+        )
+
     try:
         DeviceIntent.model_validate(raw)
     except Exception as exc:  # pydantic.ValidationError
         issues = issues_from_validation_error(
             exc, source=f"devices/{device.hostname}.yaml", hostname=device.hostname
         )
-        return IntentSaveResult(
-            saved=False,
-            hostname=device.hostname,
-            issues=[IntentIssueOut(source=i.source, field=i.location, message=i.message) for i in issues],
-        )
+        return _failed(issues)
 
     path = _device_path(container.settings.intent_repo_path, device.hostname)
     previous = path.read_text(encoding="utf-8") if path.is_file() else None
@@ -137,9 +141,5 @@ def save_intent_source(
             path.unlink(missing_ok=True)
         else:
             path.write_text(previous, encoding="utf-8")
-        return IntentSaveResult(
-            saved=False,
-            hostname=device.hostname,
-            issues=[IntentIssueOut(source=i.source, field=i.location, message=i.message) for i in issues],
-        )
+        return _failed(issues)
     return IntentSaveResult(saved=True, hostname=device.hostname)

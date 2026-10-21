@@ -6,24 +6,15 @@ import {
   RefreshCw,
   FileCheck2,
   ArrowUpDown,
-  GitCompare,
-  ExternalLink,
   Plus,
-  Zap,
   Trash2,
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type { Device, UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
-import {
-  OperStatusBadge,
-  StatusBadge,
-  ManagementModeBadge,
-  Sparkline,
-  StateTimeline,
-} from '../layout/ui';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 import { AddDeviceModal } from '../modals/AddDeviceModal';
+import { DeviceTableRow } from './device/DeviceTableRow';
 
 interface DeviceListProps {
   devices: Device[];
@@ -96,7 +87,6 @@ export const DeviceList: React.FC<DeviceListProps> = ({
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'hostname', dir: 1 });
   const [selected, setSelected] = useState<number[]>([]);
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [promotingId, setPromotingId] = useState<number | null>(null);
 
   const handleDelete = async (id: number) => {
     try {
@@ -181,9 +171,9 @@ export const DeviceList: React.FC<DeviceListProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
         <div>
           <h1 className="text-lg font-semibold text-[var(--text-primary)] tracking-tight">
-            {locale === 'en' ? 'Hardware Inventory' : 'Инвентарь оборудования'}{' '}
+            {locale === 'en' ? 'Devices' : 'Устройства'}{' '}
             <span className="text-[var(--text-muted)] font-normal text-sm ml-1 font-mono tabular-nums">
-              {rows.length} {locale === 'en' ? 'of' : 'из'} {devices.length}
+              {rows.length} / {devices.length}
             </span>
           </h1>
         </div>
@@ -208,7 +198,10 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           {userRole !== 'viewer' && (
             <>
               <button
-                onClick={onSyncInventory}
+                onClick={() => {
+                  onSyncInventory();
+                  window.dispatchEvent(new Event('netops-git-updated'));
+                }}
                 className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
               >
                 <RefreshCw className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> {t.syncInventoryBtn}
@@ -217,7 +210,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                 onClick={onLintIntent}
                 className={`${btn} border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] text-[var(--text-primary)]`}
               >
-                <FileCheck2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Pre-flight Lint
+                <FileCheck2 className="w-3.5 h-3.5 text-[var(--text-secondary)]" /> Lint
               </button>
             </>
           )}
@@ -241,7 +234,7 @@ export const DeviceList: React.FC<DeviceListProps> = ({
           value={operStatus}
           onChange={setOperStatus}
           label="Oper"
-          options={{ UP: 'UP (Доступен)', DOWN: 'DOWN (Авария)', DEGRADED: 'DEGRADED (Снижен)' }}
+          options={{ UP: 'UP', DOWN: 'DOWN', DEGRADED: 'DEGRADED' }}
         />
         <Filter
           value={status}
@@ -317,172 +310,28 @@ export const DeviceList: React.FC<DeviceListProps> = ({
                     </button>
                   </th>
                 ))}
-                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">Нагрузка (тренд)</th>
-                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">24h Timeline</th>
+                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">Нагрузка</th>
+                <th className="px-3 py-2.5 font-medium hidden xl:table-cell">24ч</th>
                 <th className="px-3 py-2.5 font-medium text-right">Действия</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-[var(--border-subtle)]">
               {rows.map((d) => (
-                <tr
+                <DeviceTableRow
                   key={d.id}
-                  onClick={() => onOpenDevice(d.id)}
-                  className="hover:bg-[var(--bg-elevated)]/40 cursor-pointer transition-colors group"
-                >
-                  {/* Select Checkbox */}
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    <input
-                      type="checkbox"
-                      checked={selected.includes(d.id)}
-                      onChange={() => toggle(d.id)}
-                      className="rounded border-[var(--border-hover)] cursor-pointer accent-zinc-200"
-                    />
-                  </td>
-
-                  {/* Device Hostname & IP */}
-                  <td className="px-3 py-2">
-                    <div className="flex flex-col">
-                      <span className="font-semibold text-[var(--text-primary)] font-mono tracking-tight whitespace-nowrap group-hover:underline">
-                        {d.hostname}
-                      </span>
-                      <span className="font-mono text-[11px] text-[var(--text-muted)]">
-                        {d.management_ip}:{d.management_port}
-                      </span>
-                    </div>
-                  </td>
-
-                  {/* Role Pill */}
-                  <td className="px-3 py-2">
-                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
-                      {ROLE_NAMES[d.role] ?? d.role}
-                    </span>
-                  </td>
-
-                  {/* Platform Pill */}
-                  <td className="px-3 py-2">
-                    <span className="inline-block px-2 py-0.5 rounded text-[11px] font-mono bg-[var(--bg-subtle)] text-[var(--text-muted)] border border-[var(--border-subtle)]">
-                      {PLATFORM_NAMES[d.platform] ?? d.platform}
-                    </span>
-                  </td>
-
-                  {/* Management Mode Pill & Promote button */}
-                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
-                    <div className="flex items-center gap-1.5">
-                      <ManagementModeBadge mode={d.management_mode} />
-                      {d.management_mode === 'MONITORING_ONLY' && (userRole === 'admin' || userRole === 'owner') && (
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            setPromotingId(d.id);
-                            try {
-                              await api.promoteDevice(d.id);
-                              onRefresh();
-                            } catch (err: unknown) {
-                              alert(`Ошибка активации управления: ${getErrorMessage(err)}`);
-                            } finally {
-                              setPromotingId(null);
-                            }
-                          }}
-                          disabled={promotingId === d.id}
-                          className="px-1.5 py-0.5 rounded text-[10px] font-mono bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors flex items-center gap-1 cursor-pointer"
-                          title="Активировать прямое управление (Promote to MANAGED)"
-                        >
-                          <Zap className="w-2.5 h-2.5" />
-                          <span>{promotingId === d.id ? '…' : 'В управление'}</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* Oper Status */}
-                  <td className="px-3 py-2">
-                    <OperStatusBadge status={d.oper_status ?? 'UP'} />
-                  </td>
-
-                  {/* Intent Status */}
-                  <td className="px-3 py-2">
-                    <StatusBadge status={d.status} />
-                  </td>
-
-                  {/* Micro-Sparkline */}
-                  <td className="px-3 py-2 hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
-                    <div className="sparkline" data-testid="sparkline">
-                      {d.sparkline && d.sparkline.length > 0 ? (
-                        <Sparkline
-                          className="sparkline"
-                          points={d.sparkline}
-                          width={76}
-                          height={20}
-                        />
-                      ) : (
-                        <span className="text-[10px] font-mono text-[var(--text-muted)]">N/A</span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* 24h State Timeline */}
-                  <td className="px-3 py-2 hidden xl:table-cell" onClick={(e) => e.stopPropagation()}>
-                    <div className="state-timeline" data-testid="state-timeline">
-                      {d.state_timeline && d.state_timeline.length > 0 ? (
-                        <StateTimeline states={d.state_timeline} />
-                      ) : (
-                        <span className="text-[10px] font-mono text-[var(--text-muted)]">N/A</span>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* 1-Click Action Buttons */}
-                  <td className="px-3 py-2 text-right" onClick={(e) => e.stopPropagation()}>
-                    <div className="inline-flex items-center gap-1 whitespace-nowrap">
-                      <button
-                        onClick={() => onOpenDevice(d.id)}
-                        className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-[var(--border-subtle)]"
-                        title="Открыть карточку устройства"
-                      >
-                        <ExternalLink className="w-3 h-3 text-[var(--text-secondary)]" />
-                        <span className="hidden 2xl:inline">{locale === 'en' ? 'Details' : 'Карточка'}</span>
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          if (onOpenDiff) onOpenDiff(d.id);
-                          else onOpenDevice(d.id);
-                        }}
-                        className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer border border-[var(--border-subtle)]"
-                        title="Сверить конфигурации (Diff)"
-                      >
-                        <GitCompare className="w-3 h-3 text-[var(--text-secondary)]" />
-                        <span className="hidden 2xl:inline">Diff</span>
-                      </button>
-
-                      {userRole !== 'viewer' && (
-                        <button
-                          onClick={() => onRunDryRun([d.id])}
-                          className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer"
-                          title="Запустить префлайт Dry-run"
-                        >
-                          <Play className="w-3 h-3 fill-current" />
-                          <span className="hidden 2xl:inline">Dry-run</span>
-                        </button>
-                      )}
-
-                      {(userRole === 'admin' || userRole === 'owner') && (
-                        <button
-                          onClick={async () => {
-                            if (window.confirm(`${t.deleteConfirm} (${d.hostname})`)) {
-                              await handleDelete(d.id);
-                            }
-                          }}
-                          className="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-400 text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
-                          title={t.deleteDeviceBtn}
-                        >
-                          <Trash2 className="w-3 h-3" />
-                          <span className="hidden 2xl:inline">{t.deleteDeviceBtn}</span>
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
+                  device={d}
+                  selected={selected.includes(d.id)}
+                  onToggleSelect={toggle}
+                  onOpenDevice={onOpenDevice}
+                  onOpenDiff={onOpenDiff}
+                  onRunDryRun={onRunDryRun}
+                  onDelete={handleDelete}
+                  onRefresh={onRefresh}
+                  userRole={userRole}
+                  locale={locale}
+                  deleteConfirmText={t.deleteConfirm}
+                  deleteBtnText={t.deleteDeviceBtn}
+                />
               ))}
               {rows.length === 0 && (
                 <tr>

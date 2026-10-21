@@ -106,16 +106,16 @@ panels:
     fieldConfig:
       defaults:
         min: 0
-        max: 4
+        max: 8
         color: { mode: thresholds }
         thresholds:
           mode: absolute
           steps:
             - { color: "#f43f5e", value: null }
-            - { color: "#f59e0b", value: 2 }
-            - { color: "#10b981", value: 4 }
+            - { color: "#f59e0b", value: 4 }
+            - { color: "#10b981", value: 7 }
     targets:
-      - expr: 'sum(netops_device_reachable{fabric_id=~"$fabric_id"})'
+      - expr: 'sum(max by (fabric_id, hostname) (netops_device_reachable{fabric_id=~"$fabric_id"}))'
         legendFormat: "Online Nodes"
         refId: A
 
@@ -139,7 +139,7 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_device_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_cpu_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"}'
+      - expr: 'max by (fabric_id, hostname) (netops_device_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_cpu_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} CPU"
         refId: A
 
@@ -163,10 +163,10 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_device_memory_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_memory_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"}'
+      - expr: 'max by (fabric_id, hostname) (netops_device_memory_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_memory_usage_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} RAM"
         refId: A
-      - expr: 'netops_device_uplink_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_uplink_util_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"}'
+      - expr: 'max by (fabric_id, hostname) (netops_device_uplink_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or netops_uplink_util_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} Uplink"
         refId: B
 
@@ -187,10 +187,10 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_bgp_session_up{fabric_id=~"$fabric_id", hostname=~"$hostname"}'
+      - expr: 'max by (fabric_id, hostname, peer, state) (netops_bgp_session_up{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} <-> {{peer}} ({{state}})"
         refId: A
-      - expr: 'netops_bgp_prefixes_accepted{fabric_id=~"$fabric_id", hostname=~"$hostname"}'
+      - expr: 'max by (fabric_id, hostname, peer) (netops_bgp_prefixes_accepted{fabric_id=~"$fabric_id", hostname=~"$hostname"})'
         legendFormat: "{{hostname}} Prefixes ({{peer}})"
         refId: B
 
@@ -226,7 +226,7 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_server_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - avg by (hostname) (rate(node_cpu_seconds_total{mode="idle"}[2m]))))'
+      - expr: 'max by (fabric_id, hostname) (netops_server_cpu_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - avg by (hostname) (rate(node_cpu_seconds_total{mode="idle"}[2m])))))'
         legendFormat: "{{hostname}} Server CPU"
         refId: A
 
@@ -250,10 +250,10 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_server_memory_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - (node_memory_MemAvailable_bytes / clamp_min(node_memory_MemTotal_bytes, 1))))'
+      - expr: 'max by (fabric_id, hostname) (netops_server_memory_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - (node_memory_MemAvailable_bytes / clamp_min(node_memory_MemTotal_bytes, 1)))))'
         legendFormat: "{{hostname}} Server RAM"
         refId: A
-      - expr: 'netops_server_disk_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - (node_filesystem_avail_bytes{mountpoint="/"} / clamp_min(node_filesystem_size_bytes{mountpoint="/"}, 1))))'
+      - expr: 'max by (fabric_id, hostname) (netops_server_disk_utilization_percent{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (100 * (1 - (node_filesystem_avail_bytes{mountpoint="/"} / clamp_min(node_filesystem_size_bytes{mountpoint="/"}, 1)))))'
         legendFormat: "{{hostname}} Server Disk"
         refId: B
 
@@ -274,9 +274,9 @@ panels:
           showPoints: never
           spanNulls: true
     targets:
-      - expr: 'netops_server_network_rate_mbps{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (sum by (hostname) (rate(node_network_receive_bytes_total{device!="lo"}[2m]) + rate(node_network_transmit_bytes_total{device!="lo"}[2m])) * 8 / 1000000)'
+      - expr: 'max by (fabric_id, hostname) (netops_server_network_rate_mbps{fabric_id=~"$fabric_id", hostname=~"$hostname"} or (sum by (hostname) (rate(node_network_receive_bytes_total{device!="lo"}[2m]) + rate(node_network_transmit_bytes_total{device!="lo"}[2m])) * 8 / 1000000))'
         legendFormat: "{{hostname}} Net Rate (Mbps)"
         refId: A
-      - expr: 'netops_server_load_1m{fabric_id=~"$fabric_id", hostname=~"$hostname"} or node_load1'
+      - expr: 'max by (fabric_id, hostname) (netops_server_load_1m{fabric_id=~"$fabric_id", hostname=~"$hostname"} or node_load1)'
         legendFormat: "{{hostname}} Load 1m"
         refId: B

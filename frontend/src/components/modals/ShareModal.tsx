@@ -5,14 +5,10 @@ import {
   Users,
   Plus,
   RefreshCw,
-  Unlock,
-  Trash2,
   GitBranch,
-  Send,
   KeyRound,
   CheckCircle2,
   AlertCircle,
-  Ban,
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type {
@@ -26,43 +22,14 @@ import type { Locale } from '../../i18n';
 import { Modal } from '../layout/ui';
 import { PublicConsolesBanner } from './share/PublicConsolesBanner';
 import { ShareIntegrationsTab } from './share/ShareIntegrationsTab';
+import { ShareStaticViewer } from './share/ShareStaticViewer';
+import { ShareUsersTable, TTL_OPTIONS } from './share/ShareUsersTable';
 
 interface ShareModalProps {
   isOpen: boolean;
   onClose: () => void;
   userRole: UserRole;
   locale?: Locale;
-}
-
-const MINTED_STORAGE_KEY = 'netops_minted_tokens_v1';
-
-const TTL_OPTIONS = [
-  { value: 0, label: 'Навсегда' },
-  { value: 60, label: '1 час' },
-  { value: 1440, label: '24 часа' },
-  { value: 10080, label: '7 дней' },
-];
-
-function formatExpiry(expiresAt: string | null | undefined): { label: string; expired: boolean } {
-  if (!expiresAt) return { label: 'Навсегда', expired: false };
-  const diffMs = new Date(expiresAt).getTime() - Date.now();
-  if (Number.isNaN(diffMs)) return { label: 'Навсегда', expired: false };
-  if (diffMs <= 0) return { label: 'Истёк', expired: true };
-  const mins = Math.ceil(diffMs / 60000);
-  if (mins < 60) return { label: `${mins}м`, expired: false };
-  const hours = Math.floor(mins / 60);
-  return hours < 48
-    ? { label: `${hours}ч`, expired: false }
-    : { label: `${Math.ceil(hours / 24)}д`, expired: false };
-}
-
-function loadMintedTokens(): Record<string, string> {
-  try {
-    localStorage.removeItem(MINTED_STORAGE_KEY);
-  } catch {
-    // ignore
-  }
-  return {};
 }
 
 const ctrlClass =
@@ -92,7 +59,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [targetSystem, setTargetSystem] = useState('');
   const [targetTtlMinutes, setTargetTtlMinutes] = useState(0);
   const [batchCount, setBatchCount] = useState(1);
-  const [mintedTokens, setMintedTokens] = useState<Record<string, string>>(loadMintedTokens);
+  const [mintedTokens, setMintedTokens] = useState<Record<string, string>>({});
   const [newlyCreated, setNewlyCreated] = useState<UserInviteCreated[]>([]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState<string | null>(null);
@@ -100,6 +67,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [exposureInfo, setExposureInfo] = useState<BootstrapExposureInfo | null>(null);
   const [deviceTargets, setDeviceTargets] = useState<Array<{ value: string; label: string }>>([]);
   const [syncingGit, setSyncingGit] = useState(false);
+  const [gitRepoInput, setGitRepoInput] = useState('');
+  const [gitBranchInput, setGitBranchInput] = useState('main');
+  const [gitPatInput, setGitPatInput] = useState('');
   const [telegramNote, setTelegramNote] = useState('');
   const [sendingTelegram, setSendingTelegram] = useState(false);
   const [telegramPreview, setTelegramPreview] = useState<string | null>(null);
@@ -115,6 +85,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       const userList = await api.getUsers().catch(() => integData.sessions || []);
       setUsers(userList);
       setIntegrations(integData);
+      const remoteUrl = integData.github_sot?.remote_url || integData.github_sot?.github_repo_url || '';
+      setGitRepoInput((prev) => prev || remoteUrl);
+      setGitBranchInput((prev) => prev || integData.github_sot?.branch || 'main');
       if (bootStatus?.exposure) {
         setExposureInfo(bootStatus.exposure);
       }
@@ -204,7 +177,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       const res = await api.generateUserVerifyCode(u.id!);
       const code = res.verification_code || '';
       handleCopy(`vcode-${u.username}`, code);
-      setStatusMsg(`${u.username}: выдан 6-значный код входа ${code}`);
+      setStatusMsg(`${u.username}: код ${code}`);
     });
   };
 
@@ -222,9 +195,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const handleGitSync = async () => {
     setSyncingGit(true);
     setErrorMsg(null);
+    setStatusMsg(null);
     try {
+      if (isAdmin && gitRepoInput.trim()) {
+        const cfg = await api.connectGitRepo({
+          repo_url: gitRepoInput.trim(),
+          branch: gitBranchInput.trim() || 'main',
+          pat: gitPatInput.trim() || undefined,
+        });
+        const gitInfo = cfg.git as (typeof cfg.git & { connected?: boolean; message?: string }) | undefined;
+        if (gitInfo?.connected === false) {
+          setErrorMsg(gitInfo.message || 'Ошибка подключения к Git');
+          return;
+        }
+      }
       const res = await api.syncGitSot();
-      setStatusMsg(`Git Sync: +${res.sync.created.length} / ~${res.sync.updated.length}`);
+      setStatusMsg(
+        `Git Sync (${res.git?.branch || 'main'}@${res.git?.commit_short || 'HEAD'}): +${res.sync.created.length} / ~${res.sync.updated.length}`
+      );
       await refreshAll();
     } catch (err: unknown) {
       setErrorMsg(getErrorMessage(err, 'Ошибка Git Sync'));
@@ -343,6 +331,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               ghostBtnClass={ghostBtnClass}
             />
 
+            <ShareStaticViewer
+              exposureInfo={exposureInfo}
+              ctrlClass={ctrlClass}
+              ghostBtnClass={ghostBtnClass}
+              primaryBtnClass={primaryBtnClass}
+            />
+
             <div className="p-2.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/40 space-y-2.5">
               <div className="grid grid-cols-2 sm:grid-cols-[1fr_110px_140px_110px_68px_auto] gap-2 items-center">
                 <input
@@ -431,203 +426,30 @@ export const ShareModal: React.FC<ShareModalProps> = ({
               )}
             </div>
 
-            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden">
-              {users.length === 0 ? (
-                <div className="p-6 text-center text-xs text-[var(--text-muted)] font-mono">Список пуст</div>
-              ) : (
-                <div className="divide-y divide-[var(--border-subtle)] max-h-[300px] overflow-y-auto">
-                  {users.map((u) => {
-                    const cachedToken = mintedTokens[u.username] || u.verification_code || null;
-                    const inviteUrl = cachedToken
-                      ? api.buildInviteUrl(cachedToken, exposureInfo?.public_url || undefined)
-                      : null;
-                    const isBound = Boolean(u.bound_client_id);
-                    const isActive = u.is_active !== false;
-                    const copyId = `row-${u.username}`;
-                    const expiryInfo = formatExpiry(u.expires_at);
-
-                    return (
-                      <div
-                        key={u.id ?? u.username}
-                        className={`px-3 py-2 space-y-1 transition-colors ${
-                          !isActive || expiryInfo.expired ? 'opacity-60 bg-[var(--bg-subtle)]' : 'hover:bg-[var(--bg-subtle)]'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-1.5 shrink-0">
-                            <span
-                              className={`w-2 h-2 rounded-full shrink-0 ${
-                                isActive && !expiryInfo.expired ? 'bg-emerald-400' : 'bg-rose-400'
-                              }`}
-                            />
-                            <span className="text-xs font-mono font-semibold text-[var(--text-primary)] truncate w-24 shrink-0">
-                              {u.username}
-                            </span>
-
-                            <select
-                              aria-label={`Роль ${u.username}`}
-                              value={u.role}
-                              disabled={String(u.role) === 'owner' || u.username === 'owner'}
-                              onChange={(e) =>
-                                u.id !== null &&
-                                void runUserAction(() =>
-                                  api.updateUserInvite(u.id!, {
-                                    role: e.target.value as 'viewer' | 'operator' | 'admin',
-                                  }).then(() => undefined)
-                                )
-                              }
-                              className={`w-[82px] shrink-0 px-1.5 h-6 text-[10px] uppercase cursor-pointer ${ctrlClass}`}
-                            >
-                              {(String(u.role) === 'owner' || u.username === 'owner') && (
-                                <option value="owner">OWNER</option>
-                              )}
-                              <option value="viewer">VIEWER</option>
-                              <option value="operator">OPERATOR</option>
-                              <option value="admin">ADMIN</option>
-                            </select>
-
-                            <select
-                              aria-label={`Система ${u.username}`}
-                              value={u.allowed_system || ''}
-                              onChange={(e) =>
-                                u.id !== null &&
-                                void runUserAction(() =>
-                                  api.updateUserInvite(u.id!, {
-                                    allowed_system: e.target.value.trim() || null,
-                                  }).then(() => undefined)
-                                )
-                              }
-                              className={`w-[108px] shrink-0 px-1.5 h-6 text-[10px] cursor-pointer truncate ${ctrlClass}`}
-                            >
-                              {systemTargets.map((sys) => (
-                                <option key={sys.value} value={sys.value}>
-                                  {sys.label}
-                                </option>
-                              ))}
-                            </select>
-
-                            <select
-                              aria-label={`TTL ${u.username}`}
-                              value=""
-                              onChange={(e) =>
-                                u.id !== null &&
-                                e.target.value !== '' &&
-                                void runUserAction(() =>
-                                  api.updateUserInvite(u.id!, {
-                                    expires_in_minutes: Number(e.target.value),
-                                  }).then(() => undefined)
-                                )
-                              }
-                              className={`w-[84px] shrink-0 px-1.5 h-6 text-[10px] cursor-pointer ${ctrlClass}`}
-                            >
-                              <option value="">{expiryInfo.label}</option>
-                              {TTL_OPTIONS.map((opt) => (
-                                <option key={opt.value} value={opt.value}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              onClick={() => void handleGenerateVerifyCode(u)}
-                              className={`h-6 px-2 text-[10px] flex items-center gap-1 ${ghostBtnClass}`}
-                              title="Код верификации для Telegram"
-                            >
-                              <Send className="w-2.5 h-2.5" />
-                              <span>TG-код</span>
-                            </button>
-
-                            <button
-                              onClick={() => inviteUrl && handleCopy(copyId, inviteUrl)}
-                              disabled={!inviteUrl}
-                              className={`h-6 w-20 justify-center text-[10px] flex items-center gap-1 disabled:opacity-30 ${ghostBtnClass}`}
-                            >
-                              {copiedKey === copyId ? <Check className="w-2.5 h-2.5" /> : <Copy className="w-2.5 h-2.5" />}
-                              <span>{copiedKey === copyId ? 'ОК' : 'Ссылка'}</span>
-                            </button>
-
-                            <button
-                              onClick={() => u.id !== null && void runUserAction(() => api.unbindUserDevice(u.id!).then(() => undefined))}
-                              disabled={!isBound}
-                              className={`h-6 px-2 text-[10px] flex items-center gap-1 disabled:opacity-25 ${ghostBtnClass}`}
-                            >
-                              <Unlock className="w-2.5 h-2.5" />
-                              <span>Отвязать</span>
-                            </button>
-
-                            <button
-                              onClick={() =>
-                                u.id !== null &&
-                                void runUserAction(() =>
-                                  api.updateUserInvite(u.id!, { is_active: u.is_active === false }).then(() => undefined)
-                                )
-                              }
-                              className={`h-6 w-20 justify-center text-[10px] flex items-center gap-1 ${ghostBtnClass}`}
-                            >
-                              {isActive ? <Ban className="w-2.5 h-2.5" /> : <CheckCircle2 className="w-2.5 h-2.5" />}
-                              <span>{isActive ? 'Блок' : 'Разблок'}</span>
-                            </button>
-
-                            <button
-                              onClick={() => void handleRotate(u)}
-                              className={`h-6 w-6 flex items-center justify-center ${ghostBtnClass}`}
-                              title="Перевыпустить токен"
-                            >
-                              <RefreshCw className="w-3 h-3" />
-                            </button>
-
-                            <button
-                              onClick={() => u.id !== null && void runUserAction(() => api.deleteUserInvite(u.id!).then(() => undefined))}
-                              className={`h-6 w-6 flex items-center justify-center ${ghostBtnClass}`}
-                              title="Удалить"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 text-[10px] font-mono text-[var(--text-muted)]">
-                          <div className="flex items-center gap-1.5">
-                            <span className="px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
-                              {u.telegram_chat_id
-                                ? `TG: ${u.telegram_username ? `@${u.telegram_username}` : u.telegram_chat_id}`
-                                : 'TG: —'}
-                            </span>
-                            {u.verification_code && (
-                              <>
-                                <button
-                                  onClick={() => handleCopy(`rawcode-${u.username}`, u.verification_code!)}
-                                  className={`px-1.5 py-0.5 text-emerald-400 ${ghostBtnClass}`}
-                                  title="Скопировать 6-значный код для входа через браузер"
-                                >
-                                  {copiedKey === `rawcode-${u.username}` ? 'ОК' : `Код: ${u.verification_code}`}
-                                </button>
-                                <button
-                                  onClick={() => handleCopy(`vcode-${u.username}`, `/verify ${u.verification_code}`)}
-                                  className={`px-1.5 py-0.5 ${ghostBtnClass}`}
-                                  title="Скопировать команду для Telegram-бота"
-                                >
-                                  /verify {u.verification_code}
-                                </button>
-                              </>
-                            )}
-                          </div>
-                          <div className="truncate text-right">
-                            {isBound ? `${u.bound_client_id} · ${u.bound_ip || 'local'}` : 'Свободна'}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+            <ShareUsersTable
+              users={users}
+              mintedTokens={mintedTokens}
+              exposureInfo={exposureInfo}
+              systemTargets={systemTargets}
+              copiedKey={copiedKey}
+              onCopy={handleCopy}
+              runUserAction={runUserAction}
+              onGenerateVerifyCode={handleGenerateVerifyCode}
+              onRotate={handleRotate}
+              ctrlClass={ctrlClass}
+              ghostBtnClass={ghostBtnClass}
+            />
           </div>
         ) : (
           <ShareIntegrationsTab
             integrations={integrations}
+            isAdmin={isAdmin}
+            gitRepoInput={gitRepoInput}
+            setGitRepoInput={setGitRepoInput}
+            gitBranchInput={gitBranchInput}
+            setGitBranchInput={setGitBranchInput}
+            gitPatInput={gitPatInput}
+            setGitPatInput={setGitPatInput}
             syncingGit={syncingGit}
             onGitSync={handleGitSync}
             telegramNote={telegramNote}

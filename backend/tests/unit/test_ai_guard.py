@@ -15,7 +15,6 @@ from netops.settings import Settings
 def mock_settings() -> Settings:
     return Settings(
         _env_file=None,  # type: ignore[call-arg]
-        forecast_url="",  # Use deterministic statistical fallback for predictable unit test results
     )
 
 

@@ -45,6 +45,11 @@ def _is_expired(exp) -> bool:
     return now_aware >= exp_aware
 
 
+def _mint_personal_token() -> str:
+    raw = generate_token()
+    return raw if raw.startswith("crk_") else f"crk_{raw}"
+
+
 class UserService:
     def __init__(self, session: Session, *, reserved_usernames: Collection[str] = ()) -> None:
         self._session = session
@@ -64,15 +69,21 @@ class UserService:
         if cleaned_token.lower().startswith("/verify "):
             cleaned_token = cleaned_token[8:].strip()
 
-        if cleaned_token.startswith("inv_"):
-            from netops.services.sessions import consume_invite_code
+        matched_invite = False
+        matched_vcode = False
+        user: User | None = None
 
-            inv_username = consume_invite_code(cleaned_token)
-            user = (
-                self._session.scalar(select(User).where(User.username == inv_username))
-                if inv_username
-                else None
-            )
+        if cleaned_token.startswith("inv_"):
+            from netops.services.sessions import consume_invite_code, peek_invite_code
+
+            inv_username = peek_invite_code(cleaned_token)
+            if inv_username:
+                user = self._session.scalar(select(User).where(User.username == inv_username))
+                matched_invite = user is not None
+            if user is None:
+                user = self._session.scalar(
+                    select(User).where(User.token_sha256 == hash_token(cleaned_token))
+                )
         elif cleaned_token.isdigit() and len(cleaned_token) == 6:
             candidates = self._session.scalars(
                 select(User).where(
@@ -84,15 +95,25 @@ class UserService:
                 (c for c in candidates if not _is_expired(c.verification_expires_at)),
                 None,
             )
-            if user is not None:
-                user.verification_code = None
-                user.verification_expires_at = None
+            matched_vcode = user is not None
         else:
             user = self._session.scalar(
                 select(User).where(User.token_sha256 == hash_token(cleaned_token))
             )
         if user is None or not user.is_active:
             return None
+
+        if user.username == "static_viewer":
+            if matched_invite:
+                from netops.services.sessions import consume_invite_code
+
+                consume_invite_code(cleaned_token)
+            # Static QR multi-viewer: allow unlimited concurrent devices and IPs to explore with viewer role
+            return ApiPrincipal(
+                username=user.username,
+                role=user.role,
+                allowed_system=user.allowed_system,
+            )
 
         now = utcnow()
         clean_client = (client_id or "").strip()[:128] or None
@@ -112,7 +133,9 @@ class UserService:
             if user.last_seen_at is not None and user.last_seen_at.tzinfo is None
             else user.last_seen_at
         )
-        should_flush_seen = prev_seen is None or (now - prev_seen).total_seconds() >= 60.0
+        should_flush_seen = (
+            prev_seen is None or (now - prev_seen).total_seconds() >= 60.0 or matched_vcode
+        )
 
         if user.bound_client_id is not None:
             if clean_client != user.bound_client_id:
@@ -122,6 +145,9 @@ class UserService:
                     )
                 user.bound_client_id = clean_client
                 should_flush_seen = True
+            if matched_vcode:
+                user.verification_code = None
+                user.verification_expires_at = None
             ip_changed = bool(clean_ip and clean_ip != user.bound_ip)
             ua_changed = bool(clean_ua and clean_ua != user.bound_user_agent)
             if should_flush_seen or ip_changed or ua_changed:
@@ -132,6 +158,9 @@ class UserService:
                     user.bound_user_agent = clean_ua
                 self._session.commit()
         elif clean_client is not None:
+            if matched_vcode:
+                user.verification_code = None
+                user.verification_expires_at = None
             existing_by_client = self._session.scalar(
                 select(User).where(User.bound_client_id == clean_client)
             )
@@ -150,8 +179,16 @@ class UserService:
             user.last_seen_at = now
             self._session.commit()
         elif should_flush_seen:
+            if matched_vcode:
+                user.verification_code = None
+                user.verification_expires_at = None
             user.last_seen_at = now
             self._session.commit()
+
+        if matched_invite:
+            from netops.services.sessions import consume_invite_code
+
+            consume_invite_code(cleaned_token)
 
         return ApiPrincipal(
             username=user.username,
@@ -173,7 +210,7 @@ class UserService:
 
         if data.username in self._reserved:
             raise ConflictError(f"Username {data.username} is used by a configured API token")
-        token = generate_token()
+        token = _mint_personal_token()
         v_code = f"{secrets.randbelow(900000) + 100000}"
         user = User(
             username=data.username,
@@ -215,7 +252,7 @@ class UserService:
                 if candidate not in existing:
                     existing.add(candidate)
                     break
-            token = generate_token()
+            token = _mint_personal_token()
             v_code = f"{secrets.randbelow(900000) + 100000}"
             user = User(
                 username=candidate,
@@ -228,7 +265,11 @@ class UserService:
             )
             self._session.add(user)
             created.append((user, token))
-        self._session.commit()
+        try:
+            self._session.commit()
+        except IntegrityError as exc:
+            self._session.rollback()
+            raise ConflictError("Batch user creation collided with existing username") from exc
         for u, tok in created:
             save_user_token(u.username, tok)
         return created
@@ -247,14 +288,10 @@ class UserService:
         return user
 
     def rotate_token(self, user_id: int) -> tuple[User, str]:
-        user = self.get(user_id)
-        token = generate_token()
+        user = self._get_modifiable_user(user_id)
+        token = _mint_personal_token()
         user.token_sha256 = hash_token(token)
-        user.bound_client_id = None
-        user.bound_ip = None
-        user.bound_user_agent = None
-        user.bound_at = None
-        user.last_seen_at = None
+        self._clear_device_binding(user)
         self._session.commit()
         from netops.services.notifier import save_user_token
 
@@ -262,19 +299,15 @@ class UserService:
         return user, token
 
     def unbind_device(self, user_id: int) -> User:
-        user = self.get(user_id)
-        user.bound_client_id = None
-        user.bound_ip = None
-        user.bound_user_agent = None
-        user.bound_at = None
-        user.last_seen_at = None
+        user = self._get_modifiable_user(user_id)
+        self._clear_device_binding(user)
         self._session.commit()
         return user
 
     def generate_verification_code(self, user_id: int) -> User:
         from datetime import timedelta
 
-        user = self.get(user_id)
+        user = self._get_modifiable_user(user_id)
         code = f"{secrets.randbelow(900000) + 100000}"
         user.verification_code = code
         user.verification_expires_at = utcnow() + timedelta(minutes=15)
@@ -285,9 +318,25 @@ class UserService:
         self._session.delete(self._get_other(user_id, acting_user))
         self._session.commit()
 
-    # Админ не может понизить, заблокировать или удалить сам себя.
-    def _get_other(self, user_id: int, acting_user: str) -> User:
+    def _get_modifiable_user(self, user_id: int) -> User:
         user = self.get(user_id)
+        if user.username in ("owner", "static_viewer"):
+            raise ConflictError(
+                f"System account '{user.username}' cannot be modified or deleted"
+            )
+        return user
+
+    @staticmethod
+    def _clear_device_binding(user: User) -> None:
+        user.bound_client_id = None
+        user.bound_ip = None
+        user.bound_user_agent = None
+        user.bound_at = None
+        user.last_seen_at = None
+
+    # Админ не может понизить, заблокировать или удалить сам себя или системные аккаунты.
+    def _get_other(self, user_id: int, acting_user: str) -> User:
+        user = self._get_modifiable_user(user_id)
         if user.username == acting_user:
             raise ConflictError("You cannot change the role, status or existence of your account")
         return user

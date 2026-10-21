@@ -159,19 +159,19 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
   if (!open) return null;
 
   return (
-    <aside className="fixed right-0 top-13 bottom-0 w-full sm:w-[400px] max-w-full z-50 bg-white dark:bg-[#0a0b0f] border-l border-slate-200 dark:border-white/[0.08] flex flex-col shadow-2xl backdrop-blur-md pb-[env(safe-area-inset-bottom,0px)]">
+    <aside className="fixed right-0 top-13 bottom-0 w-full sm:w-[400px] max-w-full z-50 bg-[var(--bg-card)] border-l border-[var(--border-subtle)] flex flex-col shadow-2xl backdrop-blur-md pb-[env(safe-area-inset-bottom,0px)]">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 h-12 border-b border-slate-200 dark:border-white/[0.06] bg-slate-50 dark:bg-[#10121a]/80">
+      <div className="flex items-center justify-between px-4 h-12 border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/80">
         <div className="flex items-center gap-2">
-          <Sparkles className="w-4 h-4 text-indigo-500 dark:text-cyan-400" />
-          <span className="text-sm font-semibold text-slate-900 dark:text-white tracking-tight">{t.copilotTitle}</span>
-          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200/70 dark:bg-white/[0.05] text-slate-700 dark:text-zinc-400 border border-slate-300 dark:border-white/[0.06]">
+          <Sparkles className="w-4 h-4 text-cyan-400" />
+          <span className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">{t.copilotTitle}</span>
+          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-elevated)] text-[var(--text-secondary)] border border-[var(--border-subtle)]">
             {activeScreen || 'dashboard'}
           </span>
         </div>
         <button
           onClick={onClose}
-          className="text-slate-400 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-white transition-colors p-1 rounded hover:bg-slate-100 dark:hover:bg-white/[0.05] cursor-pointer"
+          className="text-[var(--text-muted)] hover:text-[var(--text-primary)] transition-colors p-1 rounded hover:bg-[var(--bg-elevated)] cursor-pointer"
           title={locale === 'en' ? 'Close (Esc)' : 'Закрыть (Esc)'}
         >
           <X className="w-4 h-4" />
@@ -179,22 +179,13 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
       </div>
 
       {/* Messages Scroll Area */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs bg-slate-100/60 dark:bg-transparent">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs bg-transparent">
         {messages.length === 0 && (
           <div className="space-y-3">
-            {locale === 'en' ? (
-              <p className="text-slate-600 dark:text-zinc-400 leading-relaxed">
-                Contextual AI assistant for the CLOS fabric. Analyzes current screen (
-                <span className="text-indigo-600 dark:text-cyan-300 font-mono font-semibold">{activeScreen}</span>), Git SoT state,
-                drift, and telemetry forecasts.
-              </p>
-            ) : (
-              <p className="text-slate-600 dark:text-zinc-400 leading-relaxed">
-                Контекстный AI-ассистент фабрики CLOS. Анализирует текущий экран (
-                <span className="text-indigo-600 dark:text-cyan-300 font-mono font-semibold">{activeScreen}</span>), состояние Git SoT,
-                дрейф и прогнозы телеметрии.
-              </p>
-            )}
+            <p className="text-slate-600 dark:text-zinc-400">
+              <Sparkles className="w-3.5 h-3.5 inline mr-1.5" />
+              <span className="text-indigo-600 dark:text-cyan-300 font-mono font-semibold">{activeScreen}</span>
+            </p>
             <div className="space-y-1.5">
               <span className="text-[11px] font-semibold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
                 {locale === 'en' ? 'Quick Prompts' : 'Быстрые вопросы'}
@@ -217,8 +208,8 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
             <div
               className={`inline-block max-w-[90%] text-left whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 leading-relaxed shadow-xs ${
                 m.role === 'user'
-                  ? 'bg-indigo-600 text-white rounded-tr-xs shadow-indigo-500/10'
-                  : 'bg-white dark:bg-[#121520] text-slate-800 dark:text-zinc-200 border border-slate-200/80 dark:border-white/[0.07] rounded-tl-xs'
+                  ? 'bg-cyan-600 text-white rounded-tr-xs'
+                  : 'bg-[var(--bg-elevated)] text-[var(--text-primary)] border border-[var(--border-subtle)] rounded-tl-xs'
               }`}
             >
               <div>{m.text}</div>
@@ -277,7 +268,7 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
           e.preventDefault();
           void send(input);
         }}
-        className="p-3 border-t border-slate-200 dark:border-white/[0.06] bg-slate-50 dark:bg-[#0c0e14] flex gap-2"
+        className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-main)] flex gap-2"
       >
         <input
           value={input}
@@ -289,11 +280,11 @@ export const CopilotPanel: React.FC<CopilotPanelProps> = ({
                 : 'Вопрос про выбранное устройство…'
               : t.copilotPlaceholder
           }
-          className="flex-1 bg-white dark:bg-zinc-900 border border-slate-300 dark:border-white/[0.08] rounded-xl px-3.5 py-2 text-xs text-slate-900 dark:text-zinc-200 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500 dark:focus:border-cyan-500/60 transition-colors"
+          className="flex-1 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-xl px-3.5 py-2 text-xs text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-cyan-500/60 transition-colors"
         />
         <button
           disabled={busy || !input.trim()}
-          className="px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-medium disabled:opacity-40 cursor-pointer transition-colors flex items-center justify-center shadow-xs"
+          className="px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-medium disabled:opacity-40 cursor-pointer transition-colors flex items-center justify-center shadow-xs"
           title={locale === 'en' ? 'Send prompt' : 'Отправить запрос'}
         >
           <Send className="w-3.5 h-3.5" />

@@ -1,17 +1,18 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { allConsolePorts, api, getErrorMessage, isLocalOwnerConsole, rolePortList } from './api';
-import type { Device, JobSummary, UserRole } from './api';
-import { Header } from './components/layout/Header';
-import type { AppTheme } from './components/layout/Header';
+import { Suspense, lazy, useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import { api, isLocalOwnerConsole, rolePortList, type StandRead, type UserRole } from './api';
+import { Header, type AppTheme } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { Dashboard } from './components/views/Dashboard';
+import { TopologyMap } from './components/charts/TopologyMap';
 import { CommandPalette } from './components/layout/CommandPalette';
 import { MobileNav } from './components/layout/MobileNav';
-import { translations } from './i18n';
-import type { Locale } from './i18n';
-import { CheckCircle2, AlertCircle, Info, X } from 'lucide-react';
+import { AppOverlays } from './components/layout/AppOverlays';
+import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
+import { useNetopsPolling } from './hooks/useNetopsPolling';
+import { translations, type Locale } from './i18n';
+import { ToastNotification } from './components/layout/ToastNotification';
 
-// Lazy-loaded secondary views and overlays to isolate heavy dependencies and code-split bundles
+// Lazy-loaded secondary views to isolate heavy dependencies and code-split bundles
 const DevicePage = lazy(() => import('./components/views/DevicePage').then((m) => ({ default: m.DevicePage })));
 const DeviceList = lazy(() => import('./components/views/DeviceList').then((m) => ({ default: m.DeviceList })));
 const JobsView = lazy(() => import('./components/views/JobsView').then((m) => ({ default: m.JobsView })));
@@ -19,76 +20,20 @@ const DiffViewer = lazy(() => import('./components/views/DiffViewer').then((m) =
 const DriftView = lazy(() => import('./components/views/DriftView').then((m) => ({ default: m.DriftView })));
 const ChaosLabView = lazy(() => import('./components/views/ChaosLabView').then((m) => ({ default: m.ChaosLabView })));
 const EmergencyHub = lazy(() => import('./components/views/EmergencyHub').then((m) => ({ default: m.EmergencyHub })));
-const CopilotPanel = lazy(() => import('./components/modals/CopilotPanel').then((m) => ({ default: m.CopilotPanel })));
-const DryRunModal = lazy(() => import('./components/modals/DryRunModal').then((m) => ({ default: m.DryRunModal })));
-const WelcomeModal = lazy(() => import('./components/modals/WelcomeModal').then((m) => ({ default: m.WelcomeModal })));
-const ShareModal = lazy(() => import('./components/modals/ShareModal').then((m) => ({ default: m.ShareModal })));
-const ShortcutsModal = lazy(() => import('./components/modals/ShortcutsModal').then((m) => ({ default: m.ShortcutsModal })));
-const AccessCodeModal = lazy(() => import('./components/modals/AccessCodeModal').then((m) => ({ default: m.AccessCodeModal })));
 
 function LoadingFallback() {
   return (
     <div className="flex items-center justify-center p-16 text-zinc-500 font-mono text-xs">
-      <div className="w-5 h-5 rounded-full border-2 border-cyan-500/20 border-t-cyan-400 animate-spin mr-3" />
+      <div className="w-5 h-5 rounded-full border-2 border-zinc-700 border-t-zinc-300 animate-spin mr-3" />
       <span>Загрузка модуля...</span>
     </div>
   );
 }
 
-function areDevicesEqual(a: Device[], b: Device[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const da = a[i];
-    const db = b[i];
-    if (
-      da.id !== db.id ||
-      da.hostname !== db.hostname ||
-      da.status !== db.status ||
-      da.oper_status !== db.oper_status ||
-      da.management_mode !== db.management_mode ||
-      da.platform !== db.platform ||
-      da.role !== db.role ||
-      da.management_ip !== db.management_ip ||
-      da.last_checked_at !== db.last_checked_at ||
-      da.updated_at !== db.updated_at ||
-      da.sparkline?.length !== db.sparkline?.length ||
-      da.sparkline?.at(-1) !== db.sparkline?.at(-1)
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
-function areJobsEqual(a: JobSummary[], b: JobSummary[]): boolean {
-  if (a === b) return true;
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const ja = a[i];
-    const jb = b[i];
-    if (
-      ja.id !== jb.id ||
-      ja.status !== jb.status ||
-      ja.progress !== jb.progress ||
-      ja.started_at !== jb.started_at ||
-      ja.finished_at !== jb.finished_at
-    ) {
-      return false;
-    }
-  }
-  return true;
-}
-
 export function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [locale, setLocale] = useState<Locale>(() => {
-    return (localStorage.getItem('netops_lang') as Locale) || 'ru';
-  });
-  const [theme, setTheme] = useState<AppTheme>(() => {
-    const saved = localStorage.getItem('netops_theme');
-    return saved === 'light' ? 'light' : 'dark';
-  });
+  const [locale, setLocale] = useState<Locale>(() => (localStorage.getItem('netops_lang') as Locale) || 'ru');
+  const [theme, setTheme] = useState<AppTheme>('dark');
   const [userRole, setUserRole] = useState<UserRole>(() => api.getRole());
   const isDedicatedRolePort =
     typeof window !== 'undefined' && rolePortList().includes(window.location.port);
@@ -111,9 +56,9 @@ export function App() {
   });
   const [shareModalOpen, setShareModalOpen] = useState<boolean>(false);
   const [accessCodeModalOpen, setAccessCodeModalOpen] = useState<boolean>(false);
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [activeStand, setActiveStand] = useState<string>('all');
+  const [standsModalOpen, setStandsModalOpen] = useState<boolean>(false);
+  const [stands, setStands] = useState<StandRead[]>([]);
   const [deviceId, setDeviceId] = useState<number | null>(null);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [copilotRequest, setCopilotRequest] = useState<{ text: string; n: number } | null>(null);
@@ -121,11 +66,114 @@ export function App() {
   const [dryRunModalOpen, setDryRunModalOpen] = useState(false);
   const [dryRunTargetIds, setDryRunTargetIds] = useState<number[]>([]);
   const [shortcutsModalOpen, setShortcutsModalOpen] = useState(false);
-  const [apiHealthy, setApiHealthy] = useState<boolean>(true);
-  const [loading, setLoading] = useState<boolean>(true);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(
     null
   );
+
+  const toastTimerRef = useRef<number | null>(null);
+  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    if (toastTimerRef.current !== null) {
+      window.clearTimeout(toastTimerRef.current);
+    }
+    setToast({ message, type });
+    toastTimerRef.current = window.setTimeout(() => {
+      setToast(null);
+      toastTimerRef.current = null;
+    }, 4000);
+  }, []);
+
+  const {
+    devices,
+    jobs,
+    selectedJobId,
+    setSelectedJobId,
+    apiHealthy,
+    loading,
+    fetchDevices,
+    fetchJobs,
+    refreshAll,
+    clearAuthFailed,
+    handleExecuteDryRun,
+    handleDeploy,
+    handleScanDrift,
+    handleRemediate,
+    handleSyncInventory,
+    handleLintIntent,
+    handleDeleteDevice,
+  } = useNetopsPolling({
+    isDedicatedRolePort,
+    userRole,
+    locale,
+    setActiveTab,
+    setUserRole,
+    setWelcomeModalOpen,
+    setAccessCodeModalOpen,
+    showToast,
+  });
+
+  const fetchStands = useCallback(async () => {
+    try {
+      const data = await api.getStands();
+      if (Array.isArray(data)) {
+        setStands(data);
+      }
+    } catch {
+      // Ignore if stands endpoint is unauthenticated or offline during initial load
+    }
+  }, []);
+
+  const handleRefreshStandsAndDevices = useCallback(async () => {
+    try {
+      const synced = await api.syncAllStands();
+      if (Array.isArray(synced)) {
+        setStands(synced);
+      }
+    } catch {
+      await fetchStands();
+    }
+    await refreshAll();
+  }, [fetchStands, refreshAll]);
+
+  useEffect(() => {
+    if (apiHealthy) {
+      void fetchStands();
+    }
+  }, [apiHealthy, devices.length, fetchStands]);
+
+  useEffect(() => {
+    const onTopoMutated = () => {
+      void fetchDevices();
+    };
+    window.addEventListener('netops-topology-mutated', onTopoMutated);
+    return () => window.removeEventListener('netops-topology-mutated', onTopoMutated);
+  }, [fetchDevices]);
+
+  const filteredDevices = useMemo(
+    () =>
+      devices.filter(
+        (d) => activeStand === 'all' || d.fabric_id === activeStand || d.site === activeStand
+      ),
+    [devices, activeStand]
+  );
+
+  useKeyboardShortcuts({
+    shortcutsModalOpen,
+    setShortcutsModalOpen,
+    standsModalOpen,
+    setStandsModalOpen,
+    accessCodeModalOpen,
+    setAccessCodeModalOpen,
+    shareModalOpen,
+    setShareModalOpen,
+    welcomeModalOpen,
+    setWelcomeModalOpen,
+    dryRunModalOpen,
+    setDryRunModalOpen,
+    searchOpen,
+    setSearchOpen,
+    copilotOpen,
+    setCopilotOpen,
+  });
 
   const handleSetLocale = useCallback((newLocale: Locale) => {
     setLocale(newLocale);
@@ -141,80 +189,6 @@ export function App() {
     document.documentElement.setAttribute('data-theme', theme);
     document.documentElement.className = theme === 'dark' ? 'theme-dark dark' : 'theme-light';
   }, [theme]);
-
-  useEffect(() => {
-    if (isDedicatedRolePort) return;
-    const params = new URLSearchParams(window.location.search);
-    const hasInviteToken = Boolean(params.get('token') || params.get('role'));
-    const localOwner = isLocalOwnerConsole();
-    api
-      .getBootstrapStatus()
-      .then((st) => {
-        if (localOwner && st && st.bootstrap_completed === false) {
-          localStorage.removeItem('netops_onboarding_done');
-          setWelcomeModalOpen(true);
-        } else if (!hasInviteToken && st && st.bootstrap_completed && (st.caller_is_bound_owner || localOwner)) {
-          localStorage.setItem('netops_onboarding_done', 'true');
-          setWelcomeModalOpen(false);
-        }
-      })
-      .catch(() => {});
-  }, [isDedicatedRolePort]);
-
-  // Global window keydown listener with priority Escape order, ?, and Ctrl+K
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null;
-      const isInput = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
-
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        e.stopPropagation();
-        setSearchOpen((o) => !o);
-        return;
-      }
-
-      if (e.key === '?' && !isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
-        e.preventDefault();
-        setShortcutsModalOpen((o) => !o);
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        // Priority closure order:
-        // 1. ShortcutsModal -> 2. ShareModal -> 3. WelcomeModal -> 4. DryRunModal -> 5. CommandPalette -> 6. CopilotPanel
-        if (shortcutsModalOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setShortcutsModalOpen(false);
-        } else if (shareModalOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setShareModalOpen(false);
-        } else if (welcomeModalOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          localStorage.setItem('netops_onboarding_done', 'true');
-          setWelcomeModalOpen(false);
-        } else if (dryRunModalOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setDryRunModalOpen(false);
-        } else if (searchOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setSearchOpen(false);
-        } else if (copilotOpen) {
-          e.preventDefault();
-          e.stopPropagation();
-          setCopilotOpen(false);
-        }
-      }
-    };
-
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [shortcutsModalOpen, shareModalOpen, welcomeModalOpen, dryRunModalOpen, searchOpen, copilotOpen]);
 
   const openDevice = useCallback((id: number) => {
     setDeviceId(id);
@@ -234,331 +208,62 @@ export function App() {
       return diffJob?.id ?? current;
     });
     setActiveTab('diff');
-  }, [jobs]);
+  }, [jobs, setSelectedJobId]);
 
   const handleOpenDiffJob = useCallback((jobId?: string) => {
-    if (jobId) {
-      setSelectedJobId(jobId);
-    }
+    if (jobId) setSelectedJobId(jobId);
     setActiveTab('diff');
-  }, []);
+  }, [setSelectedJobId]);
 
   const openDryRunModal = useCallback((targetIds: number[]) => {
-    setDryRunTargetIds(targetIds.length > 0 ? targetIds : devices.map((d) => d.id));
+    setDryRunTargetIds(
+      targetIds.length > 0
+        ? targetIds
+        : filteredDevices.filter((d) => d.role !== 'server' && d.platform !== 'linux_server').map((d) => d.id)
+    );
     setDryRunModalOpen(true);
-  }, [devices]);
+  }, [filteredDevices]);
 
   const askCopilot = useCallback((text: string) => {
     setCopilotOpen(true);
     setCopilotRequest({ text, n: Date.now() });
   }, []);
 
-  const toastTimerRef = useRef<number | null>(null);
-  const showToast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    if (toastTimerRef.current !== null) {
-      window.clearTimeout(toastTimerRef.current);
-    }
-    setToast({ message, type });
-    toastTimerRef.current = window.setTimeout(() => {
-      setToast(null);
-      toastTimerRef.current = null;
-    }, 4000);
-  }, []);
-
-  const authFailedRef = useRef<boolean>(false);
-
-  const fetchDevices = useCallback(async () => {
-    try {
-      const data = await api.getDevices();
-      authFailedRef.current = false;
-      setDevices((prev) => (areDevicesEqual(prev, data) ? prev : data));
-      setApiHealthy((prev) => (prev ? prev : true));
-    } catch (err: unknown) {
-      const msg = getErrorMessage(err, '');
-      const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
-      if (isAuthErr) {
-        authFailedRef.current = true;
-        if (isLocalOwnerConsole()) {
-          localStorage.removeItem('netops_onboarding_done');
-          setWelcomeModalOpen(true);
-        } else {
-          setAccessCodeModalOpen(true);
-        }
-      } else {
-        console.error('Failed to load devices', err);
-        setApiHealthy(false);
-      }
-    }
-  }, []);
-
-  const fetchJobs = useCallback(async () => {
-    try {
-      const data = await api.getJobs();
-      authFailedRef.current = false;
-      setJobs((prev) => (areJobsEqual(prev, data) ? prev : data));
-      setSelectedJobId((current) => {
-        if (current && data.some((j) => j.id === current)) return current;
-        const diffJob = data.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
-        return diffJob?.id ?? data[0]?.id ?? null;
-      });
-    } catch (err: unknown) {
-      const msg = getErrorMessage(err, '');
-      const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
-      if (isAuthErr) {
-        authFailedRef.current = true;
-      } else {
-        console.error('Failed to load jobs', err);
-      }
-    }
-  }, []);
-
-  const refreshAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      await Promise.all([fetchDevices(), fetchJobs()]);
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchDevices, fetchJobs]);
-
-  const hasActiveJob = useMemo(() => {
-    return jobs.some((j) => j.status === 'RUNNING' || j.status === 'PENDING');
-  }, [jobs]);
-
-  // Initial load on mount (including personal token & device binding verification)
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      const localOwner = isLocalOwnerConsole();
-      try {
-        try {
-          const me = await api.getMe();
-          if (active && me.role) {
-            authFailedRef.current = false;
-            setAccessCodeModalOpen(false);
-            const resolvedRole: UserRole = localOwner && me.role === 'viewer' ? 'owner' : (me.role as UserRole);
-            setUserRole(resolvedRole);
-            localStorage.setItem('netops_user_role', resolvedRole);
-          }
-        } catch (authErr: unknown) {
-          if (active) {
-            if (localOwner) {
-              api.setRole('owner');
-              setUserRole('owner');
-            } else {
-              authFailedRef.current = true;
-              setAccessCodeModalOpen(true);
-              const params = new URLSearchParams(window.location.search);
-              if (params.get('token') || params.get('code')) {
-                showToast(getErrorMessage(authErr, 'Ошибка авторизации кода/токена'), 'error');
-              }
-              return;
-            }
-          }
-        }
-
-        const [devs, jbs] = await Promise.all([api.getDevices(), api.getJobs()]);
-        if (!active) return;
-        authFailedRef.current = false;
-        setDevices((prev) => (areDevicesEqual(prev, devs) ? prev : devs));
-        setJobs((prev) => (areJobsEqual(prev, jbs) ? prev : jbs));
-        setSelectedJobId((current) => {
-          if (current && jbs.some((j) => j.id === current)) return current;
-          const diffJob = jbs.find((j) => j.type === 'DRY_RUN' || j.type === 'DEPLOY');
-          return diffJob?.id ?? jbs[0]?.id ?? null;
-        });
-        setApiHealthy(true);
-      } catch (err: unknown) {
-        if (!active) return;
-        const msg = getErrorMessage(err, '');
-        const isAuthErr = msg.includes('401') || msg.toLowerCase().includes('учетные данные') || msg.toLowerCase().includes('unauthorized');
-        if (isAuthErr && localOwner) {
-          authFailedRef.current = true;
-          localStorage.removeItem('netops_onboarding_done');
-          setWelcomeModalOpen(true);
-        } else if (isAuthErr) {
-          authFailedRef.current = true;
-          setAccessCodeModalOpen(true);
-        } else {
-          console.error('Failed initial load', err);
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [showToast]);
-
-  // Periodic polling & visibility-based updates
-  useEffect(() => {
-    const canPoll = () =>
-      !authFailedRef.current &&
-      Boolean(
-        localStorage.getItem('netops_onboarding_done') === 'true' ||
-          localStorage.getItem('netops_auth_token') ||
-          localStorage.getItem('netops_personal_token') ||
-          document.cookie.includes('netops_csrf=') ||
-          allConsolePorts().includes(window.location.port)
-      );
-
-    const onFocusOrVisible = () => {
-      if (document.visibilityState === 'visible' && canPoll()) {
-        fetchDevices();
-        fetchJobs();
-      }
-    };
-    window.addEventListener('focus', onFocusOrVisible);
-    document.addEventListener('visibilitychange', onFocusOrVisible);
-
-    const pollMs = hasActiveJob ? 1500 : 5000;
-    const interval = setInterval(() => {
-      if (document.visibilityState === 'hidden' || !canPoll()) return;
-      fetchJobs();
-      fetchDevices();
-    }, pollMs);
-
-    return () => {
-      window.removeEventListener('focus', onFocusOrVisible);
-      document.removeEventListener('visibilitychange', onFocusOrVisible);
-      clearInterval(interval);
-    };
-  }, [hasActiveJob, fetchDevices, fetchJobs]);
-
-  const handleExecuteDryRun = useCallback(async (deviceIds: number[]) => {
-    try {
-      showToast('Запуск холостого прогона (Dry-Run)...', 'info');
-      const res = await api.createDryRun(deviceIds);
-      setSelectedJobId(res.job_id);
-      setActiveTab('jobs');
-      showToast(`Задача ${res.job_id.slice(0, 8)} поставлена в очередь!`, 'success');
-      await fetchJobs();
-    } catch (err: unknown) {
-      showToast(`Ошибка запуска Dry-Run: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchJobs, showToast]);
-
-  const handleDeploy = useCallback(async (jobId: string) => {
-    try {
-      showToast('Запуск транзакционного деплоя (commit confirmed)...', 'info');
-      const res = await api.createDeploy(jobId, userRole);
-      setSelectedJobId(res.job_id);
-      setActiveTab('jobs');
-      showToast(`Деплой ${res.job_id.slice(0, 8)} запущен!`, 'success');
-      await fetchJobs();
-    } catch (err: unknown) {
-      showToast(`Ошибка деплоя: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchJobs, showToast, userRole]);
-
-  const handleScanDrift = useCallback(async (deviceIds?: number[]) => {
-    try {
-      showToast('Запуск сканирования дрейфа конфигураций...', 'info');
-      const targetIds = deviceIds && deviceIds.length > 0 ? deviceIds : undefined;
-      const res = await api.scanDrift(targetIds);
-      setSelectedJobId(res.job_id);
-      setActiveTab('jobs');
-      showToast('Внеочередной скан дрейфа запущен!', 'success');
-      await fetchJobs();
-    } catch (err: unknown) {
-      showToast(`Ошибка сканирования дрейфа: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchJobs, showToast]);
-
-  const handleRemediate = useCallback(async (targetDeviceId: number) => {
-    try {
-      showToast('Запуск компенсирующего патча (Remediate)...', 'info');
-      const res = await api.remediateDrift(targetDeviceId);
-      setSelectedJobId(res.job_id);
-      setActiveTab('jobs');
-      showToast('Устранение дрейфа поставлено в очередь!', 'success');
-      await fetchJobs();
-    } catch (err: unknown) {
-      showToast(`Ошибка устранения дрейфа: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchJobs, showToast]);
-
-  const handleSyncInventory = useCallback(async () => {
-    try {
-      showToast('Синхронизация inventory.yaml из Git...', 'info');
-      const res = await api.syncInventory();
-      showToast(
-        `Инвентарь синхронизирован! Создано: ${res.created.length}, обновлено: ${res.updated.length}`,
-        'success'
-      );
-      await fetchDevices();
-    } catch (err: unknown) {
-      showToast(`Ошибка синхронизации инвентаря: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchDevices, showToast]);
-
-  const handleLintIntent = useCallback(async () => {
-    try {
-      const res = await api.lintIntent();
-      if (res.issues && res.issues.length > 0) {
-        showToast(`Найдено ${res.issues.length} предупреждений в моделях Intent.`, 'error');
-      } else {
-        showToast('Pre-flight lint успешен: все модели Pydantic и связность валидны!', 'success');
-      }
-    } catch (err: unknown) {
-      showToast(`Ошибка линтинга: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [showToast]);
-
-  const handleDeleteDevice = useCallback(async (id: number, returnToList = false) => {
-    try {
-      await api.deleteDevice(id);
-      showToast(locale === 'en' ? 'Device deleted successfully' : 'Устройство успешно удалено', 'success');
-      await Promise.all([fetchDevices(), fetchJobs()]);
-      if (returnToList) {
-        setActiveTab('devices');
-      }
-    } catch (err: unknown) {
-      showToast(`${locale === 'en' ? 'Delete error' : 'Ошибка удаления'}: ${getErrorMessage(err)}`, 'error');
-    }
-  }, [fetchDevices, fetchJobs, locale, showToast]);
-
-  const handleBackFromDevice = useCallback(() => {
-    setActiveTab('devices');
-    fetchDevices();
-  }, [fetchDevices]);
-
-  const handleDeleteDeviceFromPage = useCallback((id: number) => {
-    handleDeleteDevice(id, true);
-  }, [handleDeleteDevice]);
-
-  const handleDeleteDeviceFromList = useCallback((id: number) => {
-    handleDeleteDevice(id, false);
-  }, [handleDeleteDevice]);
-
-  const handleScanDriftAll = useCallback(() => {
-    handleScanDrift();
-  }, [handleScanDrift]);
-
-  const handleSwitchRole = useCallback((role: UserRole) => {
-    api.setRole(role);
-    setUserRole(role);
-  }, []);
-
+  const handleBackFromDevice = useCallback(() => { setActiveTab('devices'); fetchDevices(); }, [fetchDevices]);
+  const handleDeleteDeviceFromPage = useCallback((id: number) => handleDeleteDevice(id, true), [handleDeleteDevice]);
+  const handleDeleteDeviceFromList = useCallback((id: number) => handleDeleteDevice(id, false), [handleDeleteDevice]);
+  const handleScanDriftScoped = useCallback(
+    (ids?: number[]) =>
+      handleScanDrift(
+        ids && ids.length > 0
+          ? ids
+          : activeStand === 'all'
+            ? undefined
+            : filteredDevices.map((d) => d.id)
+      ),
+    [handleScanDrift, activeStand, filteredDevices]
+  );
+  const handleScanDriftAll = useCallback(() => handleScanDriftScoped(), [handleScanDriftScoped]);
   const handleToggleCopilot = useCallback(() => setCopilotOpen((o) => !o), []);
   const handleOpenWelcomeModal = useCallback(() => setWelcomeModalOpen(true), []);
   const handleOpenShareModal = useCallback(() => setShareModalOpen(true), []);
+  const handleOpenStandsModal = useCallback(() => setStandsModalOpen(true), []);
+  const handleCloseStandsModal = useCallback(() => setStandsModalOpen(false), []);
   const handleCloseCopilot = useCallback(() => setCopilotOpen(false), []);
   const handleCloseSearch = useCallback(() => setSearchOpen(false), []);
   const handleCloseDryRun = useCallback(() => setDryRunModalOpen(false), []);
   const handleCloseShare = useCallback(() => setShareModalOpen(false), []);
   const handleOpenSearch = useCallback(() => setSearchOpen(true), []);
-  const handleSelectJob = useCallback((id: string) => setSelectedJobId(id), []);
+  const handleSelectJob = useCallback((id: string) => setSelectedJobId(id), [setSelectedJobId]);
 
   const handleWelcomeClose = useCallback(async (role: UserRole) => {
-    authFailedRef.current = false;
+    clearAuthFailed();
     setUserRole(role);
     setWelcomeModalOpen(false);
     const t = translations[locale];
     showToast(role === 'owner' ? t.toastOwnerSuccess : t.toastConnectSuccess, 'success');
     await refreshAll();
-  }, [locale, showToast, refreshAll]);
+  }, [clearAuthFailed, locale, showToast, refreshAll]);
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-[var(--bg-main)] text-[var(--text-primary)] flex flex-col font-sans selection:bg-cyan-500/30 selection:text-cyan-200 transition-colors">
@@ -573,7 +278,9 @@ export function App() {
         setTheme={handleSetTheme}
         onOpenWelcomeModal={handleOpenWelcomeModal}
         onOpenShareModal={handleOpenShareModal}
-        onOpenShortcutsModal={() => setShortcutsModalOpen(true)}
+        activeStand={activeStand}
+        standsCount={stands.length || 1}
+        onOpenStandsModal={handleOpenStandsModal}
       />
 
       {!apiHealthy && (
@@ -595,17 +302,7 @@ export function App() {
         </div>
       )}
 
-      {toast && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center space-x-3 px-4 py-3 rounded-xl bg-zinc-900 border border-white/[0.1] shadow-2xl animate-fade-in text-xs">
-          {toast.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400" />}
-          {toast.type === 'error' && <AlertCircle className="w-4 h-4 text-rose-400" />}
-          {toast.type === 'info' && <Info className="w-4 h-4 text-cyan-400" />}
-          <span className="text-zinc-200">{toast.message}</span>
-          <button onClick={() => setToast(null)} className="text-zinc-400 hover:text-zinc-200 cursor-pointer">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
+      {toast && <ToastNotification toast={toast} onClose={() => setToast(null)} />}
 
       <div className="flex flex-1">
         <Sidebar
@@ -618,7 +315,9 @@ export function App() {
           <Suspense fallback={<LoadingFallback />}>
             {activeTab === 'dashboard' && (
               <Dashboard
-                devices={devices}
+                devices={filteredDevices}
+                stands={stands}
+                activeStand={activeStand}
                 jobs={jobs}
                 userRole={userRole}
                 locale={locale}
@@ -628,6 +327,35 @@ export function App() {
                 onOpenDiff={handleOpenDiffJob}
                 onSyncInventory={handleSyncInventory}
               />
+            )}
+
+            {activeTab === 'topology' && (
+              <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4 sm:p-5 space-y-3 animate-fade-in">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[var(--border-subtle)]">
+                  <div>
+                    <h1 className="text-base font-semibold text-[var(--text-primary)] tracking-tight">
+                      {locale === 'en' ? 'Network Topology & Commutation' : 'Топология сети и управление связями'}
+                    </h1>
+                    <p className="text-xs text-[var(--text-muted)]">
+                      {locale === 'en'
+                        ? 'Click a node to inspect or drain traffic · Click a link to toggle UP / SHUTDOWN'
+                        : 'Нажмите на устройство для управления трафиком или на линию связи для её включения / отключения'}
+                    </p>
+                  </div>
+                </div>
+                <TopologyMap
+                  devices={devices}
+                  stands={stands}
+                  activeStand={activeStand}
+                  locale={locale}
+                  compact={false}
+                  userRole={userRole}
+                  onSelectDevice={openDevice}
+                  onRunDryRun={userRole !== 'viewer' ? openDryRunModal : undefined}
+                  onSyncStands={handleRefreshStandsAndDevices}
+                  onOpenStandsModal={handleOpenStandsModal}
+                />
+              </div>
             )}
 
             {activeTab === 'device' && deviceId !== null && (
@@ -646,13 +374,13 @@ export function App() {
 
             {activeTab === 'devices' && (
               <DeviceList
-                devices={devices}
+                devices={filteredDevices}
                 loading={loading}
                 userRole={userRole}
                 locale={locale}
                 onRefresh={refreshAll}
                 onRunDryRun={openDryRunModal}
-                onScanDrift={handleScanDrift}
+                onScanDrift={handleScanDriftScoped}
                 onSyncInventory={handleSyncInventory}
                 onLintIntent={handleLintIntent}
                 onOpenDevice={openDevice}
@@ -690,6 +418,7 @@ export function App() {
             {activeTab === 'drift' && (
               <DriftView
                 userRole={userRole}
+                devices={filteredDevices}
                 onRemediate={handleRemediate}
                 onScanDrift={handleScanDriftAll}
                 locale={locale}
@@ -703,89 +432,60 @@ export function App() {
             {activeTab === 'emergency' && (userRole === 'admin' || userRole === 'owner') && (
               <EmergencyHub
                 currentRole={userRole === 'admin' || userRole === 'owner' ? 'admin' : 'operator'}
-                onSwitchRole={handleSwitchRole}
               />
             )}
           </Suspense>
         </main>
       </div>
 
-      <Suspense fallback={null}>
-        {copilotOpen && (
-          <CopilotPanel
-            open={copilotOpen}
-            onClose={handleCloseCopilot}
-            deviceId={activeTab === 'device' ? deviceId : null}
-            userRole={userRole}
-            locale={locale}
-            request={copilotRequest}
-            activeScreen={activeTab}
-            onRunDryRun={openDryRunModal}
-            onOpenDiff={openDiff}
-            onScanDrift={handleScanDrift}
-            onOpenDevice={openDevice}
-            onRemediate={handleRemediate}
-            onOpenTab={setActiveTab}
-          />
-        )}
-
-        {dryRunModalOpen && userRole !== 'viewer' && (
-          <DryRunModal
-            open={dryRunModalOpen}
-            onClose={handleCloseDryRun}
-            onConfirm={handleExecuteDryRun}
-            deviceIds={dryRunTargetIds}
-            devices={devices}
-            locale={locale}
-          />
-        )}
-
-        {shareModalOpen && (userRole === 'owner' || userRole === 'admin') && (
-          <ShareModal
-            isOpen={shareModalOpen}
-            onClose={handleCloseShare}
-            userRole={userRole}
-            locale={locale}
-          />
-        )}
-
-        {welcomeModalOpen && !isDedicatedRolePort && (
-          <WelcomeModal
-            isOpen={welcomeModalOpen}
-            onClose={handleWelcomeClose}
-            locale={locale}
-            setLocale={handleSetLocale}
-            theme={theme}
-            setTheme={handleSetTheme}
-          />
-        )}
-
-        {shortcutsModalOpen && (
-          <ShortcutsModal
-            isOpen={shortcutsModalOpen}
-            onClose={() => setShortcutsModalOpen(false)}
-            locale={locale}
-          />
-        )}
-
-        {accessCodeModalOpen && (
-          <AccessCodeModal
-            isOpen={accessCodeModalOpen}
-            locale={locale}
-            onSuccess={(role) => {
-              authFailedRef.current = false;
-              setAccessCodeModalOpen(false);
-              setUserRole(role);
-              void refreshAll();
-            }}
-          />
-        )}
-      </Suspense>
+      <AppOverlays
+        copilotOpen={copilotOpen}
+        onCloseCopilot={handleCloseCopilot}
+        activeTab={activeTab}
+        deviceId={deviceId}
+        userRole={userRole}
+        locale={locale}
+        setLocale={handleSetLocale}
+        theme={theme}
+        setTheme={handleSetTheme}
+        copilotRequest={copilotRequest}
+        onRunDryRun={openDryRunModal}
+        onOpenDiff={openDiff}
+        onScanDrift={handleScanDriftScoped}
+        onOpenDevice={openDevice}
+        onRemediate={handleRemediate}
+        onOpenTab={setActiveTab}
+        dryRunModalOpen={dryRunModalOpen}
+        onCloseDryRun={handleCloseDryRun}
+        onConfirmDryRun={handleExecuteDryRun}
+        dryRunTargetIds={dryRunTargetIds}
+        devices={filteredDevices}
+        shareModalOpen={shareModalOpen}
+        onCloseShare={handleCloseShare}
+        welcomeModalOpen={welcomeModalOpen}
+        isDedicatedRolePort={isDedicatedRolePort}
+        onWelcomeClose={handleWelcomeClose}
+        shortcutsModalOpen={shortcutsModalOpen}
+        onCloseShortcuts={() => setShortcutsModalOpen(false)}
+        accessCodeModalOpen={accessCodeModalOpen}
+        onAccessCodeSuccess={(role) => {
+          clearAuthFailed();
+          setAccessCodeModalOpen(false);
+          setUserRole(role);
+          void refreshAll();
+        }}
+        standsModalOpen={standsModalOpen}
+        onCloseStandsModal={handleCloseStandsModal}
+        activeStand={activeStand}
+        onSelectStand={setActiveStand}
+        stands={stands}
+        onRefreshStands={handleRefreshStandsAndDevices}
+      />
 
       <CommandPalette
         open={searchOpen}
         onClose={handleCloseSearch}
-        devices={devices}
+        devices={filteredDevices}
         onOpenDevice={openDevice}
         onOpenTab={setActiveTab}
         userRole={userRole}
@@ -809,3 +509,4 @@ export function App() {
 }
 
 export default App;
+

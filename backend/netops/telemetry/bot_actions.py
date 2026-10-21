@@ -54,9 +54,7 @@ def _token_text(session: Session, args: Sequence[str], *, settings: Settings | N
     )
 
 
-def _set_user_ttl_text(
-    session: Session, args: Sequence[str], *, settings: Settings | None = None
-) -> str:
+def _set_user_ttl_text(session: Session, args: Sequence[str]) -> str:
     if len(args) < 2:
         return "Укажите участника и время: /ttl <username> <минуты|forever>"
     username, ttl_arg = args[0].strip(), args[1].strip().lower()
@@ -95,18 +93,15 @@ def _set_user_active_text(session: Session, args: Sequence[str], *, active: bool
 
 
 def _unbind_user_text(session: Session, args: Sequence[str]) -> str:
+    from netops.telemetry.bot_auth import _clear_bound_client_session
+
     if not args:
         return "Укажите имя пользователя: /unbind <username>"
     username = args[0].strip()
     user = session.scalar(select(User).where(User.username == username))
     if user is None:
         return f"Пользователь {username} не найден"
-    user.bound_client_id = None
-    user.bound_ip = None
-    user.bound_user_agent = None
-    user.bound_at = None
-    user.last_seen_at = None
-    session.commit()
+    _clear_bound_client_session(session, user)
     return f"Привязка устройства для {username} сброшена. Ссылка снова свободна."
 
 
@@ -126,14 +121,31 @@ def _set_user_role_text(session: Session, args: Sequence[str]) -> str:
     return f"Роль для {username} изменена на {role_str}"
 
 
-def _collect_now_text(session: Session, settings: Settings | None = None) -> str:
+def _collect_now_text(
+    session: Session, settings: Settings | None = None, args: Sequence[str] = ()
+) -> str:
     from netops.toolchain import build_toolchain
 
     eff = settings or get_settings()
     try:
         toolchain = build_toolchain(eff)
-        samples = collector.collect(session, toolchain)
-        ts = collector.publish(samples, ttl_seconds=eff.metrics_interval_seconds * 3)
+        ttl = eff.metrics_interval_seconds * 3
+        stand = args[0].strip() if args else None
+        if stand:
+            dev_samples = collector.device_samples(
+                session,
+                toolchain,
+                max_workers=16,
+                include_fabric_label=True,
+                fabric_id=stand,
+            )
+            ts = collector.publish(dev_samples, ttl_seconds=ttl, merge=True, merge_fabric=stand)
+            samples = collector.platform_samples(session) + dev_samples
+        else:
+            samples = collector.collect(
+                session, toolchain, include_fabric_label=True, max_workers=16
+            )
+            ts = collector.publish(samples, ttl_seconds=ttl)
         lines = [f"✅ Сбор живой телеметрии завершён ({ts:%H:%M:%S} UTC):"]
         lines.extend(_summary(samples))
         return "\n".join(lines)
@@ -272,7 +284,7 @@ def _ai_copilot_text(
         if res is not None:
             return res[0].strip()
     except Exception:
-        pass
+        _ = None
 
     drifting = [d.hostname for d in devices if d.status is DeviceStatus.DRIFT_DETECTED]
     unreach = [d.hostname for d in devices if d.status is DeviceStatus.UNREACHABLE]

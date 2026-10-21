@@ -126,6 +126,48 @@ class StateDomainsMixin:
         """Check whether target is currently locked."""
         return self.get_sync_lock_info(target) is not None
 
+    def clear_sync_locks(self) -> int:
+        """Drop all sync locks (operator unfreeze); returns number of locks removed."""
+        removed = 0
+        client = self._get_redis()
+        if client:
+            try:
+                keys = list(client.scan_iter("netops:sync_lock:*"))
+                if keys:
+                    removed = int(client.delete(*keys))
+            except Exception as exc:
+                self._handle_redis_error(exc)
+        with self._lock:
+            removed = max(removed, len(self._local_locks))
+            self._local_locks.clear()
+        return removed
+
+    def acquire_ssh_lock(self, host: str, port: int, holder: str, ttl: int = 45) -> bool:
+        """Acquire a short-lived distributed Redis lock for SSH endpoint netops:ssh_lock:{host}:{port}."""
+        key = f"netops:ssh_lock:{host}:{port}"
+        client = self._get_redis()
+        if client:
+            try:
+                return bool(client.set(key, holder, nx=True, ex=ttl))
+            except Exception as exc:
+                self._handle_redis_error(exc)
+        return True
+
+    def release_ssh_lock(self, host: str, port: int, holder: str | None = None) -> bool:
+        """Release a distributed Redis lock for SSH endpoint netops:ssh_lock:{host}:{port}."""
+        key = f"netops:ssh_lock:{host}:{port}"
+        client = self._get_redis()
+        if client:
+            try:
+                if holder is not None:
+                    curr = client.get(key)
+                    if curr is not None and curr != holder:
+                        return False
+                return bool(client.delete(key))
+            except Exception as exc:
+                self._handle_redis_error(exc)
+        return True
+
     def append_telemetry(
         self, hostname: str, metric: str, value: float, max_points: int = 288
     ) -> None:
@@ -200,16 +242,31 @@ class StateDomainsMixin:
         client = self._get_redis()
         if client:
             try:
-                keys = list(client.scan_iter(f"netops:telemetry:{hostname or '*'}:*"))
+                patterns = (
+                    [f"netops:telemetry:{hostname}:*", f"netops:telemetry:host:{hostname}"]
+                    if hostname
+                    else ["netops:telemetry:*"]
+                )
+                keys = [k for pat in patterns for k in client.scan_iter(pat)]
                 if keys:
                     client.delete(*keys)
             except Exception as exc:
                 self._handle_redis_error(exc)
         with self._lock:
+            local_kv = getattr(self, "_local_kv", None)
             if hostname is None:
                 self._local_telemetry.clear()
+                if isinstance(local_kv, dict):
+                    for k in [
+                        k
+                        for k in local_kv
+                        if k.startswith(("netops:telemetry:host:", "netops:telemetry:fabric:"))
+                    ]:
+                        local_kv.pop(k, None)
             else:
                 self._local_telemetry.pop(hostname, None)
+                if isinstance(local_kv, dict):
+                    local_kv.pop(f"netops:telemetry:host:{hostname}", None)
 
     def get_git_sot_meta(self, cache_key: str) -> dict[str, Any] | None:
         """Get cached Git SoT repository metadata if still valid."""

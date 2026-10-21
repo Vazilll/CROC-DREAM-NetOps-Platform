@@ -95,6 +95,10 @@ class HealthSnapshot:
     disk_util_pct: float | None = None
     network_rate_mbps: float | None = None
     load_1m: float | None = None
+    interface_errors_rate: float | None = None
+    fdb_mac_count: float | None = None
+    tcp_retransmits_rate: float | None = None
+    conntrack_usage_pct: float | None = None
 
 
 @dataclass(frozen=True, slots=True)

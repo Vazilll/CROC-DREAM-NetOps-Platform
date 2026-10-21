@@ -1,17 +1,17 @@
-"""AI-assisted insights: metric forecasts, hybrid RRF search, AI Guard, and fabric summary."""
+"""AI-assisted insights: hybrid RRF search, AI Guard, and fabric summary."""
 
 from __future__ import annotations
 
 import asyncio
 import re
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from netops.api.deps import ContainerDep, DeviceServiceDep, Viewer
-from netops.api.routes.devices import assert_device_allowed, device_allowed
+from netops.api.routes.devices import list_allowed_devices
 from netops.api.routes.insights_copilot import (
     COPILOT_SYSTEM,
     AiGuardResponse,
@@ -27,9 +27,7 @@ from netops.api.routes.insights_copilot import (
 from netops.api.routes.insights_copilot import (
     router as insights_copilot_router,
 )
-from netops.services.forecast import ForecastRead, build_forecast
 from netops.services.llm import chat_with_llm
-from netops.services.telemetry import METRICS
 
 __all__ = [
     "COPILOT_SYSTEM",
@@ -39,7 +37,6 @@ __all__ = [
     "CopilotActionType",
     "CopilotReply",
     "CopilotRequest",
-    "ForecastAlert",
     "HybridSearchHit",
     "RankedDevice",
     "_sanitize_action_for_role",
@@ -87,7 +84,6 @@ def hybrid_rank_devices(
     query: str,
     devices: list[Any],
     *,
-    alerts: list[Any] | None = None,
     ai_anomalies: dict[str, str] | None = None,
     k: int = 60,
 ) -> list[RankedDevice]:
@@ -97,8 +93,7 @@ def hybrid_rank_devices(
     q = query.strip().lower()
     q_tokens = [t for t in re.split(r"[^a-zа-яё0-9._-]+", q) if len(t) >= 2]
     q_conc = _concepts(q)
-    alert_ids = {getattr(a, "device_id", None) for a in (alerts or [])}
-    anomalies = ai_anomalies or {}
+    anomalies = ai_anomalies if isinstance(ai_anomalies, dict) else {}
 
     lex_scores: list[float] = []
     sem_scores: list[float] = []
@@ -123,7 +118,7 @@ def hybrid_rank_devices(
             d_conc |= {"state_drift", "state_anomaly"}
         if "unreachable" in status:
             d_conc |= {"state_down", "state_anomaly"}
-        if getattr(d, "hostname", "") in anomalies or getattr(d, "id", None) in alert_ids:
+        if getattr(d, "hostname", "") in anomalies:
             d_conc.add("state_anomaly")
         ss = len(q_conc & d_conc) * 4.0 + (3.5 if (q_conc & {"state_anomaly", "state_drift", "state_down"} and getattr(d, "hostname", "") in anomalies) else 0.0)
         sem_scores.append(ss)
@@ -151,16 +146,14 @@ def select_rag_devices(
     devices: list[Any],
     *,
     selected_device_id: int | None = None,
-    alerts: list[Any] | None = None,
     ai_anomalies: dict[str, str] | None = None,
     top_k: int = 12,
 ) -> list[Any]:
     """Select Top-K relevant devices + unhealthy/selected nodes for LLM context."""
     if len(devices) <= top_k:
         return list(devices)
-    ranked = hybrid_rank_devices(query, devices, alerts=alerts, ai_anomalies=ai_anomalies)
-    alert_ids = {getattr(a, "device_id", None) for a in (alerts or [])}
-    anom_hosts = set((ai_anomalies or {}).keys())
+    ranked = hybrid_rank_devices(query, devices, ai_anomalies=ai_anomalies)
+    anom_hosts = set((ai_anomalies if isinstance(ai_anomalies, dict) else {}).keys())
     chosen: list[Any] = []
     seen: set[Any] = set()
 
@@ -172,7 +165,7 @@ def select_rag_devices(
 
     for d in devices:
         st = str(getattr(d, "status", "")).upper()
-        if getattr(d, "id", None) == selected_device_id or "DRIFT" in st or "UNREACHABLE" in st or getattr(d, "hostname", "") in anom_hosts or getattr(d, "id", None) in alert_ids:
+        if getattr(d, "id", None) == selected_device_id or "DRIFT" in st or "UNREACHABLE" in st or getattr(d, "hostname", "") in anom_hosts:
             _add(d)
     for r in ranked:
         if len(chosen) >= top_k and r.lexical_score == 0 and r.semantic_score < 2.0:
@@ -185,17 +178,6 @@ def select_rag_devices(
 
 router = APIRouter(tags=["insights"])
 
-Metric = Annotated[str, Query(pattern="^(" + "|".join(METRICS) + ")$")]
-Horizon = Annotated[int, Query(ge=12, le=288)]
-
-
-class ForecastAlert(BaseModel):
-    device_id: int
-    hostname: str
-    metric: str
-    label: str
-    threshold: float
-    breach_in_minutes: int
 
 
 _RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
@@ -227,110 +209,6 @@ def _check_rate_limit(key: str, limit: int = 30, window_seconds: float = 60.0) -
     _RATE_LIMIT_BUCKETS[key] = bucket
 
 
-@router.get(
-    "/devices/{device_id}/forecast",
-    response_model=ForecastRead,
-    summary="Metric history and statistical telemetry forecast of a device",
-)
-async def device_forecast(
-    device_id: int,
-    service: DeviceServiceDep,
-    container: ContainerDep,
-    user: Viewer,
-    metric: Metric = "uplink_util_pct",
-    horizon: Horizon = 72,
-) -> ForecastRead:
-    device = service.get(device_id)
-    assert_device_allowed(device, user.allowed_system)
-    return await asyncio.to_thread(
-        build_forecast,
-        container.settings,
-        device.id,
-        device.hostname,
-        str(device.role),
-        metric,
-        horizon,
-        session_factory=container.session_factory,
-    )
-
-
-@router.get(
-    "/insights/forecast/{hostname}",
-    response_model=ForecastRead,
-    summary="Metric history and statistical telemetry forecast of a device by hostname",
-)
-async def device_forecast_by_hostname(
-    hostname: str,
-    service: DeviceServiceDep,
-    container: ContainerDep,
-    user: Viewer,
-    metric: Metric = "uplink_util_pct",
-    horizon: Horizon = 72,
-) -> ForecastRead:
-    dev_obj = (
-        service.get(int(hostname))
-        if hostname.isdigit()
-        else service.get_by_hostname(hostname)
-    )
-    if dev_obj is None:
-        raise HTTPException(status_code=404, detail=f"Device '{hostname}' not found")
-    assert_device_allowed(dev_obj, user.allowed_system)
-    return await asyncio.to_thread(
-        build_forecast,
-        container.settings,
-        dev_obj.id,
-        dev_obj.hostname,
-        str(dev_obj.role),
-        metric,
-        horizon,
-        session_factory=container.session_factory,
-    )
-
-
-def _compute_forecast_alerts_sync(
-    settings: Any, devices: list[Any], horizon: int
-) -> list[ForecastAlert]:
-    alerts: list[ForecastAlert] = []
-    for device in devices:
-        role_str = str(device.role)
-        for metric in METRICS:
-            f = build_forecast(
-                settings,
-                device.id,
-                device.hostname,
-                role_str,
-                metric,
-                horizon,
-                include_events=False,
-            )
-            if f.breach_in_minutes is not None:
-                alerts.append(
-                    ForecastAlert(
-                        device_id=f.device_id,
-                        hostname=f.hostname,
-                        metric=f.metric,
-                        label=f.label,
-                        threshold=f.threshold,
-                        breach_in_minutes=f.breach_in_minutes,
-                    )
-                )
-    return sorted(alerts, key=lambda a: a.breach_in_minutes)
-
-
-@router.get(
-    "/forecast/alerts",
-    response_model=list[ForecastAlert],
-    summary="Devices predicted to cross a metric threshold within the horizon",
-)
-async def forecast_alerts(
-    service: DeviceServiceDep, container: ContainerDep, user: Viewer, horizon: Horizon = 72
-) -> list[ForecastAlert]:
-    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
-    return await asyncio.to_thread(
-        _compute_forecast_alerts_sync, container.settings, devices, horizon
-    )
-
-
 class FabricSummaryResponse(BaseModel):
     total_devices: int
     in_sync_count: int
@@ -355,7 +233,7 @@ async def get_fabric_summary(
     from netops.enums import DeviceStatus
     from netops.services.ai_guard import AiTelemetryGuard
 
-    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
+    devices = list_allowed_devices(service, user.allowed_system)
     total = len(devices)
     in_sync = sum(1 for d in devices if d.status == DeviceStatus.IN_SYNC)
     drift = sum(1 for d in devices if d.status == DeviceStatus.DRIFT_DETECTED)
@@ -447,7 +325,7 @@ async def hybrid_search_endpoint(
     q: str = Query(default="", max_length=200),
     limit: int = Query(default=10, ge=1, le=50),
 ) -> list[HybridSearchHit]:
-    devices = [d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)]
+    devices = list_allowed_devices(service, user.allowed_system)
     ranked = hybrid_rank_devices(q, devices)
     if q.strip():
         ranked = [r for r in ranked if r.rrf_score > 0]

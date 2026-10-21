@@ -9,12 +9,12 @@ predictive Q10/Q90 quantiles.
 from __future__ import annotations
 
 import logging
+import statistics
 from dataclasses import dataclass
 from typing import Any, Literal
 
 from netops.models import Device
-from netops.services.forecast import build_forecast
-from netops.services.telemetry import METRICS
+from netops.services.telemetry import POINTS_PER_DAY, metric_series
 from netops.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -22,6 +22,47 @@ logger = logging.getLogger(__name__)
 # Active simulated anomalies for test injection & live demonstrations (mirrored to Redis via state_manager)
 _active_injections: dict[str, Literal["blackhole", "storm"]] = {}
 _REDIS_INJECTION_PREFIX = "netops:ai_guard:injection:"
+_HISTORY_SHOWN = 144
+_PROVIDER_STAT = "Статистический тренд"
+_PROVIDER_NO_DATA = "Нет данных телеметрии"
+
+
+@dataclass(frozen=True, slots=True)
+class _Envelope:
+    """Statistical Q10/Q90 corridor for the immediate commit-confirm trial window."""
+
+    history: list[float]
+    median: list[float]
+    lower: list[float]
+    upper: list[float]
+    provider: str
+
+
+def _build_envelope(series: list[float], horizon: int) -> _Envelope:
+    """Linear trend over the last 8h plus residual quantile band (Q10-Q90)."""
+    history = series[-_HISTORY_SHOWN:]
+    if not series:
+        return _Envelope([], [], [], [], _PROVIDER_NO_DATA)
+    tail = series[-96:]
+    if len(tail) == 1:
+        tail = [tail[0]] * 3
+    elif len(tail) == 2:
+        tail = [tail[0], (tail[0] + tail[1]) / 2.0, tail[1]]
+    xs = list(range(len(tail)))
+    fit = statistics.linear_regression(xs, tail)
+    resid = max(
+        0.5,
+        statistics.pstdev([y - (fit.intercept + fit.slope * x) for x, y in zip(xs, tail, strict=True)]),
+    )
+    median = [fit.intercept + fit.slope * (len(tail) + i) for i in range(horizon)]
+    spread = [resid * (1 + i / horizon) * 1.28 for i in range(horizon)]
+    return _Envelope(
+        history,
+        [round(m, 2) for m in median],
+        [round(m - d, 2) for m, d in zip(median, spread, strict=True)],
+        [round(m + d, 2) for m, d in zip(median, spread, strict=True)],
+        _PROVIDER_STAT,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,6 +105,16 @@ class AiTelemetryGuard:
             logger.warning("Injected %s anomaly on %s for AI Guard detection", anomaly_type, hostname)
 
     @staticmethod
+    def clear_all_injections() -> None:
+        """Clear all active simulated anomalies from memory and state_manager."""
+        from netops.services.state import get_state_manager
+
+        state = get_state_manager()
+        for host in list(_active_injections):
+            state.delete(f"{_REDIS_INJECTION_PREFIX}{host}")
+        _active_injections.clear()
+
+    @staticmethod
     def get_injected_anomaly(hostname: str) -> str | None:
         from netops.services.state import get_state_manager
 
@@ -83,23 +134,14 @@ class AiTelemetryGuard:
         """Verify that observed telemetry during commit trial falls within expected bounds."""
         hostname = device.hostname
         role = str(getattr(device, "role", "leaf"))
-        device_id = getattr(device, "id", 1)
 
-        # 1. Obtain telemetry forecast
-        forecast = build_forecast(
-            self._settings,
-            device_id=device_id,
-            hostname=hostname,
-            role=role,
-            metric=metric,
-            horizon=horizon,
-            include_events=False,
-        )
+        # 1. Obtain statistical telemetry envelope
+        env = _build_envelope(metric_series(hostname, role, metric, POINTS_PER_DAY), horizon)
 
         # Immediate trial window expected bounds (first 3-6 steps, i.e. 15-30 min)
         is_offline = self._settings.network_driver == "offline"
         injected = self.get_injected_anomaly(hostname)
-        if not forecast.history and not is_offline and not injected:
+        if not env.history and not is_offline and not injected:
             return AiGuardVerdict(
                 healthy=True,
                 metric=metric,
@@ -107,17 +149,17 @@ class AiTelemetryGuard:
                 expected_range=(0.0, 0.0),
                 deviation_pct=0.0,
                 message="Нет данных телеметрии: ожидание опроса устройства по SSH",
-                provider=forecast.provider,
+                provider=env.provider,
             )
 
-        if forecast.lower:
-            window_lower = min(forecast.lower[:3])
-            window_upper = max(forecast.upper[:3])
-            window_median = forecast.median[0]
-        elif forecast.history:
-            window_lower = max(0.0, min(forecast.history) * 0.5)
-            window_upper = max(50.0, max(forecast.history) * 1.5)
-            window_median = forecast.history[-1]
+        if env.lower:
+            window_lower = min(env.lower[:3])
+            window_upper = max(env.upper[:3])
+            window_median = env.median[0]
+        elif env.history:
+            window_lower = max(0.0, min(env.history) * 0.5)
+            window_upper = max(50.0, max(env.history) * 1.5)
+            window_median = env.history[-1]
         else:
             window_lower = 10.0
             window_upper = 50.0
@@ -130,7 +172,7 @@ class AiTelemetryGuard:
         elif injected == "storm":
             observed = max(92.0, min(99.5, round(max(window_upper, 30.0) * 1.8, 2)))
         else:
-            observed = round(forecast.history[-1] if forecast.history else window_median, 2)
+            observed = round(env.history[-1] if env.history else window_median, 2)
 
         # 3. Check for Anomalies against Quantiles
         # Mode A: Critical Traffic Drop (Silent Blackhole)
@@ -148,7 +190,7 @@ class AiTelemetryGuard:
                 expected_range=(window_lower, window_upper),
                 deviation_pct=dev_pct,
                 problem=problem,
-                provider=forecast.provider,
+                provider=env.provider,
             )
 
         # Mode B: Micro-loop or Control Plane Surge
@@ -166,7 +208,7 @@ class AiTelemetryGuard:
                 expected_range=(window_lower, window_upper),
                 deviation_pct=dev_pct,
                 problem=problem,
-                provider=forecast.provider,
+                provider=env.provider,
             )
 
         # Nominal execution: Observed metric falls within predictive corridor
@@ -182,36 +224,15 @@ class AiTelemetryGuard:
             expected_range=(window_lower, window_upper),
             deviation_pct=dev_pct,
             message=msg,
-            provider=forecast.provider,
+            provider=env.provider,
         )
 
     def check_preflight(self, device: Device | Any) -> tuple[bool, str]:
-        """Pre-flight check: ensures maintenance window doesn't collide with active or predicted anomalies."""
+        """Pre-flight check: ensures maintenance window doesn't collide with active anomalies."""
         verdict = self.verify_execution(device)
         if not verdict.healthy and verdict.problem:
             return (
                 False,
                 f"AI Telemetry Guard: {verdict.problem} Проведение деплоя заблокировано.",
             )
-
-        hostname = device.hostname
-        role = str(getattr(device, "role", "leaf"))
-        device_id = getattr(device, "id", 1)
-
-        for metric_name in METRICS:
-            fc = build_forecast(
-                self._settings,
-                device_id=device_id,
-                hostname=hostname,
-                role=role,
-                metric=metric_name,
-                horizon=24,
-                include_events=False,
-            )
-            if fc.breach_in_minutes is not None and fc.breach_in_minutes <= 30:
-                return (
-                    False,
-                    f"Прогнозируется превышение порога по «{fc.label}» через "
-                    f"~{fc.breach_in_minutes} мин. Проведение деплоя заблокировано.",
-                )
-        return True, "Pre-flight проверка успешна: перегрузок не прогнозируется."
+        return True, "Pre-flight проверка успешна: аномалий телеметрии не обнаружено."

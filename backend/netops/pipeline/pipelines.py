@@ -23,6 +23,17 @@ class Pipeline(Protocol):
     def run(self, job: Job) -> None: ...
 
 
+def serialize_job_target_diffs(job: Job) -> list[dict[str, str]]:
+    return [
+        {
+            "hostname": row.hostname,
+            "remediation_patch": row.remediation_config or "",
+            "intended_config": row.intended_snapshot.content if row.intended_snapshot else "",
+        }
+        for row in job.targets
+    ]
+
+
 class _BasePipeline:
     def __init__(self, session: Session, toolchain: Toolchain, recorder: JobRecorder) -> None:
         self._session = session
@@ -48,11 +59,15 @@ class _BasePipeline:
                 str(getattr(device.role, "value", device.role)) == "server"
                 or str(getattr(device.platform, "value", device.platform)) == "linux_server"
             )
-            if is_server and snapshot.intent_for(device.hostname) is None:
-                self._recorder.warning(
-                    "plan", "Skipped: server without intent (monitoring only)", hostname=device.hostname
+            is_mon_only = (
+                str(getattr(device.management_mode, "value", device.management_mode))
+                == "MONITORING_ONLY"
+            )
+            if (is_server or is_mon_only) and snapshot.intent_for(device.hostname) is None:
+                self._recorder.info(
+                    "plan", "Skipped: device without intent (monitoring only)", hostname=device.hostname
                 )
-                row.mark(TargetStatus.SKIPPED, "Server without intent")
+                row.mark(TargetStatus.SKIPPED, "Monitoring-only device without intent")
                 continue
             planned.append((row, device))
         plans = ChangePlanner(self._toolchain, self._recorder).plan(
@@ -68,43 +83,68 @@ class _BasePipeline:
     def _auto_commit_diff_to_git(self, job: Job) -> None:
         try:
             from netops.services.git_sot import git_commit_and_push_diff
+            from netops.settings import get_settings
 
             repo_root = getattr(self._toolchain.intents, "root", None)
             if repo_root is None:
                 return
-            device_diffs = [
-                {
-                    "hostname": row.hostname,
-                    "remediation_patch": row.remediation_config or "",
-                    "intended_config": row.intended_snapshot.content if row.intended_snapshot else "",
-                }
-                for row in job.targets
-            ]
+            settings = get_settings()
+            rt = settings.apply_runtime_overlay()
+            device_diffs = serialize_job_target_diffs(job)
             res = git_commit_and_push_diff(
                 repo_root,
                 job_id=str(job.id),
                 job_type=str(getattr(job.type, "value", job.type)),
                 device_diffs=device_diffs,
+                branch=str(rt.get("github_branch") or "main"),
+                remote_url=str(rt.get("github_repo_url") or settings.github_repo_url or ""),
             )
             if res.get("status") != "skipped_pytest":
                 self._recorder.info(
                     "git-sot",
                     f"Auto-commit to Git SoT: {res.get('branch', 'main')}@{res.get('commit_short', 'HEAD')} (pushed={res.get('pushed', False)})",
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            self._recorder.warning("git-sot", f"Auto-commit to Git SoT skipped: {exc}")
+
+    @staticmethod
+    def _is_device_sync_locked(device: Device) -> bool:
+        from netops.services.state import get_state_manager
+
+        state_mgr = get_state_manager()
+        fab = getattr(device, "fabric_id", None)
+        return bool(
+            (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"))
+            or state_mgr.is_sync_locked(f"device:{device.hostname}")
+            or (fab and state_mgr.is_sync_locked(f"fabric:{fab}"))
+        )
+
+    def _check_target_lock(self, row: JobTarget, device: Device) -> bool:
+        if self._is_device_sync_locked(device):
+            self._recorder.warning(
+                "lock",
+                "Skipped: target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
+                hostname=device.hostname,
+            )
+            row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+            return True
+        return False
 
 
 class DryRunPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
+        any_failed = False
         for row, plan in self._plan(job, self._live_targets(job)):
             if plan.error is not None:
+                any_failed = True
                 row.mark(TargetStatus.FAILED, plan.error)
                 if plan.unreachable:
                     plan.device.status = DeviceStatus.UNREACHABLE
             else:
                 row.mark(TargetStatus.SUCCESS)
         self._session.commit()
+        if not any_failed:
+            self._auto_commit_diff_to_git(job)
 
 
 
@@ -149,6 +189,12 @@ class DeployPipeline(_BasePipeline):
                 if failed_on is not None:
                     row.mark(TargetStatus.SKIPPED, f"Rollout stopped after the failure on {failed_on}")
                     continue
+                if "spine" in wave_name or "leaf" in wave_name:
+                    self._recorder.info(
+                        "drain",
+                        f"BGP Graceful Drain (GSHUT 65535:0) pre-check before deploying {row.hostname}",
+                        hostname=row.hostname,
+                    )
                 if not self._deploy_row(executor, row):
                     failed_on = row.hostname
                 self._recorder.progress(index, total)
@@ -161,14 +207,7 @@ class DeployPipeline(_BasePipeline):
         if device is None:
             row.mark(TargetStatus.FAILED, "Device was deleted")
             return False
-        from netops.services.state import get_state_manager
-
-        state_mgr = get_state_manager()
-        if (
-            (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}"))
-            or state_mgr.is_sync_locked(f"device:{device.hostname}")
-            or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}"))
-        ):
+        if self._is_device_sync_locked(device):
             row.mark(
                 TargetStatus.FAILED,
                 "Target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
@@ -204,22 +243,9 @@ class DeployPipeline(_BasePipeline):
 
 class DriftScanPipeline(_BasePipeline):
     def run(self, job: Job) -> None:
-        from netops.services.state import get_state_manager
-
-        state_mgr = get_state_manager()
         pairs = []
         for row, device in self._live_targets(job):
-            locked = False
-            if (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}")) or state_mgr.is_sync_locked(f"device:{device.hostname}") or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}")):
-                locked = True
-
-            if locked:
-                self._recorder.warning(
-                    "lock",
-                    "Skipped: target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
-                    hostname=device.hostname,
-                )
-                row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+            if self._check_target_lock(row, device):
                 continue
 
             if device.status is DeviceStatus.IN_PROGRESS:
@@ -280,24 +306,16 @@ class DriftRemediationPipeline(_BasePipeline):
         if not pairs:
             raise PipelineError("The device to remediate no longer exists")
 
-        from netops.services.state import get_state_manager
-
-        state_mgr = get_state_manager()
         for row, device in pairs:
-            locked = False
-            if (device.id is not None and state_mgr.is_sync_locked(f"device:{device.id}")) or state_mgr.is_sync_locked(f"device:{device.hostname}") or (getattr(device, "fabric_id", None) and state_mgr.is_sync_locked(f"fabric:{device.fabric_id}")):
-                locked = True
-            if locked:
-                self._recorder.warning(
-                    "lock",
-                    "Skipped: target is locked after rollback/emergency patch (reset lab or wait for lock TTL)",
-                    hostname=device.hostname,
-                )
-                row.mark(TargetStatus.SKIPPED, "Target is locked during active deployment/rollback")
+            if self._check_target_lock(row, device):
                 self._session.commit()
                 return
 
-        [(row, plan)] = self._plan(job, pairs)
+        plans = self._plan(job, pairs)
+        if not plans:
+            self._session.commit()
+            return
+        row, plan = plans[0]
 
 
         device = plan.device
@@ -316,6 +334,7 @@ class DriftRemediationPipeline(_BasePipeline):
         if plan.target is None:
             raise PipelineError(f"{device.hostname}: no management target")
         executor = DeploymentExecutor(self._session, self._toolchain, self._recorder)
-        executor.deploy(
+        if executor.deploy(
             row, device, plan.target, plan.change_plan(), expectations=plan.expectations
-        )
+        ):
+            self._auto_commit_diff_to_git(job)

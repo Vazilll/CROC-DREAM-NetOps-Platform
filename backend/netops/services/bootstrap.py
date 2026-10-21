@@ -110,7 +110,7 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
         "github": {
             **git_meta,
             "repo_connected": bool(rt.get("github_repo_connected", False)),
-            "auto_commit_on_diff": True,
+            "auto_commit_on_diff": bool(rt.get("auto_commit_on_diff", True)),
             "yaml_devices_count": yaml_count,
             "webhook_endpoint": "/api/v1/git/webhook",
             "webhook_registered": bool(rt.get("github_webhook_registered", False)),
@@ -183,14 +183,19 @@ def build_bootstrap_status(request: Request, session: Session, container: Any) -
 def configure_layers(req: Any, container: Any, session: Session | None = None) -> dict[str, Any]:
     settings = container.settings
     rt = settings.apply_runtime_overlay()
-    updates: dict[str, object] = {"auto_commit_on_diff": True}
+    updates: dict[str, object] = {
+        "auto_commit_on_diff": bool(rt.get("auto_commit_on_diff", True))
+    }
     if req.cluster_name:
         updates["cluster_name"] = req.cluster_name.strip()
     if req.exposure_mode in ("local_only", "public_tunnel"):
         updates["exposure_mode"] = req.exposure_mode
+    if getattr(req, "public_web_url", None) is not None:
+        clean_pub = str(req.public_web_url).strip()
+        updates["public_web_url"] = clean_pub
+        settings.public_web_url = clean_pub
     for opt_str in (
         "telegram_bot_username",
-        "public_web_url",
         "default_fabric_id",
         "default_domain",
         "clab_topology_path",
@@ -200,17 +205,23 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
             updates[opt_str] = str(val).strip()
     if getattr(req, "frontend_port", None) is not None:
         updates["frontend_port"] = int(req.frontend_port)
+    raw_pat = getattr(req, "github_pat", None) or getattr(req, "pat", None)
     effective_pat = (
-        req.github_pat.strip()
-        if getattr(req, "github_pat", None) and req.github_pat.strip()
+        str(raw_pat).strip()
+        if raw_pat and str(raw_pat).strip()
         else str(rt.get("github_pat") or "").strip()
     )
-    if getattr(req, "github_pat", None) and req.github_pat.strip():
-        updates["github_pat"] = req.github_pat.strip()
+    if raw_pat and str(raw_pat).strip():
+        updates["github_pat"] = str(raw_pat).strip()
     git_connect_info: dict[str, Any] | None = None
-    if req.github_repo_url:
-        clean_repo_url = req.github_repo_url.strip()
-        target_branch = (getattr(req, "github_branch", None) or "main").strip()
+    raw_repo = getattr(req, "github_repo_url", None)
+    if raw_repo is None:
+        raw_repo = getattr(req, "repo_url", None)
+    if raw_repo and str(raw_repo).strip():
+        clean_repo_url = str(raw_repo).strip()
+        target_branch = (
+            getattr(req, "github_branch", None) or getattr(req, "branch", None) or "main"
+        ).strip()
         git_connect_info = git_connect_remote(
             settings.intent_repo_path,
             clean_repo_url,
@@ -220,6 +231,10 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         updates["github_repo_url"] = git_connect_info.get("remote_url") or clean_repo_url
         updates["github_branch"] = git_connect_info.get("branch") or target_branch
         updates["github_repo_connected"] = bool(git_connect_info.get("connected", True))
+    elif raw_repo is not None:
+        updates["github_repo_url"] = ""
+        updates["github_repo_connected"] = False
+        settings.github_repo_url = ""
     if getattr(req, "auto_commit_on_diff", None) is not None:
         updates["auto_commit_on_diff"] = bool(req.auto_commit_on_diff)
     if req.github_webhook_secret is not None:
@@ -237,7 +252,7 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
                     if body.get("ok") and uname:
                         updates["telegram_bot_username"] = uname
             except Exception:
-                pass
+                _ = None
     if req.telegram_chat_id:
         updates["telegram_chat_id"] = req.telegram_chat_id.strip()
     if req.groq_api_key:
@@ -280,8 +295,9 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         or rt.get("telegram_bot_username")
         or getattr(settings, "telegram_bot_username", "")
         or ""
-    )
+    ).lstrip("@")
     bot_verified = bool(settings.telegram_bot_token or req.telegram_bot_token)
+    owner_tok_for_link = load_user_tokens(settings).get("owner") or "claim_owner"
 
     saved = settings.save_runtime_overlay(updates)
     if (
@@ -297,13 +313,13 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
             inventory = container.intents.load_inventory()
             DeviceService(session).sync_inventory(inventory)
         except Exception:
-            pass
+            _ = None
 
     git_meta = git_repo_metadata(settings.intent_repo_path, settings.github_repo_url)
     if git_connect_info:
         git_meta.update(git_connect_info)
     git_meta["repo_connected"] = bool(saved.get("github_repo_connected", False))
-    git_meta["auto_commit_on_diff"] = True
+    git_meta["auto_commit_on_diff"] = bool(saved.get("auto_commit_on_diff", True))
 
     exposure = build_exposure_payload(None, settings, saved)
 
@@ -313,8 +329,8 @@ def configure_layers(req: Any, container: Any, session: Session | None = None) -
         "websocket_enabled": False,
         "webhook_status": webhook_status,
         "bot_verified": bot_verified,
-        "bot_username": f"@{bot_username.lstrip('@')}" if bot_username else "",
-        "deep_link_claim": f"https://t.me/{bot_username.lstrip('@')}?start=claim_owner" if bot_username else "",
+        "bot_username": f"@{bot_username}" if bot_username else "",
+        "deep_link_claim": f"https://t.me/{bot_username}?start={owner_tok_for_link}" if bot_username else "",
         "git": git_meta,
         "runtime_keys": list(saved.keys()),
     }

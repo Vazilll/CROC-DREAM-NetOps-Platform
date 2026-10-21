@@ -10,8 +10,10 @@ from netops.api.routes import (
     intent_edit,
     jobs,
     owner_telegram,
+    stands,
     system,
     telemetry,
+    topology,
     users,
 )
 
@@ -20,6 +22,8 @@ api_v1.include_router(auth.router)
 api_v1.include_router(config.router)
 api_v1.include_router(system.api_router)
 api_v1.include_router(devices.router)
+api_v1.include_router(stands.router)
+api_v1.include_router(topology.router)
 api_v1.include_router(intent_edit.router)
 api_v1.include_router(jobs.router)
 api_v1.include_router(drift.router)

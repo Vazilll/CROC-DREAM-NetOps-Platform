@@ -69,127 +69,78 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
       )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6 gap-3">
-        {/* Scenario 1: Cisco ACL Drift */}
-        <div className={cardClass}>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
-                СЦЕНАРИЙ #1 · CISCO IOS-XE
-              </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+        {(
+          [
+            {
+              id: 'acl_drift',
+              badge: 'CISCO IOS-XE',
+              title: 'Дрейф ACL (Cisco)',
+              btn: 'Внедрить дрейф',
+              icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
+            },
+            {
+              id: 'huawei_drift',
+              badge: 'HUAWEI VRP',
+              title: 'Дрейф VRP',
+              btn: 'Внедрить дрейф VRP',
+              icon: <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />,
+            },
+            {
+              id: 'port_down',
+              badge: 'LINK FAILURE',
+              title: 'Port Down',
+              btn: 'Уронить порт',
+              icon: <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />,
+            },
+            {
+              id: 'ai_blackhole',
+              badge: 'Q10 GUARD',
+              title: 'Silent Blackhole',
+              btn: 'Смоделировать Blackhole',
+              icon: <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />,
+            },
+            {
+              id: 'ai_storm',
+              badge: 'Q90 GUARD',
+              title: 'Шторм трафика',
+              btn: 'Смоделировать шторм',
+              icon: <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />,
+            },
+          ] as const
+        ).map((item) => (
+          <div key={item.id} className={cardClass}>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
+                  {item.badge}
+                </span>
+                {item.icon}
+              </div>
+              <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
+                {item.title}
+              </h3>
             </div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Внепроцессный Дрейф ACL (Cisco)
-            </h3>
+            <button
+              onClick={() => handleInjectChaos(item.id)}
+              disabled={loading}
+              className={actionBtn}
+            >
+              {item.btn}
+            </button>
           </div>
-          <button
-            onClick={() => handleInjectChaos('acl_drift')}
-            disabled={loading}
-            className={actionBtn}
-          >
-            Внедрить дрейф Cisco
-          </button>
-        </div>
-
-        {/* Scenario 2: Huawei VRP / Multi-Vendor ACL Drift */}
-        <div className={cardClass}>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
-                СЦЕНАРИЙ #2 · MULTI-VENDOR
-              </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-            </div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Дрейф на Huawei VRP
-            </h3>
-          </div>
-          <button
-            onClick={() => handleInjectChaos('huawei_drift')}
-            disabled={loading}
-            className={actionBtn}
-          >
-            Внедрить мультивендорный дрейф
-          </button>
-        </div>
-
-        {/* Scenario 3: Port Down */}
-        <div className={cardClass}>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
-                СЦЕНАРИЙ #3 · ФИЗИКА
-              </span>
-              <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
-            </div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Авария Линка (Port Down)
-            </h3>
-          </div>
-          <button
-            onClick={() => handleInjectChaos('port_down')}
-            disabled={loading}
-            className={actionBtn}
-          >
-            Уронить интерфейс
-          </button>
-        </div>
-
-        {/* Scenario 4: Silent Blackhole */}
-        <div className={cardClass}>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
-                TELEMETRY · Q10 GUARD
-              </span>
-              <ShieldAlert className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
-            </div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Тихая авария (Silent Blackhole)
-            </h3>
-          </div>
-          <button
-            onClick={() => handleInjectChaos('ai_blackhole')}
-            disabled={loading}
-            className={actionBtn}
-          >
-            Смоделировать Blackhole
-          </button>
-        </div>
-
-        {/* Scenario 5: Load Surge */}
-        <div className={cardClass}>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between gap-1">
-              <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-secondary)] truncate">
-                TELEMETRY · Q90 GUARD
-              </span>
-              <AlertTriangle className="w-3.5 h-3.5 text-[var(--text-secondary)] shrink-0" />
-            </div>
-            <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Шторм трафика / Микропетля
-            </h3>
-          </div>
-          <button
-            onClick={() => handleInjectChaos('ai_storm')}
-            disabled={loading}
-            className={actionBtn}
-          >
-            Смоделировать шторм
-          </button>
-        </div>
+        ))}
 
         {/* Reset */}
         <div className={cardClass}>
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-1">
               <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 truncate">
-                ЭТАЛОН GIT SOT
+                GIT SOT
               </span>
               <RotateCcw className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             </div>
             <h3 className="text-sm font-semibold text-[var(--text-primary)] tracking-tight">
-              Сброс к Git SoT
+              Эталон Git SoT
             </h3>
           </div>
           <button
@@ -197,7 +148,7 @@ export const ChaosLabView: React.FC<ChaosLabViewProps> = ({ locale = 'ru', onRef
             disabled={loading}
             className="w-full py-2 px-3 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-semibold transition-opacity cursor-pointer disabled:opacity-50"
           >
-            Сбросить к эталону (Reset)
+            Сбросить к эталону
           </button>
         </div>
       </div>

@@ -14,23 +14,25 @@ templates/
 ├── cisco_iosxe/       # Cisco IOS-XE (Catalyst 8000V / CSR1000v)
 ├── arista_eos/        # Arista EOS (cEOS / vEOS)
 ├── huawei_vrp/        # Huawei CloudEngine VRP (CE12800)
-├── eltex_mes/         # Eltex MES / ESR
+├── eltex_mes/         # Eltex MES (коммутаторы доступа/агрегации)
+├── eltex_esr/         # Eltex ESR (сервисные маршрутизаторы / Border)
 ├── juniper_junos/     # Juniper Junos (vMX / vQFX)
-└── yadro_kornfe/      # YADRO KORNFE (SONiC CLI)
+├── yadro_kornfe/      # YADRO KORNFE (SONiC CLI)
+└── linux_server/      # Linux Server (POSIX / iproute2: base.j2, interfaces.j2)
 ```
 
 ---
 
 ## Порядок сборки шаблонов
 
-Для каждого устройства рендерер последовательно склеивает 4 секционных файла внутри папки соответствующей платформы `<platform>/`:
+Для каждого устройства рендерер последовательно склеивает секционные файлы внутри папки соответствующей платформы `<platform>/`:
 
 | Порядок | Файл | За что отвечает |
 |:-------:|------|-----------------|
 | **1** | `base.j2` | Базовая системная конфигурация (`hostname`, базовые сервисы). Учётные записи и management-интерфейс сюда **не включаются**, чтобы не затрагивать OOB-управление. |
 | **2** | `interfaces.j2` | L3/L2-интерфейсы из `intent.interfaces`, описания (`description`), IPv4-адреса и маски, состояние порта (`no shutdown` / `undo shutdown` / `shutdown`), а также автоматическая генерация `Loopback0` из `bgp.router_id`, если он не задан явно. |
 | **3** | `acls.j2` | Списки контроля доступа (`ip access-list extended` / `acl name`) и правила фильтрации пакетов (`permit`/`deny`) из `intent.acls`. |
-| **4** | `bgp.j2` | Конфигурация маршрутизации BGP (`router bgp <asn>` / `bgp <asn>`), `router-id`, пиры (`neighbor ... remote-as`), описания соседей и анонсируемые сети (`network` в `address-family ipv4 unicast`). |
+| **4** | `bgp.j2` | Конфигурация маршрутизации BGP (`router bgp <asn>` / `bgp <asn>`), `router-id`, пиры (`neighbor ... remote-as`), описания соседей, анонсируемые сети и EVPN/VXLAN VNI. |
 
 ---
 

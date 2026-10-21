@@ -1,28 +1,29 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   AlertTriangle,
-  CheckCircle2,
-  Play,
-  GitCompare,
   ExternalLink,
   Server,
   Layers,
   Cpu,
-  Clock,
   ShieldCheck,
   Plus,
+  RefreshCw,
+  GitBranch,
 } from 'lucide-react';
-import { api } from '../../api';
-import type { Device, ForecastAlert, JobSummary, UserRole } from '../../api';
+import { api, getErrorMessage, type Device, type JobSummary, type StandRead, type UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
 import { TopologyMap } from '../charts/TopologyMap';
+import { GrafanaTelemetryChart } from '../charts/GrafanaTelemetryChart';
 import { BentoCard, Sparkline } from '../layout/ui';
 import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
 import { AddDeviceModal } from '../modals/AddDeviceModal';
 import { DeviceDrawer } from '../modals/DeviceDrawer';
+import { DashboardRightColumn } from './DashboardRightColumn';
 
 interface DashboardProps {
   devices: Device[];
+  stands?: StandRead[];
+  activeStand?: string;
   jobs: JobSummary[];
   userRole?: UserRole;
   locale?: Locale;
@@ -33,15 +34,10 @@ interface DashboardProps {
   onSyncInventory?: () => void;
 }
 
-const JOB_COLOR: Record<string, { text: string; bg: string; border: string }> = {
-  SUCCESS: { text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-500/10', border: 'border-emerald-500/20' },
-  FAILED: { text: 'text-rose-600 dark:text-rose-400', bg: 'bg-rose-500/10', border: 'border-rose-500/20' },
-  RUNNING: { text: 'text-cyan-600 dark:text-cyan-400', bg: 'bg-cyan-500/10', border: 'border-cyan-500/20' },
-  PENDING: { text: 'text-[var(--text-secondary)]', bg: 'bg-[var(--bg-subtle)]', border: 'border-[var(--border-subtle)]' },
-};
-
 const DashboardComponent: React.FC<DashboardProps> = ({
   devices,
+  stands,
+  activeStand,
   jobs,
   userRole,
   locale = 'ru',
@@ -52,48 +48,50 @@ const DashboardComponent: React.FC<DashboardProps> = ({
   onSyncInventory,
 }) => {
   const t = translations[locale];
-  const [alerts, setAlerts] = useState<ForecastAlert[]>([]);
-  const [dryRunRunning, setDryRunRunning] = useState<number | null>(null);
-  const [dryRunSuccess, setDryRunSuccess] = useState<number | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [drawerDeviceId, setDrawerDeviceId] = useState<number | null>(null);
+  const [syncingGit, setSyncingGit] = useState(false);
+  const [gitSyncFeedback, setGitSyncFeedback] = useState<{ text: string; ok: boolean } | null>(null);
 
-  useEffect(() => {
-    if (devices.length > 0) {
-      api.getForecastAlerts().then(setAlerts).catch(() => setAlerts([]));
+  const handleGitSync = async () => {
+    if (syncingGit) return;
+    setSyncingGit(true);
+    setGitSyncFeedback(null);
+    try {
+      const res = await api.syncGitSot();
+      const created = res.sync?.created?.length ?? 0;
+      const updated = res.sync?.updated?.length ?? 0;
+      setGitSyncFeedback({
+        text: created || updated ? `Git +${created}/~${updated}` : 'Git OK',
+        ok: true,
+      });
+      if (onSyncInventory) onSyncInventory();
+      window.dispatchEvent(new Event('netops-topology-mutated'));
+      window.dispatchEvent(new Event('netops-git-updated'));
+    } catch (err: unknown) {
+      setGitSyncFeedback({ text: getErrorMessage(err, 'Ошибка Git Sync'), ok: false });
+      if (onSyncInventory) onSyncInventory();
+    } finally {
+      setSyncingGit(false);
+      window.setTimeout(() => setGitSyncFeedback(null), 4000);
     }
-  }, [devices.length]);
+  };
 
   const { inSyncCount, driftCount, unreachableCount, healthPercent } = useMemo(() => {
     let inSync = 0;
     let drift = 0;
     let unreachable = 0;
     for (const d of devices) {
-      if (d.status === 'IN_SYNC' || d.status === 'UNKNOWN') inSync++;
+      if (d.status === 'IN_SYNC') inSync++;
       else if (d.status === 'DRIFT_DETECTED') drift++;
       else if (d.status === 'UNREACHABLE') unreachable++;
     }
-    const hp = devices.length > 0 ? Math.round(((devices.length - drift - unreachable) / devices.length) * 100) : 100;
+    const hp =
+      devices.length > 0 && inSync > 0
+        ? Math.round((inSync / devices.length) * 100)
+        : 0;
     return { inSyncCount: inSync, driftCount: drift, unreachableCount: unreachable, healthPercent: hp };
   }, [devices]);
-
-  const handleAlertDryRun = async (deviceId: number, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (onRunDryRun) {
-      onRunDryRun([deviceId]);
-      return;
-    }
-    setDryRunRunning(deviceId);
-    try {
-      await api.createDryRun([deviceId]);
-      setDryRunSuccess(deviceId);
-      setTimeout(() => setDryRunSuccess(null), 1800);
-    } catch {
-      // noop
-    } finally {
-      setDryRunRunning(null);
-    }
-  };
 
   const platformsCount = useMemo(() => {
     const acc: Record<string, number> = {};
@@ -131,11 +129,12 @@ const DashboardComponent: React.FC<DashboardProps> = ({
             )}
 
             <button
-              onClick={() => onSyncInventory && onSyncInventory()}
-              className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)]"
+              onClick={handleGitSync}
+              disabled={syncingGit}
+              className="p-4 rounded-lg border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-card)] transition-colors cursor-pointer flex items-center justify-center gap-2.5 text-xs font-semibold text-[var(--text-primary)] disabled:opacity-50"
             >
-              <Layers className="w-4 h-4 text-cyan-400 shrink-0" />
-              <span>{locale === 'en' ? 'Sync Git SoT' : 'Синхронизировать Git SoT'}</span>
+              <RefreshCw className={`w-4 h-4 text-cyan-400 shrink-0 ${syncingGit ? 'animate-spin' : ''}`} />
+              <span>{syncingGit ? 'Git Sync…' : locale === 'en' ? 'Sync Git SoT' : 'Синхронизировать Git SoT'}</span>
             </button>
           </div>
         )}
@@ -154,7 +153,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
 
   return (
     <div className="w-full max-w-[2560px] mx-auto space-y-3 2xl:space-y-4 select-none">
-      {/* 1. Health KPI Strip (Geist / Linear High-Density Metrics) */}
+      {/* 1. Health KPI Strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3 2xl:gap-4">
         <button
           onClick={() => onOpenTab('devices')}
@@ -233,13 +232,35 @@ const DashboardComponent: React.FC<DashboardProps> = ({
         </button>
       </div>
 
-      {/* 2. Device Fleet & Live Load Matrix (SVG Area Sparklines) */}
+      {/* 2. Device Fleet & Live Load Matrix */}
       <BentoCard
-        title={locale === 'en' ? 'Fabric Devices & Operational Load' : 'Сетевые узлы фабрики и операционная нагрузка'}
+        title={locale === 'en' ? 'Fabric Nodes' : 'Узлы фабрики'}
         icon={<Server className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
         indicator="bg-emerald-400"
         right={
           <div className="flex items-center gap-2">
+            {userRole !== 'viewer' && (
+              <button
+                type="button"
+                onClick={handleGitSync}
+                disabled={syncingGit}
+                className={`px-2 py-0.5 rounded border text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 ${
+                  gitSyncFeedback
+                    ? gitSyncFeedback.ok
+                      ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                      : 'bg-rose-500/10 border-rose-500/30 text-rose-400'
+                    : 'bg-[var(--bg-elevated)] border-[var(--border-subtle)] hover:border-[var(--border-hover)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                }`}
+                title={locale === 'en' ? 'Sync Git SoT & Inventory' : 'Синхронизировать Git SoT и инвентарь'}
+              >
+                {syncingGit ? (
+                  <RefreshCw className="w-3 h-3 animate-spin text-cyan-400" />
+                ) : (
+                  <GitBranch className="w-3 h-3 text-emerald-400" />
+                )}
+                <span>{syncingGit ? 'Sync…' : gitSyncFeedback ? gitSyncFeedback.text : 'Git Sync'}</span>
+              </button>
+            )}
             <span className="font-mono text-[11px] text-[var(--text-muted)] tabular-nums">
               {devices.length} {locale === 'en' ? 'nodes' : 'узлов'}
             </span>
@@ -277,6 +298,8 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                             ? 'bg-rose-400'
                             : device.status === 'DRIFT_DETECTED'
                             ? 'bg-amber-400'
+                            : device.status === 'UNKNOWN'
+                            ? 'bg-zinc-500'
                             : 'bg-emerald-400'
                         }`}
                       />
@@ -300,7 +323,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                 <div className="mt-3 pt-2 border-t border-[var(--border-subtle)]">
                   <div className="flex items-center justify-between text-[10px] font-mono tabular-nums mb-1.5">
                     <span className="text-[var(--text-muted)]">
-                      {locale === 'en' ? 'Uplink traffic:' : 'Трафик аплинка:'}
+                      {locale === 'en' ? 'Load (CPU / Link):' : 'Нагрузка (CPU / Канал):'}
                     </span>
                     <span
                       className={`font-medium ${
@@ -315,9 +338,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                     >
                       {device.sparkline && device.sparkline.length > 0
                         ? `${Math.round(currentLoad)}%`
-                        : locale === 'en'
-                        ? 'No data'
-                        : 'Нет данных'}
+                        : '—'}
                     </span>
                   </div>
 
@@ -333,7 +354,7 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                     </div>
                   ) : (
                     <div className="h-7 w-full flex items-center justify-center rounded border border-dashed border-[var(--border-subtle)] text-[10px] font-mono text-[var(--text-muted)]">
-                      {locale === 'en' ? 'Waiting for metrics poll' : 'Ожидание опроса метрик'}
+                      {locale === 'en' ? 'Polling…' : 'Опрос…'}
                     </div>
                   )}
                 </div>
@@ -341,8 +362,18 @@ const DashboardComponent: React.FC<DashboardProps> = ({
                 <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between text-[10px] font-mono">
                   <span className="text-[var(--text-muted)]">
                     Oper:{' '}
-                    <strong className={device.oper_status === 'UP' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}>
-                      {device.oper_status || 'UP'}
+                    <strong
+                      className={
+                        device.oper_status === 'UP'
+                          ? 'text-emerald-600 dark:text-emerald-400'
+                          : device.oper_status === 'DOWN'
+                          ? 'text-rose-600 dark:text-rose-400'
+                          : device.oper_status === 'DEGRADED'
+                          ? 'text-amber-600 dark:text-amber-400'
+                          : 'text-zinc-500'
+                      }
+                    >
+                      {device.oper_status || 'UNKNOWN'}
                     </strong>
                   </span>
                   <span className="text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] flex items-center gap-0.5">
@@ -355,33 +386,49 @@ const DashboardComponent: React.FC<DashboardProps> = ({
         </div>
       </BentoCard>
 
+      {/* 2.5. Stand Telemetry (Grafana & VictoriaMetrics Live TSDB) */}
+      <BentoCard
+        title={locale === 'en' ? 'Stand Telemetry · Live TSDB' : 'Телеметрия стенда · Live TSDB'}
+        icon={<Cpu className="w-3.5 h-3.5 text-cyan-400" />}
+        indicator="bg-cyan-400"
+      >
+        <GrafanaTelemetryChart
+          mode="stand"
+          devices={devices}
+          fabricId={activeStand}
+          points={24}
+        />
+      </BentoCard>
+
       {/* 3. Bento Grid Central Arena */}
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 2xl:gap-4">
-        {/* Left Column (7 cols on XL): CLOS Fabric Topology & Platform distribution */}
         <div className="xl:col-span-7 space-y-3">
           <BentoCard
             title={t.topologyTitle}
-            indicator="bg-zinc-400"
+            indicator="bg-cyan-400"
             right={
               <button
-                onClick={() => onOpenTab('devices')}
-                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer transition-colors"
+                onClick={() => onOpenTab('topology')}
+                className="text-cyan-400 hover:text-cyan-300 flex items-center gap-1 cursor-pointer transition-colors text-xs font-medium"
               >
-                <span>{t.allDevices}</span>
+                <span>{locale === 'en' ? 'Open Map & Links' : 'Развернуть карту'}</span>
                 <ExternalLink className="w-3 h-3" />
               </button>
             }
           >
             <TopologyMap
               devices={devices}
-              alerts={alerts}
+              stands={stands}
+              activeStand={activeStand}
               locale={locale}
+              compact
+              userRole={userRole}
+              onExpandTopology={() => onOpenTab('topology')}
               onSelectDevice={onOpenDevice}
               onRunDryRun={userRole !== 'viewer' ? onRunDryRun : undefined}
             />
           </BentoCard>
 
-          {/* Compact Platform & Role Inventory Strip */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <BentoCard title={t.platformsTitle} icon={<Cpu className="w-3.5 h-3.5 text-[var(--text-muted)]" />} indicator="bg-zinc-500">
               <div className="space-y-1.5">
@@ -411,152 +458,14 @@ const DashboardComponent: React.FC<DashboardProps> = ({
           </div>
         </div>
 
-        {/* Right Column (5 cols on XL): 6h Risk Radar & Recent Jobs */}
-        <div className="xl:col-span-5 space-y-3">
-          <BentoCard
-            title={t.riskRadarTitle}
-            indicator={alerts.length > 0 ? 'bg-amber-400' : 'bg-emerald-400'}
-            right={
-              <span className="font-mono text-[10px] text-[var(--text-muted)] tabular-nums">
-                {alerts.length > 0 ? `${alerts.length} ${t.radarAnomCount}` : (locale === 'en' ? '0 risks' : '0 рисков')}
-              </span>
-            }
-          >
-            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
-              {alerts.map((a) => (
-                <div
-                  key={`${a.device_id}-${a.metric}`}
-                  className="rounded-lg border border-amber-500/25 bg-amber-500/[0.03] p-2.5 flex flex-col gap-2 hover:border-amber-500/40 transition-colors"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                      <div className="min-w-0">
-                        <div className="font-semibold text-[var(--text-primary)] text-xs truncate">
-                          {a.hostname}
-                        </div>
-                        <div className="text-[11px] text-[var(--text-secondary)] truncate">
-                          {a.label}
-                        </div>
-                      </div>
-                    </div>
-                    <span className="font-mono tabular-nums text-[11px] text-amber-600 dark:text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 shrink-0">
-                      &gt;{a.threshold}{a.metric === 'load_1m' ? '' : '%'} {locale === 'en' ? 'in' : 'через'} ~{a.breach_in_minutes}{locale === 'en' ? 'm' : 'м'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-1.5 pt-1.5 border-t border-[var(--border-subtle)]">
-                    <button
-                      onClick={() => onOpenDevice(a.device_id)}
-                      className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
-                      title="Открыть карточку устройства и прогноз"
-                    >
-                      <ExternalLink className="w-3 h-3 text-[var(--text-secondary)]" />
-                      <span>{t.openBtn}</span>
-                    </button>
-
-                    <button
-                      onClick={() => {
-                        if (onOpenDiff) onOpenDiff();
-                        else onOpenTab('diff');
-                      }}
-                      className="px-2 py-1 rounded bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] border border-[var(--border-subtle)] text-[var(--text-primary)] text-[11px] font-mono flex items-center gap-1 transition-colors cursor-pointer"
-                      title="Сверить конфигурации в DiffViewer"
-                    >
-                      <GitCompare className="w-3 h-3 text-[var(--text-secondary)]" />
-                      <span>{t.diffBtn}</span>
-                    </button>
-
-                    {userRole !== 'viewer' && (
-                      <button
-                        onClick={(e) => handleAlertDryRun(a.device_id, e)}
-                        disabled={dryRunRunning === a.device_id}
-                        className="px-2 py-1 rounded bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-[11px] font-mono font-medium flex items-center gap-1 transition-opacity cursor-pointer disabled:opacity-50"
-                        title="Запустить предиктивный Dry-run"
-                      >
-                        <Play className="w-3 h-3 fill-current" />
-                        <span>
-                          {dryRunSuccess === a.device_id
-                            ? (locale === 'en' ? 'Launched!' : 'Запущен!')
-                            : dryRunRunning === a.device_id
-                            ? '...'
-                            : t.dryRunBtn}
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-
-              {alerts.length === 0 && (
-                <div className="py-6 text-center text-xs text-[var(--text-secondary)] flex flex-col items-center justify-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-                  <span className="text-[var(--text-primary)] font-medium">
-                    {locale === 'en' ? 'Normal state' : 'Штатный режим'}
-                  </span>
-                  <span className="text-[var(--text-muted)] text-[11px]">
-                    {locale === 'en' ? 'No metric threshold breaches forecasted within 6h' : 'Пробоев порогов в ближайшие 6 часов не прогнозируется'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </BentoCard>
-
-          <BentoCard
-            title={t.automationJobsTitle}
-            icon={<Clock className="w-3.5 h-3.5 text-[var(--text-muted)]" />}
-            indicator="bg-zinc-500"
-            right={
-              <button
-                onClick={() => onOpenTab('jobs')}
-                className="text-[var(--text-secondary)] hover:text-[var(--text-primary)] flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                <span>{t.auditLogBtn}</span>
-                <ExternalLink className="w-3 h-3" />
-              </button>
-            }
-          >
-            <div className="space-y-1">
-              {jobs.slice(0, 5).map((j) => {
-                const s = JOB_COLOR[j.status] ?? JOB_COLOR.PENDING;
-                return (
-                  <div
-                    key={j.id}
-                    onClick={() => {
-                      if (onOpenDiff) onOpenDiff(j.id);
-                      else onOpenTab('jobs');
-                    }}
-                    className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-[var(--bg-elevated)] transition-colors cursor-pointer border border-transparent hover:border-[var(--border-subtle)] text-xs"
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-mono text-[var(--text-primary)] truncate">{j.type}</span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <span className="text-[var(--text-muted)] text-[11px] font-mono tabular-nums">
-                        {new Date(j.created_at).toLocaleTimeString(locale === 'en' ? 'en-US' : 'ru-RU', {
-                          hour: '2-digit',
-                          minute: '2-digit',
-                        })}
-                      </span>
-                      <span
-                        className={`font-mono text-[10px] px-1.5 py-0.5 rounded border ${s.bg} ${s.text} ${s.border}`}
-                      >
-                        {j.status}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-
-              {jobs.length === 0 && (
-                <div className="py-4 text-center text-xs text-[var(--text-muted)]">{t.noRunsYet}</div>
-              )}
-            </div>
-          </BentoCard>
-        </div>
+        <DashboardRightColumn
+          jobs={jobs}
+          locale={locale}
+          onOpenTab={onOpenTab}
+          onOpenDiff={onOpenDiff}
+        />
       </div>
 
-      {/* Device Side Drawer Inspector */}
       <DeviceDrawer
         deviceId={drawerDeviceId}
         onClose={() => setDrawerDeviceId(null)}

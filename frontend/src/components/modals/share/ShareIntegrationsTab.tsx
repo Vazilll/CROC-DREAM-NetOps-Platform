@@ -4,6 +4,13 @@ import type { IntegrationsStatus } from '../../../api';
 
 interface ShareIntegrationsTabProps {
   integrations: IntegrationsStatus | null;
+  isAdmin?: boolean;
+  gitRepoInput: string;
+  setGitRepoInput: (v: string) => void;
+  gitBranchInput: string;
+  setGitBranchInput: (v: string) => void;
+  gitPatInput: string;
+  setGitPatInput: (v: string) => void;
   syncingGit: boolean;
   onGitSync: () => void;
   telegramNote: string;
@@ -18,6 +25,13 @@ interface ShareIntegrationsTabProps {
 
 export const ShareIntegrationsTab: React.FC<ShareIntegrationsTabProps> = ({
   integrations,
+  isAdmin = false,
+  gitRepoInput,
+  setGitRepoInput,
+  gitBranchInput,
+  setGitBranchInput,
+  gitPatInput,
+  setGitPatInput,
   syncingGit,
   onGitSync,
   telegramNote,
@@ -35,6 +49,11 @@ export const ShareIntegrationsTab: React.FC<ShareIntegrationsTabProps> = ({
         <div className="space-y-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5 text-xs font-semibold text-[var(--text-primary)]">
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  integrations?.github_sot?.github_repo_url ? 'bg-emerald-400' : 'bg-cyan-400'
+                }`}
+              />
               <GitBranch className="w-3.5 h-3.5 text-[var(--text-secondary)]" />
               <span>GitOps SoT</span>
             </div>
@@ -42,9 +61,37 @@ export const ShareIntegrationsTab: React.FC<ShareIntegrationsTabProps> = ({
               {integrations?.github_sot?.branch || 'main'} @ {integrations?.github_sot?.commit_short || 'HEAD'}
             </span>
           </div>
-          <div className="text-[11px] font-mono text-[var(--text-secondary)] truncate">
-            {integrations?.github_sot?.github_repo_url || 'Локальный репозиторий'}
-          </div>
+          {isAdmin ? (
+            <div className="space-y-1.5">
+              <input
+                type="text"
+                value={gitRepoInput}
+                onChange={(e) => setGitRepoInput(e.target.value)}
+                placeholder="https://github.com/org/netops-sot.git"
+                className={`w-full px-2.5 h-7 text-[11px] ${ctrlClass}`}
+              />
+              <div className="grid grid-cols-2 gap-1.5">
+                <input
+                  type="text"
+                  value={gitBranchInput}
+                  onChange={(e) => setGitBranchInput(e.target.value)}
+                  placeholder="main"
+                  className={`w-full px-2.5 h-7 text-[11px] ${ctrlClass}`}
+                />
+                <input
+                  type="password"
+                  value={gitPatInput}
+                  onChange={(e) => setGitPatInput(e.target.value)}
+                  placeholder="PAT (ghp_...)"
+                  className={`w-full px-2.5 h-7 text-[11px] ${ctrlClass}`}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="text-[11px] font-mono text-[var(--text-secondary)] truncate">
+              {integrations?.github_sot?.github_repo_url || 'Локальный репозиторий'}
+            </div>
+          )}
         </div>
         <button
           onClick={onGitSync}

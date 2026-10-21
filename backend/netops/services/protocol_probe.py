@@ -140,23 +140,31 @@ def snmp_agent_versions(
     host: str, port: int, *, community: str | None, timeout: float
 ) -> set[str]:
     """Return SNMP versions the agent actually answered: subset of {"v3", "v2c"}."""
-    probes = [("v3", 3, snmpv3_discovery(next(_REQUEST_IDS)))]
+    probes: list[tuple[str, int, bytes]] = []
     if community:
         probes.append(("v2c", 1, snmpv2c_get_sysdescr(community.encode(), next(_REQUEST_IDS))))
+    probes.append(("v3", 3, snmpv3_discovery(next(_REQUEST_IDS))))
     answered: set[str] = set()
-    for name, wire_version, packet in probes:
-        # connect(): ICMP port-unreachable приходит сразу как ConnectionRefusedError,
-        # а не через полный timeout; заодно отбрасываются ответы с чужих адресов.
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.settimeout(timeout)
+    # Один UDP-сокет на обе пробы: socat UDP4-RECVFROM,fork на стенде привязывает
+    # сессию к эфемерному порту клиента и отбрасывает пакет со второго сокета.
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.settimeout(timeout)
+        try:
+            sock.connect((host, port))
+        except OSError:
+            return answered
+        for name, wire_version, packet in probes:
+            data = b""
             try:
-                sock.connect((host, port))
                 sock.send(packet)
                 data = sock.recv(4096)
+            except TimeoutError:
+                continue
             except ConnectionRefusedError:
                 break  # порт закрыт — агента нет, остальные пробы бессмысленны
             except OSError:
                 continue
-        if _message_version(data) == wire_version:
-            answered.add(name)
+            if data and _message_version(data) == wire_version:
+                answered.add(name)
     return answered
+

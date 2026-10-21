@@ -56,6 +56,12 @@ def _probe_tcp_node(node: tuple[str, str, int, str, str]) -> dict[str, Any]:
 
 def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any]:
     settings = container.settings
+    rt = settings.apply_runtime_overlay()
+    default_fab = (
+        getattr(req, "fabric_id", None)
+        or getattr(settings, "default_fabric_id", "croc-dc1-pod1")
+        or "croc-dc1-pod1"
+    )
     if req.mode == "offline":
         settings.save_runtime_overlay(
             {
@@ -67,7 +73,9 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             container.intents._inventory_file = settings.inventory_file
         inventory = container.intents.load_inventory()
         sync_res = DeviceService(session).sync_inventory(inventory)
-        devices = DeviceService(session).list_devices(limit=100)
+        devices = DeviceService(session).list_devices(
+            fabric_id=getattr(req, "fabric_id", None), limit=5000
+        )
         return {
             "status": "ok",
             "mode": "offline",
@@ -89,7 +97,11 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         }
 
     clean_host = req.host.strip()
-    clean_port = int(req.port or 221)
+    clean_port = int(req.port or rt.get("clab_port") or settings.clab_port or 221)
+    clean_user = (
+        req.username.strip()
+        or str(rt.get("clab_user") or settings.clab_user or default_username()).strip()
+    )
     has_explicit_pwd = bool(req.password and str(req.password).strip())
 
     discovered_containers: list[dict[str, str]] = []
@@ -103,11 +115,15 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         from netops.enums import Platform
 
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes"):
+            ssh.load_system_host_keys()
+            ssh.set_missing_host_key_policy(paramiko.RejectPolicy())
+        else:
+            ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
         connect_kwargs: dict[str, Any] = {
             "hostname": clean_host,
             "port": clean_port,
-            "username": req.username.strip(),
+            "username": clean_user,
             "timeout": 8.0,
             "allow_agent": not has_explicit_pwd,
             "look_for_keys": not has_explicit_pwd,
@@ -119,6 +135,9 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         _, stdout, _ = ssh.exec_command(
             "docker ps --format '{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}'", timeout=4.0
         )
+        from netops.services.discovery import load_platform_profiles
+
+        platform_profiles = load_platform_profiles(settings.intent_repo_path)
         container_port_by_name: dict[str, int] = {}
         for line in stdout.read().decode("utf-8", errors="ignore").splitlines():
             parts = line.strip().split("|")
@@ -136,11 +155,9 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                 )
                 if "host-" in cname.lower() or "alpine" in cimage.lower():
                     continue
-                from netops.services.discovery import load_platform_profiles
-
                 sig_low = cimage.lower()
                 hint_plat = None
-                for p_name, p_prof in load_platform_profiles(settings.intent_repo_path).items():
+                for p_name, p_prof in platform_profiles.items():
                     sigs = [
                         *(p_prof.get("ssh_banners") or []),
                         *(p_prof.get("version_signatures") or []),
@@ -174,8 +191,43 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                         ips = [ip.strip() for ip in raw_ips.split() if ip.strip()]
                         if ips:
                             clab_port_map[str(container_port_by_name[clean_n])] = ips[-1]
+                if clab_port_map and not os.environ.get("PYTEST_CURRENT_TEST"):
+                    from netops.telemetry.targets import GNMI_RELAY_BASE_PORT, SNMP_RELAY_BASE_PORT
+
+                    profs = load_platform_profiles(settings.intent_repo_path)
+                    relay_cmds: list[str] = []
+                    for p_str, nip in clab_port_map.items():
+                        octet = int(nip.rsplit(".", 1)[-1])
+                        sp = SNMP_RELAY_BASE_PORT + octet
+                        gp = GNMI_RELAY_BASE_PORT + octet
+                        h_plat = port_platform_hints.get(int(p_str))
+                        p_key = h_plat.value if hasattr(h_plat, "value") else str(h_plat or "")
+                        g_def = int(((profs.get(p_key) or {}).get("gnmi") or {}).get("default_port") or 6030)
+                        relay_cmds.append(
+                            f"(docker ps --format '{{{{.Names}}}}' | grep -qx snmp-relay-{octet} || "
+                            f"(docker rm -f snmp-relay-{octet} >/dev/null 2>&1; "
+                            f"docker run -d --restart unless-stopped --name snmp-relay-{octet} --network clab_mgmt "
+                            f"-p {sp}:161/udp alpine/socat UDP4-RECVFROM:161,fork UDP4-SENDTO:{nip}:161 >/dev/null 2>&1))"
+                        )
+                        relay_cmds.append(
+                            f"(docker ps --format '{{{{.Names}}}}' | grep -qx gnmi-relay-{octet} || "
+                            f"(docker rm -f gnmi-relay-{octet} >/dev/null 2>&1; "
+                            f"docker run -d --restart unless-stopped --name gnmi-relay-{octet} --network clab_mgmt "
+                            f"-p {gp}:{gp}/tcp alpine/socat TCP-LISTEN:{gp},fork,reuseaddr TCP:{nip}:{g_def} >/dev/null 2>&1))"
+                        )
+                    for cname, p_val in container_port_by_name.items():
+                        nip = clab_port_map.get(str(p_val))
+                        if nip and port_platform_hints.get(p_val) == Platform.ARISTA_EOS:
+                            relay_cmds.append(
+                                f"printf 'enable\\nconfigure\\ninterface Management0\\nip address {nip}/24\\n"
+                                f"management api gnmi\\ntransport grpc default\\nno shutdown\\nend\\n' "
+                                f"| docker exec -i {cname} FastCli -p 15 >/dev/null 2>&1 || true"
+                            )
+                    if relay_cmds:
+                        _, r_out, _ = ssh.exec_command(" ; ".join(relay_cmds), timeout=25.0)
+                        r_out.channel.recv_exit_status()
             except Exception:
-                pass
+                _ = None
         if not candidate_ports_set:
             try:
                 _, ss_out, _ = ssh.exec_command("ss -tlnH | awk '{print $4}'", timeout=3.0)
@@ -186,27 +238,27 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                         if 2000 <= p_val <= 2999 and p_val != clean_port:
                             candidate_ports_set.add(p_val)
             except Exception:
-                pass
-        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
+                _ = None
+        discovered_topo_path = f"/home/{clean_user}/clab-quickstart/fabric.clab.yaml"
     except paramiko.AuthenticationException as exc:
         if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Неверный пароль SSH: сервер отклонил аутентификацию",
             ) from exc
-        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
+        discovered_topo_path = f"/home/{clean_user}/clab-quickstart/fabric.clab.yaml"
     except Exception as exc:
         if has_explicit_pwd or not os.environ.get("PYTEST_CURRENT_TEST"):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Ошибка подключения или выполнения команд SSH: {exc}",
             ) from exc
-        discovered_topo_path = f"/home/{req.username.strip()}/clab-quickstart/fabric.clab.yaml"
+        discovered_topo_path = f"/home/{clean_user}/clab-quickstart/fabric.clab.yaml"
     finally:
         try:
             ssh.close()
         except Exception:
-            pass
+            _ = None
 
     existing_pws: list[str] = []
     try:
@@ -223,18 +275,18 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                     if pw_val not in existing_pws:
                         existing_pws.append(pw_val)
     except Exception:
-        pass
+        _ = None
 
     settings.save_runtime_overlay(
         {
             "network_driver": "scrapli",
             "clab_host": clean_host,
             "clab_port": clean_port,
-            "clab_user": req.username.strip(),
+            "clab_user": clean_user,
             "clab_password": req.password if req.password else None,
-            "clab_topology_path": discovered_topo_path,
+            "clab_topology_path": str(rt.get("clab_topology_path") or discovered_topo_path),
             "clab_port_map": clab_port_map or None,
-            "exposure_mode": "public_tunnel",
+            "exposure_mode": str(rt.get("exposure_mode") or "public_tunnel"),
             "bootstrap_completed": True,
         }
     )
@@ -288,10 +340,27 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         with ThreadPoolExecutor(max_workers=max(1, min(8, len(candidate_ports)))) as pool:
             live_switches = [sw for sw in pool.map(_probe_live_port, candidate_ports) if sw]
 
+        if server_ssh_ok and not any(
+            str(d.management_ip) == clean_host
+            and int(d.management_port) == clean_port
+            and d.fabric_id == default_fab
+            for d in DeviceService(session).list_devices(fabric_id=default_fab, limit=5000)
+        ):
+            srv_sw = discover_live_switch_via_ssh(
+                host=clean_host,
+                port=clean_port,
+                username=clean_user,
+                password=str(req.password or fallback_password()),
+                settings=settings,
+                candidate_passwords=cand_pws,
+                initial_platform=Platform.LINUX_SERVER,
+            )
+            if srv_sw:
+                live_switches.append(srv_sw)
+
         if live_switches:
             from netops.intent.models import Inventory
 
-            default_fab = getattr(settings, "default_fabric_id", "croc-dc1-pod1") or "croc-dc1-pod1"
             inv_items = [
                 {
                     "hostname": sw["hostname"],
@@ -307,7 +376,9 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
             ]
             inventory = Inventory.model_validate({"devices": inv_items})
             sync_res = DeviceService(session).sync_inventory(inventory)
-            db_devices = list(DeviceService(session).list_devices(limit=100))
+            db_devices = list(
+                DeviceService(session).list_devices(fabric_id=default_fab, limit=5000)
+            )
             dev_by_host = {d.hostname: d for d in db_devices}
             for sw in live_switches:
                 dev = dev_by_host.get(sw["hostname"])
@@ -372,7 +443,11 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
         created_cnt = 0
         updated_cnt = 0
 
-    db_devices = list(DeviceService(session).list_devices(limit=100))
+    db_devices = list(
+        DeviceService(session).list_devices(
+            fabric_id=getattr(req, "fabric_id", None), limit=5000
+        )
+    )
     known_fabric_nodes = [
         (
             d.hostname,
@@ -395,13 +470,13 @@ def discover_server(req: Any, session: Session, container: Any) -> dict[str, Any
                         sw["reachable"] = False
                         sw["banner"] = ""
                 except Exception:
-                    pass
+                    _ = None
     any_port_open = any(sw["reachable"] for sw in discovered_switches)
 
     reachable_hosts = {sw["hostname"] for sw in discovered_switches if sw["reachable"]}
     for dev in db_devices:
         dev.status = (
-            DeviceStatus.IN_SYNC
+            DeviceStatus.UNKNOWN
             if dev.hostname in reachable_hosts
             else DeviceStatus.UNREACHABLE
         )

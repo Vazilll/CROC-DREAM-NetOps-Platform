@@ -63,7 +63,9 @@ def build_exposure_payload(
     pub_host = resolve_public_host(request, settings, rt)
     has_public_host = bool(pub_host and pub_host not in ("localhost", "127.0.0.1"))
 
-    if exp_mode == "public_tunnel" and has_public_host and not os.environ.get("PYTEST_CURRENT_TEST"):
+    if exp_mode != "public_tunnel":
+        stop_public_role_tunnels()
+    elif has_public_host and not os.environ.get("PYTEST_CURRENT_TEST"):
         ensure_public_role_tunnels_async(settings, web_port)
 
     tunnel_port = _ACTIVE_PUBLIC_PORT if has_public_host else web_port
@@ -85,6 +87,20 @@ def build_exposure_payload(
         "public_host": pub_host if has_public_host else None,
         "websocket_enabled": False,
     }
+
+
+def stop_public_role_tunnels() -> None:
+    """Close active SSH reverse tunnel when switching to local_only mode."""
+    global _ACTIVE_TUNNEL_HOST, _ACTIVE_TUNNEL_SSH
+    with _TUNNEL_LOCK:
+        ssh = _ACTIVE_TUNNEL_SSH
+        _ACTIVE_TUNNEL_SSH = None
+        _ACTIVE_TUNNEL_HOST = None
+    if ssh is not None:
+        try:
+            ssh.close()
+        except Exception:
+            _ = None
 
 
 def redact_cascade_for_caller(
@@ -115,13 +131,13 @@ def _pipe_sockets(a: socket.socket, b: socket.socket) -> None:
                 target = b if sock is a else a
                 target.sendall(data)
     except Exception:
-        pass
+        _ = None
     finally:
         for s in (a, b):
             try:
                 s.close()
             except Exception:
-                pass
+                _ = None
 
 
 def _handle_reverse_channel(chan: Any, target_host: str, target_port: int) -> None:
@@ -135,11 +151,11 @@ def _handle_reverse_channel(chan: Any, target_host: str, target_port: int) -> No
         try:
             chan.close()
         except Exception:
-            pass
+            _ = None
         try:
             sock.close()
         except Exception:
-            pass
+            _ = None
 
 
 def ensure_public_role_tunnels_async(settings: Any, base_web_port: int | None = None) -> None:
@@ -158,13 +174,21 @@ def ensure_public_role_tunnels_async(settings: Any, base_web_port: int | None = 
     if not clab_host or clab_host in ("localhost", "127.0.0.1") or not clab_user or not clab_pw:
         return
 
-    global _ACTIVE_TUNNEL_HOST
+    global _ACTIVE_TUNNEL_HOST, _ACTIVE_TUNNEL_SSH
+    stale_ssh = None
     with _TUNNEL_LOCK:
-        if _ACTIVE_TUNNEL_SSH is not None and clab_host == _ACTIVE_TUNNEL_HOST:
+        if _ACTIVE_TUNNEL_SSH is not None:
             transport = _ACTIVE_TUNNEL_SSH.get_transport()
-            if transport is not None and transport.is_active():
+            if clab_host == _ACTIVE_TUNNEL_HOST and transport is not None and transport.is_active():
                 return
+            stale_ssh = _ACTIVE_TUNNEL_SSH
+            _ACTIVE_TUNNEL_SSH = None
         _ACTIVE_TUNNEL_HOST = clab_host
+    if stale_ssh is not None:
+        try:
+            stale_ssh.close()
+        except Exception:
+            _ = None
 
     def _worker() -> None:
         global _ACTIVE_TUNNEL_SSH, _ACTIVE_PUBLIC_PORT
@@ -172,7 +196,10 @@ def ensure_public_role_tunnels_async(settings: Any, base_web_port: int | None = 
             import paramiko
 
             ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            strict_ssh = os.getenv("NETOPS_SSH_STRICT_HOST_KEY", "").lower() in ("1", "true", "yes")
+            ssh.set_missing_host_key_policy(paramiko.RejectPolicy() if strict_ssh else paramiko.WarningPolicy())
+            if strict_ssh:
+                ssh.load_system_host_keys()
             ssh.connect(
                 hostname=clab_host,
                 port=clab_port,
@@ -223,7 +250,7 @@ def ensure_public_role_tunnels_async(settings: Any, base_web_port: int | None = 
                     stdout.read()
                     time.sleep(0.5)
                 except Exception:
-                    pass
+                    _ = None
 
             if bound_primary is not None:
                 _ACTIVE_PUBLIC_PORT = bound_primary

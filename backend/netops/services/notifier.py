@@ -174,32 +174,13 @@ def save_subscriber(settings: Settings, chat_id: int) -> None:
 
 
 def resolve_telegram_targets(settings: Settings, *, discover: bool = True) -> list[int | str]:
+    _ = discover
     targets: list[int | str] = list(settings.telegram_chat_ids)
     if settings.telegram_chat_id and settings.telegram_chat_id not in [str(t) for t in targets]:
         targets.append(settings.telegram_chat_id)
     for sub in load_saved_subscribers(settings):
         if sub not in targets and str(sub) not in [str(t) for t in targets]:
             targets.append(sub)
-
-    if not targets and discover and settings.telegram_bot_token:
-        token = settings.telegram_bot_token.get_secret_value()
-        if not token.startswith(("test", "fake", "123456")):
-            try:
-                req = urllib.request.Request(
-                    f"https://api.telegram.org/bot{token}/getUpdates?timeout=1",
-                    headers={"User-Agent": "CROC-NetOps/1.0"},
-                )
-                with urllib.request.urlopen(req, timeout=3.0) as resp:
-                    body = json.loads(resp.read().decode("utf-8"))
-                for upd in body.get("result") or []:
-                    msg = upd.get("message") or upd.get("my_chat_member") or {}
-                    cid = (msg.get("chat") or {}).get("id")
-                    if isinstance(cid, int):
-                        save_subscriber(settings, cid)
-                        if cid not in targets:
-                            targets.append(cid)
-            except Exception:
-                pass
     return targets
 
 

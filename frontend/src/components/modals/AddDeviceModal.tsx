@@ -1,27 +1,24 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   X,
   Server,
-  Cpu,
-  HardDrive,
-  Network,
-  CheckCircle2,
   AlertTriangle,
   ArrowRight,
   ArrowLeft,
   Loader2,
   ShieldAlert,
-  Radio,
+  CheckCircle2,
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
-import type { Device, DeviceProbeResult, Platform, DeviceRole, UserRole } from '../../api';
-import { PLATFORM_NAMES, ROLE_NAMES } from '../../constants';
+import type { Device, DeviceProbeResult, Platform, DeviceRole, StandRead, UserRole } from '../../api';
+import { AddDeviceStep2 } from './add_device/AddDeviceStep2';
 
 interface AddDeviceModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (device: Device) => void;
   userRole: UserRole;
+  activeStand?: string;
 }
 
 export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
@@ -29,6 +26,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   onClose,
   onSuccess,
   userRole,
+  activeStand,
 }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [ip, setIp] = useState('');
@@ -38,6 +36,8 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [proxyJump, setProxyJump] = useState('');
   const [authProfile, setAuthProfile] = useState('lab_creds');
   const [customCreds, setCustomCreds] = useState(true);
+  const [stands, setStands] = useState<StandRead[]>([]);
+  const [targetStand, setTargetStand] = useState<string>('');
 
   const [platform, setPlatform] = useState<Platform>('linux_server');
   const [role, setRole] = useState<DeviceRole>('leaf');
@@ -48,58 +48,67 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [probeError, setProbeError] = useState('');
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    api
+      .getStands()
+      .then((list) => {
+        setStands(list);
+        if (activeStand && activeStand !== 'all') {
+          setTargetStand(activeStand);
+        } else {
+          const def = list.find((s) => s.is_default || s.is_active) || list[0];
+          if (def) setTargetStand(def.slug);
+        }
+      })
+      .catch(() => {});
+  }, [isOpen, activeStand]);
+
   if (!isOpen) return null;
 
-  // Smart IP handler that splits ip:port if pasted
+  const parseIpAndPort = (rawIp: string, fallbackPort: number) => {
+    let cleanIp = rawIp.trim().replace(/^https?:\/\//, '');
+    let cleanPort = fallbackPort;
+    if (cleanIp.includes(':')) {
+      const [hostPart, portPart] = cleanIp.split(':');
+      cleanIp = hostPart;
+      const p = parseInt(portPart, 10);
+      if (!isNaN(p) && p > 0 && p <= 65535) cleanPort = p;
+    }
+    return { cleanIp, cleanPort };
+  };
+
   const handleIpChange = (val: string) => {
-    let clean = val.trim();
-    if (clean.includes(':')) {
-      const parts = clean.split(':');
-      setIp(parts[0]);
-      const p = parseInt(parts[1], 10);
-      if (!isNaN(p) && p > 0 && p <= 65535) {
-        setPort(p);
-      }
+    if (val.trim().includes(':')) {
+      const { cleanIp, cleanPort } = parseIpAndPort(val, port);
+      setIp(cleanIp);
+      setPort(cleanPort);
     } else {
       setIp(val);
     }
   };
 
   const handleProbe = async () => {
-    let cleanIp = ip.trim().replace(/^https?:\/\//, '');
-    let cleanPort = port;
-    if (cleanIp.includes(':')) {
-      const parts = cleanIp.split(':');
-      cleanIp = parts[0];
-      const p = parseInt(parts[1], 10);
-      if (!isNaN(p) && p > 0 && p <= 65535) cleanPort = p;
-    }
-
+    const { cleanIp, cleanPort } = parseIpAndPort(ip, port);
     if (!cleanIp) {
       setProbeError('Укажите IP-адрес или FQDN устройства');
       return;
     }
-
     setProbing(true);
     setProbeError('');
     try {
+      const effectiveJump = proxyJump.trim() || (targetStand ? `stand:${targetStand}` : undefined);
       const res = await api.probeDevice({
         management_ip: cleanIp,
         management_port: cleanPort,
         username: customCreds ? username : undefined,
         password: customCreds ? password : undefined,
-        proxy_jump: proxyJump.trim() || undefined,
+        proxy_jump: effectiveJump,
       });
       setProbeResult(res);
-      if (res.hostname) {
-        setHostname(res.hostname);
-      }
-      if (res.detected_platform) {
-        setPlatform(res.detected_platform);
-      }
-      if (res.detected_role) {
-        setRole(res.detected_role);
-      }
+      if (res.hostname) setHostname(res.hostname);
+      if (res.detected_platform) setPlatform(res.detected_platform);
+      if (res.detected_role) setRole(res.detected_role);
       setStep(2);
     } catch (err: unknown) {
       setProbeError(getErrorMessage(err, 'Ошибка SSH-пробы оборудования'));
@@ -112,34 +121,26 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
     setSaving(true);
     setProbeError('');
     try {
-      let cleanIp = ip.trim().replace(/^https?:\/\//, '');
-      let cleanPort = port;
-      if (cleanIp.includes(':')) {
-        const parts = cleanIp.split(':');
-        cleanIp = parts[0];
-        const p = parseInt(parts[1], 10);
-        if (!isNaN(p) && p > 0 && p <= 65535) cleanPort = p;
-      }
-
+      const { cleanIp, cleanPort } = parseIpAndPort(ip, port);
       const rawHostname = hostname.trim() || probeResult?.hostname || `node-${cleanPort}`;
-      // Sanitize hostname to valid RFC label (only letters, digits, and hyphens)
       const finalHostname = rawHostname.replace(/[^A-Za-z0-9.-]/g, '-').toLowerCase();
-
       const profileKey = customCreds
         ? `${finalHostname.split('.')[0].replace(/[^a-z0-9_]/g, '_')}_auth`
         : authProfile;
-
+      const chosenStandObj = stands.find((s) => s.slug === targetStand);
       const newDev = await api.createDevice({
         hostname: finalHostname,
         management_ip: cleanIp,
         management_port: cleanPort,
         platform,
         role,
+        fabric_id: targetStand || undefined,
+        site: chosenStandObj?.site || targetStand || undefined,
         auth_profile: profileKey,
         username: customCreds ? username : undefined,
         password: customCreds ? password : undefined,
         management_mode: 'MONITORING_ONLY',
-        proxy_jump: proxyJump.trim() || null,
+        proxy_jump: proxyJump.trim() || (targetStand ? `stand:${targetStand}` : null),
         hardware_specs: probeResult
           ? JSON.stringify({
               cpu_cores: probeResult.cpu_cores,
@@ -151,7 +152,6 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             })
           : null,
       });
-
       onSuccess(newDev);
       handleClose();
     } catch (err: unknown) {
@@ -238,18 +238,36 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                     </div>
                   </div>
 
-                  {/* Bastion / ProxyJump */}
-                  <div>
-                    <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
-                      Bastion / ProxyJump (Опционально)
-                    </label>
-                    <input
-                      type="text"
-                      value={proxyJump}
-                      onChange={(e) => setProxyJump(e.target.value)}
-                      placeholder="user@jump:22"
-                      className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono focus:outline-none transition-colors"
-                    />
+                  {/* Stand / Fabric & Bastion / ProxyJump */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
+                        Целевой стенд / Фабрика ЦОД
+                      </label>
+                      <select
+                        value={targetStand}
+                        onChange={(e) => setTargetStand(e.target.value)}
+                        className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono focus:outline-none transition-colors"
+                      >
+                        {stands.map((s) => (
+                          <option key={s.slug} value={s.slug}>
+                            {s.name} ({s.slug})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1.5">
+                        Bastion / ProxyJump (Опционально)
+                      </label>
+                      <input
+                        type="text"
+                        value={proxyJump}
+                        onChange={(e) => setProxyJump(e.target.value)}
+                        placeholder={targetStand ? `stand:${targetStand}` : 'user@jump:22'}
+                        className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-2 text-xs text-zinc-200 font-mono focus:outline-none transition-colors"
+                      />
+                    </div>
                   </div>
 
                   {/* Auth Configuration */}
@@ -314,148 +332,16 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
 
               {/* STEP 2: Probe Results & Confirmation */}
               {step === 2 && probeResult && (
-                <div className="space-y-4 animate-fade-in">
-                  <div
-                    className={`p-4 rounded-xl border flex items-center justify-between ${
-                      probeResult.reachable
-                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-                        : 'bg-rose-500/10 border-rose-500/25 text-rose-300'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      {probeResult.reachable ? (
-                        <CheckCircle2 className="w-6 h-6 text-emerald-400 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="w-6 h-6 text-rose-400 shrink-0" />
-                      )}
-                      <div>
-                        <div className="font-semibold text-xs text-white">
-                          {probeResult.reachable
-                            ? 'Оборудование успешно обнаружено'
-                            : 'Узел не отвечает по указанному порту'}
-                        </div>
-                        <div className="text-[11px] text-zinc-400">{probeResult.message}</div>
-                      </div>
-                    </div>
-                    <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded bg-black/40">
-                      {probeResult.reachable ? 'SSH Reachable' : 'Unreachable'}
-                    </span>
-                  </div>
-
-                  {/* Discovered Specs Bento */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    <div className="p-3 rounded-xl bg-[#0c0e14] border border-white/[0.06]">
-                      <div className="flex items-center gap-1.5 text-zinc-400 text-[11px] mb-1">
-                        <Cpu className="w-3.5 h-3.5 text-cyan-400" />
-                        <span>CPU Cores</span>
-                      </div>
-                      <div className="text-base font-bold text-zinc-100 font-mono">
-                        {probeResult.cpu_cores ? `${probeResult.cpu_cores} vCPU` : '—'}
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-[#0c0e14] border border-white/[0.06]">
-                      <div className="flex items-center gap-1.5 text-zinc-400 text-[11px] mb-1">
-                        <HardDrive className="w-3.5 h-3.5 text-indigo-400" />
-                        <span>Память RAM</span>
-                      </div>
-                      <div className="text-base font-bold text-zinc-100 font-mono">
-                        {probeResult.ram_gb ? `${probeResult.ram_gb} GB` : '—'}
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-[#0c0e14] border border-white/[0.06]">
-                      <div className="flex items-center gap-1.5 text-zinc-400 text-[11px] mb-1">
-                        <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                        <span>Диск NVMe</span>
-                      </div>
-                      <div className="text-base font-bold text-zinc-100 font-mono">
-                        {probeResult.disk_gb ? `${probeResult.disk_gb} GB` : '—'}
-                      </div>
-                    </div>
-
-                    <div className="p-3 rounded-xl bg-[#0c0e14] border border-white/[0.06]">
-                      <div className="flex items-center gap-1.5 text-zinc-400 text-[11px] mb-1">
-                        <Radio className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Интерфейсы</span>
-                      </div>
-                      <div className="text-base font-bold text-zinc-100 font-mono">
-                        {probeResult.interfaces && probeResult.interfaces.length > 0
-                          ? `${probeResult.interfaces.length} портов`
-                          : '—'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Device Meta Form */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-                        Хостнейм в фабрике
-                      </label>
-                      <input
-                        type="text"
-                        value={hostname}
-                        onChange={(e) => setHostname(e.target.value)}
-                        placeholder={probeResult.hostname || 'leaf-1'}
-                        className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-100 font-mono focus:outline-none"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-                        Роль в топологии
-                      </label>
-                      <select
-                        value={role}
-                        onChange={(e) => setRole(e.target.value as DeviceRole)}
-                        className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none"
-                      >
-                        {Object.entries(ROLE_NAMES).map(([k, v]) => (
-                          <option key={k} value={k}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
-                        Сетевая ОС / Платформа
-                      </label>
-                      <select
-                        value={platform}
-                        onChange={(e) => setPlatform(e.target.value as Platform)}
-                        className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none"
-                      >
-                        {Object.entries(PLATFORM_NAMES).map(([k, v]) => (
-                          <option key={k} value={k}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  {/* Safe-First Callout */}
-                  <div className="p-3.5 rounded-xl bg-cyan-950/20 border border-cyan-500/20 text-cyan-200 text-xs flex items-start gap-3">
-                    <Network className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-semibold text-cyan-300">Безопасный Safe-First режим</div>
-                      <p className="text-[11px] text-zinc-400 mt-0.5">
-                        Устройство добавляется в режиме <strong>MONITORING_ONLY</strong>. В этом режиме
-                        собирается телеметрия, но исключены случайные мутации конфигурации до явного
-                        подтверждения администратором.
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Error in Step 2 */}
-                  {probeError && (
-                    <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/25 text-rose-300 text-xs flex items-center gap-2.5">
-                      <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" />
-                      <span>{probeError}</span>
-                    </div>
-                  )}
-                </div>
+                <AddDeviceStep2
+                  probeResult={probeResult}
+                  hostname={hostname}
+                  setHostname={setHostname}
+                  role={role}
+                  setRole={setRole}
+                  platform={platform}
+                  setPlatform={setPlatform}
+                  probeError={probeError}
+                />
               )}
             </>
           )}

@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.1 /uv /bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.13.4 /uv /bin/uv
 # gnmic нужен платформе для проверки gNMI (gRPC Capabilities) перед переводом устройства на поток.
 COPY --from=ghcr.io/openconfig/gnmic:0.49.0 /app/gnmic /usr/local/bin/gnmic
 
@@ -27,7 +27,10 @@ COPY netops ./netops
 ENV PYTHONPATH="/app"
 RUN uv sync --no-dev --no-install-project --extra scrapli --offline || true
 
-RUN useradd --create-home --uid 1000 netops && chown -R netops:netops /app
+RUN useradd --create-home --uid 1000 netops \
+    && mkdir -p /data \
+    && chown -R netops:netops /app /data \
+    && git config --system safe.directory '*'
 USER netops
 
 EXPOSE 8000

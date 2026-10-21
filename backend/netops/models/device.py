@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import String, UniqueConstraint
+from sqlalchemy import Index, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from netops.db import Base, enum_type, utcnow
@@ -12,7 +12,10 @@ from netops.enums import DeviceRole, DeviceStatus, Platform
 
 class Device(Base):
     __tablename__ = "devices"
-    __table_args__ = (UniqueConstraint("management_ip", "management_port"),)
+    __table_args__ = (
+        UniqueConstraint("fabric_id", "management_ip", "management_port"),
+        Index("ix_devices_fabric_id_hostname", "fabric_id", "hostname"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     hostname: Mapped[str] = mapped_column(String(253), unique=True)

@@ -5,28 +5,20 @@ import {
   Play,
   RotateCcw,
   RefreshCw,
-  AlertTriangle,
   Send,
   Trash2,
   Zap,
   Lock,
   Copy,
   Check,
-  History,
-  User,
 } from 'lucide-react';
 import { api, getErrorMessage } from '../../api';
 import type { EmergencyAuditLog } from '../../api';
-
-const PRESETS: Record<string, string[]> = {
-  arista_eos: ['show ip bgp summary', 'show ip route', 'show interfaces status', 'show running-config'],
-  cisco_iosxe: ['show ip bgp summary', 'show ip interface brief', 'show ip route', 'show version'],
-  huawei_vrp: ['display bgp peer', 'display ip interface brief', 'display ip routing-table', 'display current-configuration'],
-};
+import { PLATFORM_CLI_PRESETS } from '../../constants';
+import { EmergencyAuditSection } from './EmergencyAuditSection';
 
 interface EmergencyHubProps {
   currentRole: 'operator' | 'admin';
-  onSwitchRole?: (role: 'operator' | 'admin') => void;
 }
 
 export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
@@ -129,7 +121,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   };
 
   const activeDeviceObj = devices.find((d) => d.hostname === selectedDevice) || devices[0];
-  const activePresets = (activeDeviceObj && PRESETS[activeDeviceObj.platform]) || PRESETS.arista_eos;
+  const activePresets =
+    (activeDeviceObj && PLATFORM_CLI_PRESETS[activeDeviceObj.platform]) || PLATFORM_CLI_PRESETS.arista_eos;
 
   const handleRunCommand = async (cmdToRun = command) => {
     if (!cmdToRun.trim() || !selectedDevice) return;
@@ -206,13 +199,13 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   if (currentRole !== 'admin') {
     return (
       <div className="max-w-4xl mx-auto p-8 animate-fade-in">
-        <div className="p-8 rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] text-center space-y-4">
-          <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
-            <Lock className="w-7 h-7" />
+        <div className="p-8 rounded-2xl border border-amber-500/20 bg-amber-500/[0.04] text-center space-y-3">
+          <div className="w-12 h-12 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <Lock className="w-6 h-6" />
           </div>
-          <h2 className="text-xl font-bold text-white">Доступ к Аварийному пульту ограничен (403 RBAC)</h2>
-          <p className="text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
-            Модуль аварийного вмешательства (прямой Web SSH CLI, накатывание хот-патчей и двухуровневый сброс фабрики) доступен только пользователям с ролью <strong className="text-amber-300">Admin</strong> или <strong className="text-amber-300">Owner</strong>.
+          <h2 className="text-lg font-bold text-white">Доступ ограничен (403 RBAC)</h2>
+          <p className="text-xs font-mono text-slate-400 max-w-sm mx-auto">
+            Требуется роль <strong className="text-amber-300">Admin</strong> или <strong className="text-amber-300">Owner</strong>.
           </p>
         </div>
       </div>
@@ -222,60 +215,60 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   return (
     <div className="space-y-6 max-w-7xl mx-auto p-3 sm:p-6 animate-fade-in text-[var(--text-primary)]">
       {/* Top Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-lg border border-amber-500/25 bg-amber-500/[0.04]">
-        <div className="flex items-center gap-3.5">
-          <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 dark:text-amber-400">
-            <ShieldAlert className="w-6 h-6" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-lg border border-amber-500/25 bg-amber-500/[0.04]">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-500 dark:text-amber-400">
+            <ShieldAlert className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-slate-900 dark:text-white tracking-tight">Аварийный пульт прямого управления</h1>
-              <span className="px-2 py-0.5 rounded text-[11px] font-mono font-medium bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
-                ADMIN EXCLUSIVE
+              <h1 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">Аварийный пульт</h1>
+              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-amber-500/30">
+                ADMIN
               </span>
             </div>
-            <p className="text-xs text-slate-600 dark:text-slate-400 mt-0.5">
-              Прямой доступ к CLI Bare Metal оборудования, экстренное накатывание конфигурации и двухуровневый сброс сети.
+            <p className="text-[11px] font-mono text-slate-600 dark:text-slate-400 mt-0.5">
+              Прямой SSH CLI · Хот-патчи · Сброс фабрики
             </p>
           </div>
         </div>
 
         {/* 2-Tier Recovery & Freeze Quick Buttons */}
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={handleToggleFreeze}
             disabled={isTogglingFreeze}
-            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
               isFrozen
                 ? 'text-cyan-700 dark:text-cyan-200 bg-cyan-500/20 border-cyan-500/40'
                 : 'text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border-amber-500/30'
             }`}
           >
             <Lock className="w-3.5 h-3.5" />
-            <span>{isFrozen ? 'Разморозить фабрику' : 'Заморозка (Change Freeze)'}</span>
+            <span>{isFrozen ? 'Снять Freeze' : 'Freeze'}</span>
           </button>
           <button
             onClick={() => setResetModal('soft')}
             disabled={isSoftResetting || isHardResetting}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 transition-all cursor-pointer"
           >
             <RotateCcw className={`w-3.5 h-3.5 ${isSoftResetting ? 'animate-spin' : ''}`} />
-            Мягкий сброс (Soft Reset)
+            Soft Reset
           </button>
           <button
             onClick={() => setResetModal('hard')}
             disabled={isSoftResetting || isHardResetting}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold text-rose-700 dark:text-red-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-rose-700 dark:text-red-300 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 transition-all cursor-pointer"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isHardResetting ? 'animate-spin' : ''}`} />
-            Хард-рестарт Clab
+            Hard Reset
           </button>
         </div>
       </div>
 
       {/* Recovery Log Feedback (if any) */}
       {resetLog && (
-        <div className="p-4 rounded-xl border border-slate-700 bg-slate-900 text-xs font-mono text-slate-200 whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
+        <div className="p-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-elevated)] text-xs font-mono text-[var(--text-primary)] whitespace-pre-wrap leading-relaxed max-h-48 overflow-y-auto">
           {resetLog}
         </div>
       )}
@@ -285,10 +278,10 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
         {/* Left Column: Interactive Web CLI (7 cols) */}
         <div className="lg:col-span-7 flex flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden shadow-sm">
           {/* CLI Header */}
-          <div className="p-4 border-b border-[var(--border-subtle)] bg-slate-50 dark:bg-white/[0.02] flex flex-wrap items-center justify-between gap-3">
+          <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/50 flex flex-wrap items-center justify-between gap-3">
             <div className="flex items-center gap-2">
-              <TerminalIcon className="w-4 h-4 text-cyan-500 dark:text-cyan-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
+              <TerminalIcon className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
                 Interactive Web CLI
               </span>
             </div>
@@ -299,19 +292,19 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
               onChange={(e) => {
                 setSelectedDevice(e.target.value);
                 const dev = devices.find((d) => d.hostname === e.target.value);
-                if (dev && PRESETS[dev.platform]) {
-                  setCommand(PRESETS[dev.platform][0]);
+                if (dev && PLATFORM_CLI_PRESETS[dev.platform]) {
+                  setCommand(PLATFORM_CLI_PRESETS[dev.platform][0]);
                 }
               }}
-              className="px-3 py-1.5 rounded-lg text-xs font-mono bg-white/[0.05] border border-white/10 text-white focus:outline-none focus:border-cyan-500"
+              className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] focus:outline-none focus:border-cyan-500"
             >
               {devices.length === 0 ? (
-                <option value="" className="bg-slate-900 text-white">
+                <option value="" className="bg-[var(--bg-elevated)] text-[var(--text-primary)]">
                   Нет подключенных устройств
                 </option>
               ) : (
                 devices.map((d) => (
-                  <option key={d.hostname} value={d.hostname} className="bg-slate-900 text-white">
+                  <option key={d.hostname} value={d.hostname} className="bg-[var(--bg-elevated)] text-[var(--text-primary)]">
                     {d.label}
                   </option>
                 ))
@@ -320,8 +313,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
           </div>
 
           {/* Quick Command Pills */}
-          <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-slate-50 dark:bg-black/20 flex flex-wrap gap-1.5 items-center">
-            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400 mr-1">Шаблоны:</span>
+          <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/30 flex flex-wrap gap-1.5 items-center">
+            <span className="text-[11px] font-mono text-[var(--text-muted)] mr-1">Шаблоны:</span>
             {activePresets.map((preset) => (
               <button
                 key={preset}
@@ -358,8 +351,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
           </div>
 
           {/* Command Input Bar */}
-          <div className="p-3 border-t border-[var(--border-subtle)] bg-slate-50 dark:bg-white/[0.02] flex items-center gap-2">
-            <span className="text-xs font-mono text-cyan-600 dark:text-cyan-400 pl-2">#</span>
+          <div className="p-3 border-t border-[var(--border-subtle)] bg-[var(--bg-main)]/30 flex items-center gap-2">
+            <span className="text-xs font-mono text-cyan-400 pl-2">#</span>
             <input
               type="text"
               value={command}
@@ -367,7 +360,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
               onKeyDown={(e) => e.key === 'Enter' && handleRunCommand()}
               placeholder="Введите команду (например: show ip bgp summary)..."
               disabled={isExecutingCmd}
-              className="flex-1 bg-transparent border-0 text-xs font-mono text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none"
+              className="flex-1 bg-transparent border-0 text-xs font-mono text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none"
             />
             <button
               onClick={() => handleRunCommand()}
@@ -386,36 +379,36 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
 
         {/* Right Column: Emergency Patch Studio (5 cols) */}
         <div className="lg:col-span-5 flex flex-col rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] overflow-hidden shadow-sm">
-          <div className="p-4 border-b border-[var(--border-subtle)] bg-slate-50 dark:bg-white/[0.02] flex items-center justify-between">
+          <div className="p-4 border-b border-[var(--border-subtle)] bg-[var(--bg-main)]/50 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Zap className="w-4 h-4 text-amber-500 dark:text-amber-400" />
-              <span className="text-xs font-bold uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                Экстренный Патч-Студио
+              <Zap className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold uppercase tracking-wider text-[var(--text-primary)]">
+                Хот-патч CLI
               </span>
             </div>
-            <span className="text-[11px] font-mono text-slate-500 dark:text-slate-400">
-              На узел: <strong className="text-cyan-600 dark:text-cyan-400">{selectedDevice}</strong>
+            <span className="text-[11px] font-mono text-cyan-400 font-semibold">
+              {selectedDevice}
             </span>
           </div>
 
           <div className="p-4 space-y-4 flex-1 flex flex-col justify-between">
             <div className="space-y-3">
               <div>
-                <label className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Причина вмешательства (Audit Log):
+                <label className="block text-[11px] font-mono text-[var(--text-muted)] uppercase tracking-wider mb-1">
+                  Причина (Audit):
                 </label>
                 <input
                   type="text"
                   value={patchReason}
                   onChange={(e) => setPatchReason(e.target.value)}
-                  placeholder="Обоснование для аудита..."
-                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 text-slate-800 dark:text-zinc-200 placeholder-slate-400 focus:outline-none focus:border-cyan-500"
+                  placeholder="Обоснование..."
+                  className="w-full px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] placeholder-[var(--text-muted)] focus:outline-none focus:border-cyan-500"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-mono text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">
-                  Конфигурационные строки для применения (CLI патч):
+                <label className="block text-[11px] font-mono text-[var(--text-muted)] uppercase tracking-wider mb-1">
+                  Команды CLI:
                 </label>
                 <textarea
                   rows={8}
@@ -428,7 +421,7 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
                       ? 'interface GigabitEthernet2\n no shutdown\n exit'
                       : 'interface Ethernet1\n no shutdown\n exit'
                   }
-                  className="w-full p-3 rounded-lg text-xs font-mono bg-slate-900 dark:bg-black/60 border border-slate-700 dark:border-white/10 text-amber-300 placeholder-slate-400 focus:outline-none focus:border-amber-400"
+                  className="w-full p-3 rounded-lg text-xs font-mono bg-[var(--bg-main)]/60 border border-[var(--border-subtle)] text-amber-300 placeholder-[var(--text-muted)] focus:outline-none focus:border-amber-400"
                 />
               </div>
 
@@ -456,165 +449,23 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
                 ) : (
                   <Play className="w-4 h-4 fill-current" />
                 )}
-                Применить экстренный патч на {selectedDevice}
+                Применить на {selectedDevice}
               </button>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Emergency Audit Trail Card */}
-      <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-card)] p-4 sm:p-5 space-y-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-500 dark:text-amber-400">
-              <History className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Журнал аудита аварийных вмешательств (Audit Trail)</h3>
-              <p className="text-xs text-slate-600 dark:text-slate-400">
-                Фиксация низкоуровневых команд, хот-патчей и сбросов администратора с таймстемпом
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={loadAudit}
-            disabled={isLoadingAudit}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-300 bg-black/5 dark:bg-white/5 border border-slate-200 dark:border-white/10 hover:bg-black/10 dark:hover:bg-white/10 transition-all cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAudit ? 'animate-spin' : ''}`} />
-            Обновить
-          </button>
-        </div>
-
-        {auditLogs.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-500">
-            Журнал пуст. Экстренные действия еще не фиксировались.
-          </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-white/5 text-slate-400">
-                  <th className="pb-2.5 font-medium">Время (UTC)</th>
-                  <th className="pb-2.5 font-medium">Пользователь</th>
-                  <th className="pb-2.5 font-medium">Узел</th>
-                  <th className="pb-2.5 font-medium">Действие</th>
-                  <th className="pb-2.5 font-medium">Команда / Детали</th>
-                  <th className="pb-2.5 font-medium">Причина</th>
-                  <th className="pb-2.5 font-medium text-right">Статус</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-white/5">
-                {auditLogs.map((entry, idx) => (
-                  <tr key={idx} className="hover:bg-white/[0.02] transition-colors">
-                    <td className="py-2.5 font-mono text-slate-400 whitespace-nowrap">
-                      {new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                    </td>
-                    <td className="py-2.5 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md font-mono text-[10px] bg-amber-500/10 border border-amber-500/20 text-amber-300">
-                        <User className="w-3 h-3" />
-                        {entry.user}
-                      </span>
-                    </td>
-                    <td className="py-2.5 font-mono text-slate-300 whitespace-nowrap">{entry.device}</td>
-                    <td className="py-2.5 whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-md font-mono text-[10px] uppercase font-semibold ${
-                          entry.action === 'cli_command'
-                            ? 'bg-sky-500/10 border border-sky-500/20 text-sky-300'
-                            : entry.action === 'emergency_patch'
-                            ? 'bg-purple-500/10 border border-purple-500/20 text-purple-300'
-                            : 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-300'
-                        }`}
-                      >
-                        {entry.action}
-                      </span>
-                    </td>
-                    <td className="py-2.5 font-mono text-slate-200 max-w-xs truncate" title={entry.payload}>
-                      {entry.payload}
-                    </td>
-                    <td className="py-2.5 text-slate-400 max-w-xs truncate" title={entry.reason}>
-                      {entry.reason}
-                    </td>
-                    <td className="py-2.5 text-right whitespace-nowrap">
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-md font-mono text-[10px] font-semibold ${
-                          entry.success
-                            ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400'
-                            : 'bg-red-500/10 border border-red-500/20 text-red-400'
-                        }`}
-                      >
-                        {entry.success ? 'УСПЕШНО' : 'СБОЙ'}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Confirmation Modals for Soft/Hard Reset */}
-      {resetModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md p-6 rounded-2xl border border-white/10 bg-[#0d0f14] shadow-2xl text-slate-200 space-y-4">
-            <div className="flex items-center gap-3">
-              <div
-                className={`p-2.5 rounded-xl ${
-                  resetModal === 'soft'
-                    ? 'bg-emerald-500/10 border border-emerald-500/30 text-emerald-400'
-                    : 'bg-red-500/10 border border-red-500/30 text-red-400'
-                }`}
-              >
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">
-                  {resetModal === 'soft' ? 'Подтверждение Мягкого сброса' : 'Подтверждение Хард-рестарта Clab'}
-                </h3>
-                <p className="text-xs text-slate-400">
-                  {resetModal === 'soft'
-                    ? 'Перенакат золотого эталона Git SoT'
-                    : `Передеплой всех узлов (${devices.length}) на стенде`}
-                </p>
-              </div>
-            </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              {resetModal === 'soft' ? (
-                <>
-                  Будет выполнен прогон NetOps pipeline по всем узлам фабрики ({devices.length}). Все несанкционированные команды будут устранены, а недостающие маршруты и интерфейсы восстановлены.
-                </>
-              ) : (
-                <>
-                  Внимание: будет выполнен полный передеплой топологии стенда к базовому состоянию. Сетевые сессии перезапустятся.
-                </>
-              )}
-            </p>
-
-            <div className="flex items-center justify-end gap-2.5 pt-2">
-              <button
-                onClick={() => setResetModal(null)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 transition-all cursor-pointer"
-              >
-                Отмена
-              </button>
-              <button
-                onClick={resetModal === 'soft' ? handleSoftReset : handleHardReset}
-                className={`px-5 py-2 rounded-xl text-xs font-semibold text-black transition-all cursor-pointer ${
-                  resetModal === 'soft'
-                    ? 'bg-emerald-400 hover:bg-emerald-300 shadow-lg shadow-emerald-500/20'
-                    : 'bg-red-500 hover:bg-red-400 shadow-lg shadow-red-500/20 text-white'
-                }`}
-              >
-                {resetModal === 'soft' ? 'Выполнить Soft Reset' : 'Выполнить Hard Reset'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <EmergencyAuditSection
+        auditLogs={auditLogs}
+        isLoadingAudit={isLoadingAudit}
+        onRefreshAudit={loadAudit}
+        resetModal={resetModal}
+        setResetModal={setResetModal}
+        devicesCount={devices.length}
+        onSoftReset={handleSoftReset}
+        onHardReset={handleHardReset}
+      />
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import {
   ShieldCheck,
   ShieldAlert,
@@ -12,21 +12,29 @@ import {
   FileDown,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { DriftReportItem, UserRole } from '../../api';
+import type { Device, DriftReportItem, UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
+import { downloadMarkdown } from '../layout/ui';
 
 interface DriftViewProps {
   userRole?: UserRole;
   locale?: Locale;
+  devices?: Device[];
   onRemediate: (deviceId: number) => void;
   onScanDrift: () => void;
 }
 
-export const DriftView: React.FC<DriftViewProps> = ({ userRole = 'viewer', locale = 'ru', onRemediate, onScanDrift }) => {
+export const DriftView: React.FC<DriftViewProps> = ({ userRole = 'viewer', locale = 'ru', devices, onRemediate, onScanDrift }) => {
   const canOperate = userRole !== 'viewer';
   const t = translations[locale];
-  const [report, setReport] = useState<DriftReportItem[]>([]);
+  const [rawReport, setReport] = useState<DriftReportItem[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const report = useMemo(() => {
+    if (!devices) return rawReport;
+    const allowedIds = new Set(devices.map((d) => d.id));
+    return rawReport.filter((r) => allowedIds.has(r.device_id));
+  }, [rawReport, devices]);
 
   const fetchReport = () => {
     setLoading(true);
@@ -87,13 +95,10 @@ ${listText || 'Данные отсутствуют'}
 ---
 *Документ сформирован автоматически платформой CROC DREAM NetOps Platform*
 `;
-    const blob = new Blob([act], { type: 'text/markdown;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `NetOps_Compliance_Act_${new Date().toISOString().slice(0, 10)}.md`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadMarkdown(
+      `NetOps_Compliance_Act_${new Date().toISOString().slice(0, 10)}.md`,
+      act
+    );
   };
 
   return (
@@ -175,7 +180,7 @@ ${listText || 'Данные отсутствуют'}
       <div className="space-y-3">
         <h3 className="text-xs font-semibold font-mono uppercase tracking-wider text-[var(--text-secondary)] flex items-center gap-2">
           <Terminal className="w-3.5 h-3.5 text-[var(--text-muted)]" />
-          <span>Детализация Расхождений по Оборудованию</span>
+          <span>{locale === 'en' ? 'Node Drift' : 'Расхождения по узлам'}</span>
         </h3>
 
         {report.map((item) => (
@@ -196,7 +201,7 @@ ${listText || 'Данные отсутствуют'}
                   <h4 className="text-sm font-semibold text-[var(--text-primary)] font-mono">{item.hostname}</h4>
                   <div className="flex items-center gap-1.5 text-[11px] font-mono tabular-nums text-[var(--text-muted)]">
                     <Clock className="w-3 h-3" />
-                    <span>Проверено: {new Date(item.checked_at).toLocaleTimeString()}</span>
+                    <span>{new Date(item.checked_at).toLocaleTimeString()}</span>
                   </div>
                 </div>
               </div>
@@ -232,7 +237,7 @@ ${listText || 'Данные отсутствуют'}
                     className="px-3 py-1.5 bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 rounded-md text-xs font-mono font-semibold flex items-center gap-1.5 transition-opacity cursor-pointer"
                   >
                     <Wrench className="w-3.5 h-3.5" />
-                    <span>Устранить дрейф (Remediate)</span>
+                    <span>{locale === 'en' ? 'Remediate' : 'Устранить'}</span>
                   </button>
                 )}
               </div>
@@ -242,7 +247,7 @@ ${listText || 'Данные отсутствуют'}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs font-mono pt-3">
                 <div className="p-3 rounded-md bg-[var(--bg-main)] border border-rose-500/20 space-y-2">
                   <span className="text-[11px] font-semibold text-rose-500 dark:text-rose-400 uppercase tracking-wider block">
-                    Несанкционированные строки (+) ({item.unauthorized_lines.length})
+                    + Лишние строки ({item.unauthorized_lines.length})
                   </span>
                   <div className="space-y-1">
                     {item.unauthorized_lines.map((line, i) => (
@@ -251,14 +256,14 @@ ${listText || 'Данные отсутствуют'}
                       </div>
                     ))}
                     {item.unauthorized_lines.length === 0 && (
-                      <span className="text-[var(--text-muted)] italic">Нет лишних строк</span>
+                      <span className="text-[var(--text-muted)] italic">Нет</span>
                     )}
                   </div>
                 </div>
 
                 <div className="p-3 rounded-md bg-[var(--bg-main)] border border-amber-500/20 space-y-2">
                   <span className="text-[11px] font-semibold text-amber-500 dark:text-amber-400 uppercase tracking-wider block">
-                    Отсутствующие строки из эталона (-) ({item.missing_lines.length})
+                    − Пропущено из Git ({item.missing_lines.length})
                   </span>
                   <div className="space-y-1">
                     {item.missing_lines.map((line, i) => (
@@ -267,7 +272,7 @@ ${listText || 'Данные отсутствуют'}
                       </div>
                     ))}
                     {item.missing_lines.length === 0 && (
-                      <span className="text-[var(--text-muted)] italic">Нет пропущенных строк</span>
+                      <span className="text-[var(--text-muted)] italic">Нет</span>
                     )}
                   </div>
                 </div>
@@ -275,7 +280,7 @@ ${listText || 'Данные отсутствуют'}
             ) : (
               <div className="text-xs font-mono text-[var(--text-secondary)] flex items-center gap-2 pt-2.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Рабочая конфигурация на 100% соответствует эталону в Git.</span>
+                <span>100% соответствие Git SoT</span>
               </div>
             )}
           </div>
@@ -285,7 +290,7 @@ ${listText || 'Данные отсутствуют'}
           <div className="p-12 rounded-lg bg-[var(--bg-card)] border border-[var(--border-subtle)] text-center text-[var(--text-muted)] space-y-2 font-mono text-xs">
             <ShieldCheck className="w-6 h-6 mx-auto opacity-40" />
             <p>
-              {loading ? 'Загрузка отчета о дрейфе...' : 'Отчет о дрейфе пуст. Запустите сканирование.'}
+              {loading ? 'Загрузка…' : 'Нет данных · Запустите скан'}
             </p>
           </div>
         )}

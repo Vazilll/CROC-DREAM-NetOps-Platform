@@ -47,7 +47,7 @@ class ConfigNormalizer:
                 if enum_plat in self._rules:
                     return self._rules[enum_plat]
             except ValueError:
-                pass
+                _ = None
         return self._rules[platform]
 
     def normalize(
@@ -55,13 +55,10 @@ class ConfigNormalizer:
         platform: Platform | str,
         text: str,
         *,
-        is_intended: bool = False,
         managed_only: bool = True,
     ) -> str:
         rules = self.rules_for(platform)
-        entries = list(
-            _filter_lines(text, rules, is_intended=is_intended, managed_only=managed_only)
-        )
+        entries = list(_filter_lines(text, rules, managed_only=managed_only))
         if not entries:
             return ""
         return "\n".join(_reindent(entries, rules.indent_unit)) + "\n"
@@ -123,7 +120,6 @@ def _filter_lines(
     text: str,
     rules: NormalizationRules,
     *,
-    is_intended: bool = False,
     managed_only: bool = True,
 ) -> Iterator[tuple[int, str]]:
     skip_deeper_than: int | None = None

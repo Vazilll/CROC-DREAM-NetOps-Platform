@@ -143,14 +143,10 @@ def pre_collect_cleanup(
     log_dir: str | Path = "/var/log/netops",
     max_log_bytes: int = 10 * 1024 * 1024,
 ) -> dict[str, int]:
-    """Run lightweight pre-collection cleanup: sweep expired RAM keys, compact logs, purge DB."""
+    """Run lightweight pre-collection cleanup: sweep expired RAM keys, compact logs (DB purge — только daily beat)."""
     swept = _sweep_expired_memory_state()
     logs_truncated = _truncate_oversized_logs(Path(log_dir), max_log_bytes)
     job_logs_purged = 0
-    if session is not None:
-        with contextlib.suppress(Exception):
-            res = purge_expired_records(session)
-            job_logs_purged = int(res.get("job_logs_purged", 0))
     return {
         "memory_keys_swept": swept,
         "logs_truncated": logs_truncated,

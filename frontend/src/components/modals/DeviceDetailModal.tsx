@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Network, Server, Shield, Globe, Cpu, AlertTriangle } from 'lucide-react';
+import { X, Server, Network, Shield, Globe, Cpu, AlertTriangle } from 'lucide-react';
 import { api } from '../../api';
 import type { DeviceDetail } from '../../api';
 
@@ -15,17 +15,19 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
 
   useEffect(() => {
     let mounted = true;
+    setLoading(true);
     api
       .getDevice(deviceId)
       .then((data) => {
         if (mounted) {
           setDevice(data);
+          setError(null);
           setLoading(false);
         }
       })
-      .catch((err) => {
+      .catch((err: unknown) => {
         if (mounted) {
-          setError(err.message);
+          setError(err instanceof Error ? err.message : 'Не удалось загрузить данные устройства');
           setLoading(false);
         }
       });
@@ -36,10 +38,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full text-center">
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl p-6 max-w-lg w-full text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500 mx-auto mb-4" />
-          <p className="text-sm text-slate-400">Загрузка параметров устройства...</p>
+          <p className="text-sm text-[var(--text-muted)]">Загрузка параметров устройства...</p>
         </div>
       </div>
     );
@@ -47,14 +49,14 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
 
   if (error || !device) {
     return (
-      <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-        <div className="bg-slate-900 border border-rose-900/50 rounded-2xl p-6 max-w-lg w-full text-center">
+      <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+        <div className="bg-[var(--bg-card)] border border-rose-900/50 rounded-2xl p-6 max-w-lg w-full text-center">
           <AlertTriangle className="h-8 w-8 text-rose-500 mx-auto mb-2" />
           <h3 className="text-base font-semibold text-rose-200">Ошибка загрузки</h3>
           <p className="text-xs text-rose-300/80 mt-1">{error || 'Устройство не найдено'}</p>
           <button
             onClick={onClose}
-            className="mt-4 px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs font-medium rounded-lg text-slate-200 transition"
+            className="mt-4 px-4 py-1.5 bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-xs font-medium rounded-lg text-[var(--text-primary)] border border-[var(--border-subtle)] transition-colors cursor-pointer"
           >
             Закрыть
           </button>
@@ -66,30 +68,30 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
   const { intent } = device;
 
   return (
-    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl shadow-indigo-950/40">
+    <div className="fixed inset-0 bg-black/80 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+      <div className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-2xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl">
         {/* Header */}
-        <div className="flex items-start sm:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-slate-800">
+        <div className="flex items-start sm:items-center justify-between gap-3 px-4 sm:px-6 py-4 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-3 min-w-0">
             <div className="p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 shrink-0">
               <Server className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-sm sm:text-base font-bold text-white flex flex-wrap items-center gap-2">
+              <h2 className="text-sm sm:text-base font-bold text-[var(--text-primary)] flex flex-wrap items-center gap-2">
                 <span className="truncate">{device.hostname}</span>
-                <span className="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-[var(--bg-elevated)] text-[var(--text-secondary)] font-mono border border-[var(--border-subtle)]">
                   {device.management_ip}:{device.management_port}
                 </span>
               </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Платформа: <span className="text-slate-200 uppercase font-mono">{device.platform}</span> • Роль: <span className="text-slate-200 capitalize font-mono">{device.role}</span>
+              <p className="text-xs text-[var(--text-muted)] mt-0.5">
+                Платформа: <span className="text-[var(--text-secondary)] uppercase font-mono">{device.platform}</span> • Роль: <span className="text-[var(--text-secondary)] capitalize font-mono">{device.role}</span>
               </p>
             </div>
           </div>
           <button
             onClick={onClose}
             aria-label="Закрыть инспектор Intent"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0"
+            className="p-1.5 rounded-lg text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-elevated)] transition-colors shrink-0 cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -102,7 +104,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
             <>
               {/* Interfaces */}
               <div>
-                <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center space-x-1.5">
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3 flex items-center space-x-1.5 font-mono">
                   <Network className="w-4 h-4 text-cyan-400" />
                   <span>Интерфейсы ({intent.interfaces.length})</span>
                 </h3>
@@ -110,26 +112,26 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
                   {intent.interfaces.map((iface) => (
                     <div
                       key={iface.name}
-                      className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-xs space-y-1.5"
+                      className="p-3 bg-[var(--bg-main)]/60 border border-[var(--border-subtle)] rounded-xl text-xs space-y-1.5"
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-mono font-semibold text-slate-200">{iface.name}</span>
+                        <span className="font-mono font-semibold text-[var(--text-primary)]">{iface.name}</span>
                         <span
                           className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
                             iface.enabled
                               ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              : 'bg-slate-800 text-slate-400'
+                              : 'bg-[var(--bg-elevated)] text-[var(--text-muted)] border border-[var(--border-subtle)]'
                           }`}
                         >
                           {iface.enabled ? 'ENABLED' : 'DISABLED'}
                         </span>
                       </div>
-                      <div className="text-slate-400 text-[11px] truncate">
+                      <div className="text-[var(--text-muted)] text-[11px] truncate">
                         {iface.description || 'Нет описания'}
                       </div>
-                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-900">
-                        <span className="text-slate-500">IP: {iface.ipv4_address || '—'}</span>
-                        <span className="text-slate-500 font-mono">MTU: {iface.mtu}</span>
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-[var(--border-subtle)]">
+                        <span className="text-[var(--text-muted)]">IP: {iface.ipv4_address || '—'}</span>
+                        <span className="text-[var(--text-muted)] font-mono">MTU: {iface.mtu}</span>
                       </div>
                     </div>
                   ))}
@@ -139,37 +141,45 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
               {/* BGP */}
               {intent.bgp && (
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center space-x-1.5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3 flex items-center space-x-1.5 font-mono">
                     <Globe className="w-4 h-4 text-indigo-400" />
                     <span>Динамическая маршрутизация BGP (ASN {intent.bgp.asn})</span>
                   </h3>
-                  <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3.5 space-y-3">
-                    <div className="flex items-center space-x-6 text-xs">
+                  <div className="bg-[var(--bg-main)]/60 border border-[var(--border-subtle)] rounded-xl p-3.5 space-y-3">
+                    <div className="flex flex-wrap items-center gap-6 text-xs">
                       <div>
-                        <span className="text-slate-500 block text-[10px]">Router ID</span>
-                        <span className="font-mono text-slate-200">{intent.bgp.router_id}</span>
+                        <span className="text-[var(--text-muted)] block text-[10px]">Router ID</span>
+                        <span className="font-mono text-[var(--text-primary)]">{intent.bgp.router_id}</span>
                       </div>
                       <div>
-                        <span className="text-slate-500 block text-[10px]">Local ASN</span>
-                        <span className="font-mono text-slate-200">{intent.bgp.asn}</span>
+                        <span className="text-[var(--text-muted)] block text-[10px]">Local ASN</span>
+                        <span className="font-mono text-[var(--text-primary)]">{intent.bgp.asn}</span>
                       </div>
                       <div>
-                        <span className="text-slate-500 block text-[10px]">Соседей BGP</span>
-                        <span className="font-mono text-slate-200">{intent.bgp.neighbors.length}</span>
+                        <span className="text-[var(--text-muted)] block text-[10px]">Соседей BGP</span>
+                        <span className="font-mono text-[var(--text-primary)]">{intent.bgp.neighbors.length}</span>
                       </div>
+                      {intent.bgp.evpn && (
+                        <div>
+                          <span className="text-[var(--text-muted)] block text-[10px]">Overlay EVPN</span>
+                          <span className="font-mono text-purple-300">
+                            VXLAN {intent.bgp.vxlan_vni ? `VNI ${intent.bgp.vxlan_vni}` : 'Enabled'}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                      <span className="text-[11px] font-semibold text-slate-400">Пиринговые связи:</span>
+                    <div className="space-y-1.5 pt-2 border-t border-[var(--border-subtle)]">
+                      <span className="text-[11px] font-semibold text-[var(--text-muted)]">Пиринговые связи:</span>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                         {intent.bgp.neighbors.map((n) => (
                           <div
                             key={n.peer_ip}
-                            className="bg-slate-900 border border-slate-800/80 rounded-lg p-2.5 text-xs flex justify-between items-center"
+                            className="bg-[var(--bg-card)] border border-[var(--border-subtle)] rounded-lg p-2.5 text-xs flex justify-between items-center"
                           >
                             <div>
                               <div className="font-mono text-indigo-300 font-medium">{n.peer_ip}</div>
-                              <div className="text-[11px] text-slate-500">{n.description || 'Neighbor'}</div>
+                              <div className="text-[11px] text-[var(--text-muted)]">{n.description || 'Neighbor'}</div>
                             </div>
                             <span className="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono text-[10px]">
                               AS {n.remote_asn}
@@ -185,7 +195,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
               {/* ACLs */}
               {intent.acls && intent.acls.length > 0 && (
                 <div>
-                  <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3 flex items-center space-x-1.5">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)] mb-3 flex items-center space-x-1.5 font-mono">
                     <Shield className="w-4 h-4 text-emerald-400" />
                     <span>Списки доступа ACL ({intent.acls.length})</span>
                   </h3>
@@ -193,14 +203,14 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
                     {intent.acls.map((acl) => (
                       <div
                         key={acl.name}
-                        className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-xs space-y-2"
+                        className="bg-[var(--bg-main)]/60 border border-[var(--border-subtle)] rounded-xl p-3 text-xs space-y-2"
                       >
                         <div className="font-mono font-semibold text-emerald-300">{acl.name}</div>
                         <div className="space-y-1">
                           {acl.rules.map((rule) => (
                             <div
                               key={rule.sequence}
-                              className="font-mono text-[11px] px-2 py-1 rounded bg-slate-900 flex items-center justify-between text-slate-300"
+                              className="font-mono text-[11px] px-2 py-1 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] flex items-center justify-between text-[var(--text-secondary)]"
                             >
                               <span>
                                 #{rule.sequence} {rule.action.toUpperCase()} {rule.protocol} {rule.source} → {rule.destination}
@@ -222,7 +232,7 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
               )}
             </>
           ) : (
-            <div className="p-8 text-center text-slate-500">
+            <div className="p-8 text-center text-[var(--text-muted)]">
               <Cpu className="w-8 h-8 mx-auto mb-2 opacity-40" />
               <p className="text-sm">Intent файл для {device.hostname} не найден в Git-репозитории.</p>
             </div>
@@ -230,10 +240,10 @@ export const DeviceDetailModal: React.FC<DeviceDetailModalProps> = ({ deviceId, 
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-slate-800 flex justify-end">
+        <div className="px-6 py-3 border-t border-[var(--border-subtle)] flex justify-end">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+            className="px-4 py-1.5 rounded-lg bg-[var(--bg-elevated)] hover:border-[var(--border-hover)] text-[var(--text-primary)] border border-[var(--border-subtle)] text-xs font-medium transition-colors cursor-pointer"
           >
             Закрыть
           </button>

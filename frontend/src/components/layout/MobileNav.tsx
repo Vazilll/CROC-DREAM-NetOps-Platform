@@ -27,7 +27,6 @@ interface MobileNavProps {
   theme: AppTheme;
   setTheme: (t: AppTheme) => void;
   userRole: UserRole;
-  setUserRole?: (role: UserRole) => void;
   setLocale: (l: Locale) => void;
   onToggleCopilot: () => void;
   onOpenSearch: () => void;

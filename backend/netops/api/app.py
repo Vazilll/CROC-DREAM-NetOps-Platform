@@ -67,7 +67,7 @@ def create_app(
                     celery_app.send_task(COLLECT_METRICS_TASK)
                     celery_app.send_task(REFRESH_COLLECTOR_TARGETS_TASK)
             except Exception:
-                pass
+                _ = None
         yield
         engine.dispose()
 

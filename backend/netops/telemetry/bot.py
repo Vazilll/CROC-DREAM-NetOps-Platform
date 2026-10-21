@@ -1,4 +1,3 @@
-# ruff: noqa: F401
 from __future__ import annotations
 
 import json
@@ -35,17 +34,13 @@ from netops.telemetry.bot_auth import (
     _authorize_open_registration_chat,
     _bot_username,
     _menu_keyboard,
-    _public_host,
     _user_card_markup,
     _users_markup,
-    _web_urls,
     bind_telegram_chat_user,
     ensure_user_token,
 )
 from netops.telemetry.bot_views import (
     _BOT_HELP_TEXT,
-    MAX_ROWS,
-    _drift_details,
     _drift_text,
     _fabrics_text,
     _failed_jobs,
@@ -54,10 +49,8 @@ from netops.telemetry.bot_views import (
     _metrics_text,
     _new_alerts,
     _overview_text,
-    _ratio,
     _security_text,
     _status_text,
-    _summary,
     _users_text,
 )
 
@@ -225,7 +218,7 @@ class MetricsBot:
     ) -> bool:
         if not isinstance(chat_id, int):
             return False
-        if chat_id in self._chat_ids:
+        if chat_id in self._admin_chat_ids:
             if self._settings is not None:
                 from netops.models import User
 
@@ -236,6 +229,8 @@ class MetricsBot:
                             session, chat_id, tg_username=(from_user or {}).get("username"),
                             first_name=(from_user or {}).get("first_name"), settings=self._settings,
                         )
+            return True
+        if chat_id in self._chat_ids and not self._open_registration:
             return True
         if not self._open_registration:
             logger.warning("Запрос из чата %s отклонён: его нет в NETOPS_TELEGRAM_CHAT_IDS", chat_id)
@@ -302,7 +297,7 @@ class MetricsBot:
                     answer = f"✅ {answer}\n\n{card}"
                 markup = _user_card_markup(session, target_user, self._settings)
             elif is_admin and command in ("/users", "/tokens", "/cleanup"):
-                markup = _users_markup(session, self._settings)
+                markup = _users_markup(session)
             else:
                 markup = {"inline_keyboard": _menu_keyboard()}
 
@@ -323,7 +318,7 @@ class MetricsBot:
         if role == "blocked":
             return "🚫 Ваш профиль заблокирован администратором."
         if command == "/recover":
-            return _answer_recover(session, chat_id, from_user, self._settings)
+            return _answer_recover(session, chat_id, self._settings)
 
         admin_commands = {"/users", "/tokens", "/cleanup", "/ttl", "/security", "/block", "/unblock", "/unbind", "/role"}
         if command in admin_commands and role not in ("owner", "admin"):
@@ -346,23 +341,23 @@ class MetricsBot:
 
         simple_routes = {
             "/overview": lambda: _overview_text(session, self._settings),
-            "/status": lambda: _status_text(session, self._settings),
+            "/status": lambda: _status_text(session),
             "/drift": lambda: _drift_text(session),
             "/jobs": lambda: _jobs_text(session),
-            "/metrics": lambda: _metrics_text(session),
+            "/metrics": _metrics_text,
             "/fabrics": lambda: _fabrics_text(session, self._settings),
             "/stands": lambda: _fabrics_text(session, self._settings),
             "/users": lambda: _users_text(session, self._settings),
             "/tokens": lambda: _users_text(session, self._settings),
             "/cleanup": lambda: _cleanup_duplicates_text(session, self._settings),
             "/token": lambda: _token_text(session, args, settings=self._settings),
-            "/ttl": lambda: _set_user_ttl_text(session, args, settings=self._settings),
+            "/ttl": lambda: _set_user_ttl_text(session, args),
             "/security": lambda: _security_text(self._settings),
             "/block": lambda: _set_user_active_text(session, args, active=False),
             "/unblock": lambda: _set_user_active_text(session, args, active=True),
             "/unbind": lambda: _unbind_user_text(session, args),
             "/role": lambda: _set_user_role_text(session, args),
-            "/collect": lambda: _collect_now_text(session, self._settings),
+            "/collect": lambda: _collect_now_text(session, self._settings, args),
             "/scan": lambda: _scan_now_text(session, self._session_factory, self._settings),
             "/freeze": lambda: _freeze_text(args, self._settings),
             "/ai": lambda: _ai_copilot_text(session, args, settings=self._settings),
@@ -440,3 +435,5 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+__all__ = ["BotState", "HttpTelegramApi", "MetricsBot", "TelegramApi", "bind_telegram_chat_user", "build_bot", "ensure_user_token"]

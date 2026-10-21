@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Network,
   Sparkles,
@@ -9,8 +9,11 @@ import {
   Share2,
   SlidersHorizontal,
   BarChart3,
+  Layers,
+  GitBranch,
+  RefreshCw,
 } from 'lucide-react';
-import type { UserRole } from '../../api';
+import { api, getErrorMessage, type GitStatusInfo, type UserRole } from '../../api';
 import { translations, type Locale } from '../../i18n';
 
 export type AppTheme = 'dark' | 'light';
@@ -26,7 +29,9 @@ interface HeaderProps {
   setTheme: (t: AppTheme) => void;
   onOpenWelcomeModal?: () => void;
   onOpenShareModal?: () => void;
-  onOpenShortcutsModal?: () => void;
+  activeStand?: string;
+  standsCount?: number;
+  onOpenStandsModal?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -40,8 +45,58 @@ export const Header: React.FC<HeaderProps> = ({
   setTheme,
   onOpenWelcomeModal,
   onOpenShareModal,
+  activeStand = 'all',
+  standsCount = 1,
+  onOpenStandsModal,
 }) => {
   const t = translations[locale];
+  const [gitStatus, setGitStatus] = useState<GitStatusInfo | null>(null);
+  const [syncingGit, setSyncingGit] = useState(false);
+  const [gitNote, setGitNote] = useState<{ text: string; ok: boolean } | null>(null);
+
+  const loadGitStatus = useCallback(async () => {
+    try {
+      const st = await api.getGitStatus();
+      setGitStatus(st);
+    } catch {
+      // Ignore if unauthenticated during bootstrap
+    }
+  }, []);
+
+  useEffect(() => {
+    if (apiHealthy) {
+      void loadGitStatus();
+    }
+  }, [apiHealthy, loadGitStatus]);
+
+  useEffect(() => {
+    const onGitUpdated = () => {
+      void loadGitStatus();
+    };
+    window.addEventListener('netops-git-updated', onGitUpdated);
+    return () => window.removeEventListener('netops-git-updated', onGitUpdated);
+  }, [loadGitStatus]);
+
+  const handleGitSync = async () => {
+    if (syncingGit || userRole === 'viewer') return;
+    setSyncingGit(true);
+    setGitNote(null);
+    try {
+      const res = await api.syncGitSot();
+      if (res.git) setGitStatus(res.git);
+      const created = res.sync?.created?.length ?? 0;
+      const updated = res.sync?.updated?.length ?? 0;
+      setGitNote({
+        text: created || updated ? `+${created}/~${updated}` : 'Git OK',
+        ok: true,
+      });
+    } catch (err: unknown) {
+      setGitNote({ text: getErrorMessage(err, 'Ошибка Git'), ok: false });
+    } finally {
+      setSyncingGit(false);
+      window.setTimeout(() => setGitNote(null), 4000);
+    }
+  };
 
   const ghostBtn =
     'h-8 flex items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] hover:border-[var(--border-hover)] bg-[var(--bg-elevated)]/50 hover:bg-[var(--bg-elevated)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors cursor-pointer';
@@ -62,10 +117,6 @@ export const Header: React.FC<HeaderProps> = ({
           <span className="text-xs sm:text-[13px] font-semibold tracking-tight text-[var(--text-primary)] truncate">
             {t.appName}
           </span>
-          <span className="text-[var(--border-hover)] hidden sm:inline">/</span>
-          <span className="text-[11px] text-[var(--text-muted)] font-mono hidden md:inline truncate">
-            {t.appSub}
-          </span>
           <span
             className={`inline-flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 border ${
               apiHealthy
@@ -80,11 +131,86 @@ export const Header: React.FC<HeaderProps> = ({
             />
             <span className="hidden sm:inline">{apiHealthy ? t.online : t.offline}</span>
           </span>
+          {onOpenStandsModal && (
+            <button
+              type="button"
+              onClick={onOpenStandsModal}
+              data-testid="header-stands-selector"
+              className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-mono shrink-0 border transition-colors cursor-pointer ${
+                activeStand !== 'all'
+                  ? 'bg-cyan-500/15 text-cyan-500 dark:text-cyan-300 border-cyan-500/30 hover:border-cyan-400/50'
+                  : 'bg-[var(--bg-elevated)]/60 text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)] hover:border-[var(--border-hover)]'
+              }`}
+              title={
+                locale === 'en'
+                  ? 'Switch active stand / data center pod'
+                  : 'Переключить активный стенд / ЦОД'
+              }
+            >
+              <Layers className="w-3 h-3 text-cyan-400" />
+              <span className="truncate max-w-[140px]">
+                {activeStand === 'all'
+                  ? locale === 'en'
+                    ? `Stands (${standsCount})`
+                    : `Стенды (${standsCount})`
+                  : activeStand}
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Right Controls: Unified Monochrome Action Strip */}
       <div className="flex items-center gap-1.5 shrink-0">
+        {/* Git SoT Status & 1-Click Sync */}
+        {userRole !== 'viewer' ? (
+          <button
+            type="button"
+            onClick={handleGitSync}
+            disabled={syncingGit}
+            data-testid="header-git-sync-btn"
+            className={`${ghostBtn} font-mono ${
+              gitNote
+                ? gitNote.ok
+                  ? 'border-emerald-500/40 text-emerald-400'
+                  : 'border-rose-500/40 text-rose-400'
+                : ''
+            }`}
+            title={
+              gitStatus?.commit_short
+                ? `Git SoT: ${gitStatus.branch || 'main'}@${gitStatus.commit_short} — нажмите для синхронизации`
+                : locale === 'en'
+                  ? 'Sync Git SoT & Inventory'
+                  : 'Синхронизировать Git SoT и инвентарь'
+            }
+          >
+            {syncingGit ? (
+              <RefreshCw className="w-3.5 h-3.5 text-cyan-400 animate-spin" />
+            ) : (
+              <GitBranch className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+            <span className="hidden md:inline text-[11px]">
+              {syncingGit
+                ? 'Sync…'
+                : gitNote
+                  ? gitNote.text
+                  : gitStatus?.commit_short
+                    ? `${gitStatus.branch || 'main'}@${gitStatus.commit_short}`
+                    : 'Git Sync'}
+            </span>
+          </button>
+        ) : (
+          gitStatus?.commit_short && (
+            <span
+              className="hidden md:inline-flex h-8 items-center gap-1.5 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/30 text-[11px] font-mono text-[var(--text-muted)]"
+              title={`Git SoT: ${gitStatus.branch || 'main'}@${gitStatus.commit_short}`}
+            >
+              <GitBranch className="w-3 h-3 text-emerald-400" />
+              <span>{gitStatus.commit_short}</span>
+            </span>
+          )
+        )}
+
         {/* Grafana Enterprise NOC Wallboard Link */}
         <a
           href={grafanaUrl}

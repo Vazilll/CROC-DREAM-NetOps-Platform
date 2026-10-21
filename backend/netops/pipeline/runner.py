@@ -128,7 +128,7 @@ class JobRunner:
                         + err_html,
                     )
             except Exception:
-                pass
+                _ = None
             return job.status
 
 

@@ -90,13 +90,12 @@ npx --prefix frontend oxlint frontend/src/  # Статический анали�
 
 ## 3. Структура каталогов
 
-Все 30 исходных файлов в `frontend/src/` строго распределены по функциональным слоям:
+Все 58 исходных файлов в `frontend/src/` строго распределены по функциональным слоям и модулям:
 
 ```
 frontend/
 ├── index.html                  # Точка входа HTML, шрифты Inter + JetBrains Mono
 ├── package.json                # Зависимости и скрипты сборки
-├── tailwind.config.js          # Конфигурация Tailwind CSS и кастомных анимаций
 ├── tsconfig.app.json           # Строгий конфиг TypeScript (strict: true)
 ├── vite.config.ts              # Конфиг сборщика Vite, manualChunks и dev-proxy
 ├── README.md                   # Этот документ (руководство по модулям фронтенда)
@@ -105,40 +104,59 @@ frontend/
 │   └── audit_all_views_e2e.py  # Сквозной Playwright E2E-аудит всех вкладок и модалок
 └── src/
     ├── main.tsx                # Монтирование React 19 createRoot в DOM
-    ├── App.tsx                 # Корневой оркестратор состояния, роутинга вкладок и хоткеев
-    ├── api.ts                  # Типизированный REST/WebSocket клиент и интерфейсы домена
+    ├── App.tsx                 # Корневой оркестратор состояния, роутинга вкладок и модальных окон
+    ├── api.ts                  # Реэкспорт модульного API-клиента (./api/*)
+    ├── api/                    # Модульный типизированный HTTP/SSE клиент и доменные типы
+    │   ├── client.ts           # Класс NetOpsApiClient и точка входа api
+    │   ├── http.ts             # Низкоуровневая обёртка fetch с таймаутами и обработкой ошибок
+    │   ├── auth.ts             # Управление токенами, сессионными cookies, CSRF и Client ID
+    │   ├── runtimeConfig.ts    # Конфигурация ролевых портов консолей и URL
+    │   ├── standsApi.ts        # Методы управления мульти-стендами (/api/v1/stands/*)
+    │   ├── deviceJobApi.ts     # Методы CRUD устройств, пайплайнов и стриминга задач
+    │   ├── types.ts            # Базовые интерфейсы домена (Device, Job, Forecast, Intent)
+    │   └── domainTypes.ts      # Расширенные типы (Stands, Bootstrap, Users, Collectors)
+    ├── hooks/                  # Выделенные React-хуки
+    │   ├── useNetopsPolling.ts # Адаптивный пуллинг (1.5s/5s) с защитой от лишних перерисовок
+    │   └── useKeyboardShortcuts.ts # Глобальные клавиатурные сокращения и стек закрытия по Esc
+    ├── locales/                # Двуязычные словари локализации
+    │   ├── ru.ts               # Русский словарь интерфейса
+    │   └── en.ts               # Английский словарь интерфейса
     ├── constants.ts            # Словари платформ, ролей узлов и метаданные навигации
-    ├── i18n.ts                 # Словари локализации интерфейса (RU / EN)
+    ├── i18n.ts                 # Точка входа интернационализации (RU / EN)
     ├── index.css               # Семантические CSS-переменные тем (Dark / Light) и утилиты
     └── components/
-        ├── layout/             # Каркас приложения и атомарные UI-примитивы (5 модулей)
+        ├── layout/             # Каркас приложения и атомарные UI-примитивы
         │   ├── Header.tsx
         │   ├── Sidebar.tsx
         │   ├── MobileNav.tsx
         │   ├── CommandPalette.tsx
+        │   ├── AppOverlays.tsx
+        │   ├── ToastNotification.tsx
         │   └── ui.tsx
-        ├── views/              # Основные полноэкранные рабочие области (9 модулей)
-        │   ├── Dashboard.tsx
+        ├── views/              # Основные полноэкранные рабочие области и их подмодули
+        │   ├── Dashboard.tsx (+ DashboardRightColumn.tsx)
         │   ├── DeviceList.tsx
-        │   ├── DevicePage.tsx
-        │   ├── DiffViewer.tsx
+        │   ├── DevicePage.tsx (+ device/DeviceOverviewSection.tsx, DeviceForecastTab.tsx, DeviceInterfacesAndDanger.tsx, DeviceTerminalAndCopilot.tsx, DeviceTableRow.tsx)
+        │   ├── DiffViewer.tsx (+ DiffViewerFallbacks.tsx)
         │   ├── DriftView.tsx
+        │   ├── IntentEditor.tsx
         │   ├── JobsView.tsx
         │   ├── ChaosLabView.tsx
-        │   ├── EmergencyHub.tsx
-        │   └── SlidesPresentation.tsx
-        ├── modals/             # Модальные окна, визарды и боковые панели (8 модулей)
-        │   ├── WelcomeModal.tsx
-        │   ├── ShareModal.tsx
+        │   └── EmergencyHub.tsx (+ EmergencyAuditSection.tsx)
+        ├── modals/             # Модальные окна, визарды и боковые панели
+        │   ├── WelcomeModal.tsx (+ welcome/WelcomeSteps1To3.tsx, WelcomeSteps4And5.tsx, WelcomeStepStyles.ts)
+        │   ├── ShareModal.tsx (+ share/ShareUsersTable.tsx, ShareStaticViewer.tsx, ShareIntegrationsTab.tsx, PublicConsolesBanner.tsx)
+        │   ├── StandsModal.tsx
+        │   ├── AccessCodeModal.tsx
         │   ├── DryRunModal.tsx
-        │   ├── AddDeviceModal.tsx
-        │   ├── DeviceDrawer.tsx
+        │   ├── AddDeviceModal.tsx (+ add_device/AddDeviceStep2.tsx)
+        │   ├── DeviceDrawer.tsx (+ device_drawer/DeviceDrawerMetricsTab.tsx)
         │   ├── DeviceDetailModal.tsx
         │   ├── CopilotPanel.tsx
         │   └── ShortcutsModal.tsx
-        └── charts/             # Графы топологии и графики временных рядов (3 модуля)
-            ├── TopologyMap.tsx
-            ├── Topology3D.tsx
+        └── charts/             # Графы топологии L1–L3, коммутация и графики прогнозов
+            ├── TopologyMap.tsx (+ topologyLayout.ts, TopologyToolbar.tsx, TopologyNodePopover.tsx, TopologyCommutationPanel.tsx, TopologyCheckpointBar.tsx)
+            ├── TopologyMacroFleetView.tsx
             └── ForecastChart.tsx
 ```
 
@@ -146,15 +164,16 @@ frontend/
 
 ## 4. Подробное описание каждого модуля
 
-### 4.1. Ядро приложения
+### 4.1. Ядро приложения (`src/`, `src/api/`, `src/hooks/`, `src/locales/`)
 
-| Файл | За что отвечает и как работает |
+| Файл / Пакет | За что отвечает и как работает |
 |------|--------------------------------|
 | [`src/main.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/main.tsx) | Точка инициализации React 19 (`createRoot`). Оборачивает `<App />` в `<StrictMode>` и подключает глобальную таблицу стилей `index.css`. |
-| [`src/App.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/App.tsx) | Главный контроллер состояния: хранит активную вкладку (`activeTab`), список устройств (`devices`), задач (`jobs`), режим контура (`online` SSH vs `offline` эмуляция), статус аварийной заморозки (`Factory Freeze`), тему (`dark`/`light`), язык (`ru`/`en`) и текущую роль пользователя (`viewer`/`operator`/`admin`/`owner`). Управляет WebSocket-подпиской, глобальными хоткеями (`Ctrl+K`, `?`, `g+d`, `g+n`, `g+j`, `g+c`, `g+f`, `g+s`, `g+e`) и системой всплывающих уведомлений (toasts). |
-| [`src/api.ts`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/api.ts) | Единый слой взаимодействия с бэкендом (`/api/v1/*`). Содержит строго типизированные интерфейсы всех сущностей (`Device`, `DeviceDetail`, `JobSummary`, `JobDiff`, `DriftReportItem`, `Forecast`, `AiGuardResponse`, `BootstrapStatusResponse`, `AccessRegistryResponse` и др.), хелпер извлечения ошибок `getErrorMessage(err: unknown)` и методы API с таймаутами `AbortSignal.timeout`. |
-| [`src/constants.ts`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/constants.ts) | Единый источник констант отображения: человекочитаемые названия платформ (`PLATFORM_NAMES`: Cisco IOS-XE, Arista EOS, Huawei VRP, Juniper Junos, Eltex MES, YADRO KORNFE), ролей устройств (`ROLE_NAMES`: Spine, Leaf, Edge, Core) и конфигурация вкладок сайдбара (`TAB_DEFINITIONS`). |
-| [`src/i18n.ts`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/i18n.ts) | Полный двуязычный словарь интерфейса (`translations.ru` и `translations.en`). Обеспечивает мгновенное переключение языка во всех компонентах без перезагрузки страницы. |
+| [`src/App.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/App.tsx) | Главный контроллер состояния: хранит активную вкладку (`activeTab`), список стендов (`stands`), активный стенд (`activeStandSlug`), устройства (`devices`), задачи (`jobs`), статус аварийной заморозки (`Factory Freeze`), тему (`dark`/`light`), язык (`ru`/`en`) и текущую роль пользователя (`viewer`/`operator`/`admin`/`owner`). |
+| [`src/api/*`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/api/client.ts) | Модульный слой взаимодействия с бэкендом (`/api/v1/*`): `client.ts` агрегирует методы `standsApi.ts`, `deviceJobApi.ts`, `auth.ts` и `http.ts`; строгие контракты разделены между `types.ts` и `domainTypes.ts`. |
+| [`src/hooks/*`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/hooks/useNetopsPolling.ts) | `useNetopsPolling.ts` реализует адаптивный опрос бэкенда с глубоким сравнением ссылок (`areDevicesEqual`, `areJobsEqual`); `useKeyboardShortcuts.ts` управляет хоткеями и приоритетным стеком `Escape`. |
+| [`src/constants.ts`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/constants.ts) | Единый источник констант отображения: человекочитаемые названия платформ (`PLATFORM_NAMES`: Cisco IOS-XE, Arista EOS, Huawei VRP, Juniper Junos, Eltex MES/ESR, YADRO KORNFE, Linux Server), ролей устройств (`ROLE_NAMES`) и вкладок (`TAB_DEFINITIONS`). |
+| [`src/i18n.ts`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/i18n.ts) и `src/locales/*` | Двуязычный словарь интерфейса (`locales/ru.ts` и `locales/en.ts`). Обеспечивает мгновенное переключение языка во всех компонентах без перезагрузки страницы. |
 | [`src/index.css`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/index.css) | Определяет CSS-переменные цветовой палитры для `:root` (Dark Mode по умолчанию) и `html.theme-light` (Light Mode), а также переопределения контрастности по стандартам Vercel Geist и Yandex Gravity UI. |
 
 ---
@@ -165,11 +184,12 @@ frontend/
 
 | Модуль | За что отвечает | Ключевые возможности |
 |--------|-----------------|----------------------|
-| [`Header.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/Header.tsx) | Верхняя панель управления NOC | Отображает пульс фабрики (онлайн/всего узлов, сфокусированные алерты), переключатель контура (`ONLINE SSH` / `OFFLINE LAB`), переключатель аварийной заморозки (`Factory Freeze`), кнопки вызова `Dry-Run`, `Share/Access`, `AI Copilot`, переключатель языка (`RU`/`EN`), темы (`Dark`/`Light`) и текущей роли оператора. |
-| [`Sidebar.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/Sidebar.tsx) | Левая панель навигации | Группирует экраны по доменам («Мониторинг», «Автоматизация», «Надёжность», «Презентация»), показывает счётчики активных дрейфов и задач, скрывает или блокирует вкладки в соответствии с ролью (`RBAC`) и позволяет сворачивать панель в компактный режим. |
-| [`MobileNav.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/MobileNav.tsx) | Мобильная навигация | Обеспечивает адаптивную работу на планшетах и смартфонах дежурных инженеров: нижний док быстрых вкладок и выдвижное бургер-меню с переключателями темы, языка и контура. |
-| [`CommandPalette.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/CommandPalette.tsx) | Глобальная палитра команд (`Ctrl+K`) | Мгновенный поиск по узлам фабрики (по hostname, IP, платформе, роли), быстрый переход между экранами и запуск операций (`Dry-Run`, синхронизация инвентаря, переключение темы) с клавиатуры. |
-| [`ui.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/ui.tsx) | Атомарная библиотека компонентов | Содержит `BentoCard` (карточка с подсветкой границ), `StatusBadge` (бейджи `in_sync`/`drifted`/`unreachable` + `up`/`degraded`/`down`), `JobStatusBadge`, `Sparkline` (SVG-микрографик телеметрии), `Modal`, `EmptyState`, `Skeleton` и `CopyButton`. |
+| [`Header.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/Header.tsx) | Верхняя панель управления NOC | Отображает пульс фабрики, селектор активного стенда и кнопку `StandsModal`, переключатель контура (`ONLINE SSH` / `OFFLINE LAB`), `Factory Freeze`, кнопки `Dry-Run`, `Share/Access`, `AI Copilot`, переключатель языка (`RU`/`EN`), темы (`Dark`/`Light`) и текущей роли оператора. |
+| [`Sidebar.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/Sidebar.tsx) | Левая панель навигации | Группирует экраны по доменам («Мониторинг», «Автоматизация», «Надёжность»), показывает счётчики активных дрейфов и задач, адаптирует вкладки в соответствии с ролью (`RBAC`) и позволяет сворачивать панель в компактный режим. |
+| [`MobileNav.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/MobileNav.tsx) | Мобильная навигация | Обеспечивает адаптивную работу на планшетах и смартфонах дежурных инженеров: нижний док быстрых вкладок и выдвижное бургер-меню. |
+| [`CommandPalette.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/CommandPalette.tsx) | Глобальная палитра команд (`Ctrl+K`) | Мгновенный поиск по узлам фабрики (по hostname, IP, платформе, роли), быстрый переход между экранами и запуск операций с клавиатуры. |
+| [`AppOverlays.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/AppOverlays.tsx) и [`ToastNotification.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/ToastNotification.tsx) | Оверлеи и уведомления | Оркестрирует все лениво подгружаемые модальные окна (`Suspense`) и всплывающие тост-уведомления. |
+| [`ui.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/layout/ui.tsx) | Атомарная библиотека компонентов | Содержит `BentoCard`, `StatusBadge`, `OperStatusBadge`, `IntentStatusBadge`, `JobStatusBadge`, `Sparkline`, `StateTimeline`, `Modal` и др. |
 
 ---
 
@@ -179,15 +199,15 @@ frontend/
 
 | Модуль | Вкладка | За что отвечает и как работает |
 |--------|---------|--------------------------------|
-| [`Dashboard.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/Dashboard.tsx) | `dashboard` | Главный экран NOC в стиле Bento Grid. Объединяет: (1) KPI-карточки здоровья фабрики, (2) интерактивную карту топологии `TopologyMap`, (3) панель `AI Pre-Flight Guard` (проверка безопасности изменений), (4) радар прогнозов Statistical Forecast по аномалиям CPU и трафика, (5) ленту последних пайплайнов и быстрый запуск `Golden Baseline` / `Remediate All`. |
-| [`DeviceList.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DeviceList.tsx) | `devices` | Табличный реестр всех сетевых устройств фабрики. Поддерживает фильтрацию по статусу/платформе/роли, поиск, инлайн-редактирование IP и учётных профилей, точечный `Ping/SSH Probe`, синхронизацию `inventory.yaml` и переход в глубокую диагностику узла. |
-| [`DevicePage.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DevicePage.tsx) | `device-detail` | Полноэкранный диагностический центр конкретного маршрутизатора/коммутатора. Включает 5 суб-вкладок: **Overview & Telemetry** (живые графики CPU/RAM/Uplink + прогноз Statistical Forecast), **Running Config & Snapshots** (просмотр и сравнение снапшотов), **BGP & Interfaces** (таблицы пиров и портов), **Intent YAML** (декларативный профиль узла) и **Audit & Quick CLI** (выполнение диагностических команд). |
-| [`DiffViewer.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DiffViewer.tsx) | `diff` | Инспектор конфигурационных различий (`running` vs `candidate`). Подсвечивает добавленные (`+`) и удалённые (`-`) строки CLI, фильтрует шум (`diff_filters.yaml`) и вызывает LLM-анализатор (`POST /jobs/{id}/explain`) для оценки blast radius и рисков перед выкаткой. |
-| [`DriftView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DriftView.tsx) | `drift` | Центр контроля конфигурационного дрейфа. Показывает какие узлы отклонились от эталонного Git Source of Truth (`intent/network_intent.yaml`), визуализирует diff-сниппеты каждого отклонения и позволяет запустить точечное или массовое авто-восстановление (`Remediate`). |
-| [`JobsView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/JobsView.tsx) | `jobs` | Журнал оркестрации пайплайнов (`plan`, `apply`, `rollback`, `remediate`). Отображает пошаговый прогресс выполнения задачи по каждому устройству (`validate` → `render` → `diff` → `push` → `verify`), тайминги и кнопку мгновенного отката (`Rollback`) к предыдущему снапшоту. |
-| [`ChaosLabView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/ChaosLabView.tsx) | `chaos` | Стенд Chaos Engineering для проверки устойчивости сети. Позволяет безопасно инжектировать сценарии сбоев (несанкционированный CLI-дрейф, падение BGP-сессии на Spine, перегрузка аплинка Leaf) и наблюдать, как платформа детектирует и автоматически устраняет аварию. |
-| [`EmergencyHub.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/EmergencyHub.tsx) | `emergency` | Аварийный пульт управления (`Out-of-Band Console`), доступный только ролям `admin` и `owner`. Содержит: прямой мульти-вендорный CLI-терминал (`show`/`display`), экстренный патч в обход пайплайна, двухступенчатый сброс стенда (**Soft Reset** через Golden Intent и **Hard Reset** через пересборку Containerlab) и неизменяемый журнал аудита (`emergency_audit.jsonl`). |
-| [`SlidesPresentation.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/SlidesPresentation.tsx) | `slides` | Встроенная интерактивная презентация архитектуры платформы CROC DREAM NetOps для демонстрации жюри и заказчикам прямо из интерфейса NOC. |
+| [`Dashboard.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/Dashboard.tsx) (+ `DashboardRightColumn.tsx`) | `dashboard` | Главный экран NOC в стиле Bento Grid. Объединяет: (1) KPI-карточки здоровья фабрики, (2) интерактивную карту топологии `TopologyMap`, (3) панель `AI Pre-Flight Guard`, (4) радар прогнозов Statistical Forecast, (5) ленту последних пайплайнов и быстрый запуск `Golden Baseline` / `Remediate All`. |
+| [`DeviceList.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DeviceList.tsx) (+ `device/DeviceTableRow.tsx`) | `devices` | Табличный реестр всех сетевых устройств и серверов фабрики. Поддерживает фильтрацию по статусу/платформе/роли, индикацию живучести (`UP`/`DOWN` + резервный бэкап), точечный `Ping/SSH Probe`, синхронизацию `inventory.yaml` и переход в глубокую диагностику узла. |
+| [`DevicePage.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DevicePage.tsx) (+ `device/*`) | `device-detail` | Полноэкранный диагностический паспорт узла, разбитый на модули: `DeviceOverviewSection` (паспорт, живучесть, ИИ-диагноз сбоя и восстановление из бэкапа), `DeviceForecastTab` (симулятор What-If и прогноз), `DeviceInterfacesAndDanger` (интерфейсы, соседи BGP и опасная зона), `DeviceTerminalAndCopilot` (живой SSH CLI и контекстный ИИ). |
+| [`IntentEditor.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/IntentEditor.tsx) | `intent` | Интерактивный редактор YAML-намерений (`intent/devices/*.yaml`) с мгновенной проверкой Pre-Flight Lint и запуском Dry-Run. |
+| [`DiffViewer.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DiffViewer.tsx) (+ `DiffViewerFallbacks.tsx`) | `diff` | Двухпанельный инспектор конфигурационных различий (`running` vs `candidate`) на базе Monaco Editor с легковесным фоллбэком и вызовом LLM-анализатора (`POST /jobs/{id}/explain`). |
+| [`DriftView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/DriftView.tsx) | `drift` | Центр контроля конфигурационного дрейфа. Показывает какие узлы отклонились от эталонного Git Source of Truth, визуализирует diff-сниппеты и позволяет запустить точечное или массовое авто-восстановление (`Remediate`). |
+| [`JobsView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/JobsView.tsx) | `jobs` | Журнал оркестрации пайплайнов (`DRY_RUN`, `DEPLOY`, `DRIFT_SCAN`, `DRIFT_REMEDIATE`) с SSE-стримингом живых логов по шагам и экспортом отчёта соответствия в Markdown. |
+| [`ChaosLabView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/ChaosLabView.tsx) | `chaos` | Стенд Chaos Engineering для проверки устойчивости сети (инъекция несанкционированного CLI-дрейфа, падение BGP-сессии, перегрузка аплинка и сброс к эталону). |
+| [`EmergencyHub.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/views/EmergencyHub.tsx) (+ `EmergencyAuditSection.tsx`) | `emergency` | Аварийный пульт управления (`Out-of-Band Console`), доступный только ролям `admin` и `owner`: прямой мульти-вендорный CLI-терминал, экстренный патч, двухступенчатый сброс стенда (**Soft Reset** и **Hard Reset**) и неизменяемый журнал аудита. |
 
 ---
 
@@ -197,26 +217,29 @@ frontend/
 
 | Модуль | За что отвечает и как работает |
 |--------|--------------------------------|
-| [`WelcomeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/WelcomeModal.tsx) | **4-шаговый визард первичной инициализации («Матрёшка»)**. Состоит из стартового сплэш-экрана (`Boot Splash`) и 4 шагов настройки: (1) подключение Telegram-бота и привязка владельца (`Owner`), (2) выбор режима (`ONLINE SSH` с проверкой сокетов до Containerlab или `OFFLINE` эмуляция), (3) валидация и авто-заполнение учётных данных узлов (`Credentials Matrix`), (4) привязка GitHub Source of Truth (`PAT` + `Webhook Secret`). Полностью поддерживает переключение тем (`Dark`/`Light`) и языков (`RU`/`EN`) прямо внутри визарда. |
-| [`ShareModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/ShareModal.tsx) | **Центр управления доступом (RBAC & IAM) и интеграциями**. Позволяет просматривать реестр участников, выпускать именные JWT-токены с ограничением времени жизни (`TTL`) и области видимости (`Allowed Scopes`), управлять привязками Telegram-аккаунтов, просматривать журнал событий безопасности и синхронизировать Git Source of Truth (`Pull` / `Push`). |
-| [`DryRunModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DryRunModal.tsx) | **Модальное окно Pre-Flight Dry-Run (`Plan`) и выкатки (`Apply`)**. Позволяет выбрать целевые устройства (или всю фабрику), сгенерировать план изменений без записи в сеть, просмотреть сводку затронутых узлов и при отсутствии блокировок запустить боевой деплой. |
-| [`AddDeviceModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/AddDeviceModal.tsx) | **Визард регистрации нового сетевого устройства**. Поддерживает живое зондирование (`POST /devices/probe`) IP-адреса и SSH-порта перед добавлением, выбор вендора (`Cisco IOS-XE`, `Arista EOS`, `Huawei VRP`, `Juniper Junos`, `Eltex MES`, `YADRO KORNFE`), роли (`Spine`, `Leaf`, `Edge`) и автоматическую запись в `inventory.yaml`. |
-| [`DeviceDrawer.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DeviceDrawer.tsx) | **Боковая шторка быстрой инспекции узла**. Открывается при клике по узлу на дашборде без ухода с главного экрана: показывает текущие метрики CPU/RAM/Uplink, статус синхронизации, последний снапшот и кнопки быстрого перехода в `DevicePage` или запуска `Dry-Run`. |
-| [`DeviceDetailModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DeviceDetailModal.tsx) | **Инспектор декларативного YAML-интента узла**. Вызывается с карты топологии (`TopologyMap`) по кнопке «Инспектор Intent (YAML)»: отображает BGP ASN, Router ID, список L3-интерфейсов, таблицу BGP-соседей и сгенерированный целевой YAML-профиль устройства. |
-| [`CopilotPanel.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/CopilotPanel.tsx) | **Боковая панель ИИ-ассистента (`NetOps Copilot`)**. Ведёт диалог с инженером на естественном языке с учётом живого состояния фабрики (`POST /copilot`), предлагает готовые кнопки действий (`Action Chips` для перехода к проблемному узлу, открытия diff или запуска проверки) и объясняет причины аварий. |
-| [`ShortcutsModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/ShortcutsModal.tsx) | **Справочник горячих клавиш (`?`)**. Наглядная шпаргалка по всем клавиатурным сокращениям платформы для быстрой навигации без мыши. |
+| [`WelcomeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/WelcomeModal.tsx) (+ `welcome/*`) | **5-слойный визард первичной инициализации («Матрёшка»)**: (1) Владелец и Telegram-бот, (2) Публикация и AI-каскад, (3) Политики и тайминги, (4) GitHub Source of Truth (`PAT` + `Webhook`), (5) Сервер и авто-обнаружение узлов Containerlab по SSH. |
+| [`ShareModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/ShareModal.tsx) (+ `share/*`) | **Центр управления доступом (RBAC & IAM) и интеграциями**: включает блок многопользовательского статического QR-доступа для жюри (`ShareStaticViewer.tsx`), таблицу персональных токенов с изоляцией стендов (`ShareUsersTable.tsx`), баннер ролевых консолей (`PublicConsolesBanner.tsx`) и вкладку интеграций (`ShareIntegrationsTab.tsx`). |
+| [`StandsModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/StandsModal.tsx) | **Менеджер лабораторных и боевых стендов (`Multi-Stand Hub`)**. Позволяет добавлять новые стенды с зашифрованными паролями Jump-хостов, переключать активный стенд, запускать SSH-обнаружение узлов (`Discover`), сохранять резервные копии (`Backup`) и синхронизировать все стенды с диском. |
+| [`AccessCodeModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/AccessCodeModal.tsx) | **Экран входа для внешних участников и жюри**. Принимает персональные токены (`crk_*`), статические токены жюри (`inv_*`) или 6-значные коды доступа. |
+| [`DryRunModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DryRunModal.tsx) | **Модальное окно Pre-Flight Dry-Run (`Plan`)**. Позволяет выбрать целевые устройства, оценить Blast Radius и запустить расчёт диффа без записи в сеть. |
+| [`AddDeviceModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/AddDeviceModal.tsx) (+ `add_device/*`) | **Двухшаговый визард регистрации нового устройства**. Выполняет живое зондирование (`POST /devices/probe`) IP-адреса и SSH-порта, определяет платформу/характеристики и добавляет узел в выбранный стенд. |
+| [`DeviceDrawer.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DeviceDrawer.tsx) (+ `device_drawer/*`) | **Боковая шторка быстрой инспекции узла**. Открывается при клике по узлу без ухода с главного экрана: показывает метрики, статус живучести, интерфейсы, соседей BGP и текущий конфиг. |
+| [`DeviceDetailModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/DeviceDetailModal.tsx) | **Инспектор декларативного YAML-интента узла** с быстрым просмотром интерфейсов и BGP-соседей. |
+| [`CopilotPanel.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/CopilotPanel.tsx) | **Боковая панель ИИ-ассистента (`NetOps Copilot`)** с контекстом активного экрана/стенда и кнопками действий в 1 клик (`Action Chips`). |
+| [`ShortcutsModal.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/modals/ShortcutsModal.tsx) | **Справочник горячих клавиш (`?`)** и матрица ролевых прав. |
 
 ---
 
 ### 4.5. Визуализация графа и прогнозов (`src/components/charts/`)
 
-Модули визуализации отвечают за рендеринг топологии фабрики CLOS и предиктивной аналитики временных рядов.
+Модули визуализации отвечают за рендеринг топологии фабрики CLOS, L1–L3 коммутацию и предиктивную аналитику временных рядов.
 
 | Модуль | За что отвечает и как работает |
 |--------|--------------------------------|
-| [`TopologyMap.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/TopologyMap.tsx) | **Интерактивная 2D/3D карта топологии CLOS-фабрики**. Строит иерархический SVG-граф (`Spine` ↔ `Leaf` ↔ `Edge`), анимирует пакетные потоки по линкам, подсвечивает узлы с дрейфом (`amber`), недоступностью (`rose`) или прогнозируемым исчерпанием SLA по Statistical Forecast (`purple`), содержит всплывающий поповер быстрых действий (`Ping`, `Dry-Run`, `Инспектор Intent`) и переключатель в 3D-режим. |
-| [`Topology3D.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/Topology3D.tsx) | **Трёхмерная изометрическая визуализация фабрики (3D Canvas)**. Отрисовывает разнесённые по высоте плоскости `Spine Tier`, `Leaf Tier` и `Edge Tier` с вращением камеры, пульсацией трафика по межъ.ярусным линкам и интерактивным выбором узлов. Загружается лениво только при включении режима `3D View`. |
-| [`ForecastChart.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/ForecastChart.tsx) | **График предиктивной аналитики Statistical Forecast**. Отрисовывает исторический ряд метрики (`cpu_pct` или `uplink_util_pct`), горизонт прогноза ИИ, закрашенный коридор доверительного интервала (`p10`–`p90`), линию порога SLA (`threshold`) и вертикальные маркеры сетевых событий (`deploy`, `rollback`, `drift`). |
+| [`TopologyMap.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/TopologyMap.tsx) (+ `topologyLayout.ts`, `TopologyToolbar.tsx`, `TopologyNodePopover.tsx`) | **Интерактивная карта топологии CLOS-фабрики (L1/L2/L3)**. Отрисовывает иерархический SVG-граф (`Border` ↔ `Spine` ↔ `Leaf` ↔ `Server`), анимирует загрузку линков, подсвечивает точки отказа (SPOF) и позволяет моделировать падение узлов (`What-If Failure Simulation`). |
+| [`TopologyCommutationPanel.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/TopologyCommutationPanel.tsx) и [`TopologyCheckpointBar.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/TopologyCheckpointBar.tsx) | **Панель L1–L3 коммутации и контрольных точек топологии**. Позволяет соединять/переключать порты устройств, настраивать подсети/VLAN/BGP на линках и сохранять/откатывать чекпоинты топологии. |
+| [`TopologyMacroFleetView.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/TopologyMacroFleetView.tsx) | **Макро-обзор мульти-подовой фабрики (`Macro Fleet View`)** для масштабирования на десятки и сотни стендов с агрегацией здоровья каждого пода. |
+| [`ForecastChart.tsx`](file:///home/tarhes/%D0%9F%D1%80%D0%BE%D0%B5%D0%BA%D1%82%D1%8B/app/CROC-DREAM-NetOps-Platform/frontend/src/components/charts/ForecastChart.tsx) | **График предиктивной аналитики Statistical Forecast**. Отрисовывает исторический ряд метрики (`cpu_pct` или `uplink_util_pct`), горизонт прогноза, коридор доверительного интервала (`p10`–`p90`), порог SLA и маркеры сетевых событий (`DEPLOY`, `DRIFT_DETECTED`, `REMEDIATE`, `CHAOS`). |
 
 ---
 

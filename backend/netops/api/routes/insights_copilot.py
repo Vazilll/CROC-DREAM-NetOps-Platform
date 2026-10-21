@@ -77,7 +77,7 @@ def extract_copilot_action(
                 (
                     d
                     for d in devices
-                    if str(getattr(d, "hostname", "")).lower() == raw_low
+                    if str(getattr(d, "hostname", "")).lower() in (raw_low, f"{raw_low}.croc.lab")
                     or str(getattr(d, "hostname", "")).lower().split(".")[0] == raw_low
                 ),
                 None,
@@ -99,17 +99,16 @@ def _sanitize_action_for_role(
         return action
     if action.type in ("remediate", "dry_run", "scan_drift"):
         target_id = action.device_id or (action.device_ids[0] if action.device_ids else None)
-        return (
-            CopilotAction(type="open_diff", label="Посмотреть Diff (только чтение)", device_id=target_id)
-            if target_id is not None
-            else None
-        )
+        if target_id is not None:
+            return CopilotAction(
+                type="open_diff", label="Посмотреть Diff (только чтение)", device_id=target_id
+            )
+        return None
     return action
 
 
 def _device_fallback_action(
     selected: Any,
-    alerts: list[Any],
     ai_anomalies: dict[str, str] | None = None,
 ) -> tuple[str, CopilotAction | None]:
     if str(selected.status) == "DRIFT_DETECTED":
@@ -122,51 +121,29 @@ def _device_fallback_action(
             f"КРИТИЧЕСКАЯ АНОМАЛИЯ ТЕЛЕМЕТРИИ (AI Guard) на {selected.hostname}: {ai_anomalies[selected.hostname]} Проверьте состояние интерфейсов и BGP-сессий.",
             CopilotAction(type="open_device", label=f"Проверить телеметрию {selected.hostname}", device_id=selected.id),
         )
-    dev_alerts = [a for a in alerts if a.device_id == selected.id]
-    if dev_alerts:
-        a = dev_alerts[0]
-        return (
-            f"Устройство {selected.hostname}: прогнозируется превышение порога {a.threshold:g}% по «{a.label}» через ~{a.breach_in_minutes} мин. Рекомендуется префлайт-проверка.",
-            CopilotAction(type="dry_run", label=f"Запустить Dry-Run для {selected.hostname}", device_id=selected.id),
-        )
     return (
         f"Устройство {selected.hostname} ({selected.role}, {selected.platform}): статус {selected.status}. Конфигурация синхронизирована с эталоном.",
         CopilotAction(type="open_diff", label=f"Посмотреть Diff {selected.hostname}", device_id=selected.id),
     )
 
 
-def _screen_fallback_action(
-    screen: str | None,
-    alerts: list[Any],
-) -> tuple[str, CopilotAction | None] | None:
+def _screen_fallback_action(screen: str | None) -> tuple[str, CopilotAction | None] | None:
     if screen == "drift":
         return (
             "Все устройства в синхронизации с Git SoT. Доступно внеочередное сканирование фабрики.",
             CopilotAction(type="scan_drift", label="Запустить сканирование дрейфа"),
         )
     if screen == "diff":
-        if alerts:
-            f = alerts[0]
-            return (
-                f"Экран верификации изменений (Diff): прогнозируется нагрузка на {f.hostname} («{f.label}», пробой через ~{f.breach_in_minutes} мин). Рекомендуется Dry-Run.",
-                CopilotAction(type="dry_run", label=f"Запустить Dry-Run для {f.hostname}", device_id=f.device_id),
-            )
         return (
             "Экран верификации изменений (Diff/Dry-Run). Расхождений нет, доступен префлайт-прогон.",
             CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
         )
-    if screen in ("topology", "devices") and alerts:
-        f = alerts[0]
-        return (
-            f"Прогнозируется превышение порога на узле {f.hostname} («{f.label}», пробой через ~{f.breach_in_minutes} мин).",
-            CopilotAction(type="open_device", label=f"Перейти к {f.hostname}", device_id=f.device_id),
-        )
     return None
 
 
-def _nominal_fallback_action(screen: str | None, total_devices: int) -> tuple[str, CopilotAction | None]:
+def _nominal_fallback_action(total_devices: int) -> tuple[str, CopilotAction | None]:
     return (
-        f"Сеть в штатном режиме. Всего устройств: {total_devices}, дрейф отсутствует, аномалий не прогнозируется.",
+        f"Сеть в штатном режиме. Всего устройств: {total_devices}, дрейф отсутствует, аномалий телеметрии нет.",
         CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
     )
 
@@ -174,60 +151,96 @@ def _nominal_fallback_action(screen: str | None, total_devices: int) -> tuple[st
 def generate_fallback_action(
     data: CopilotRequest,
     devices: list[Any],
-    alerts: list[Any],
     ai_anomalies: dict[str, str] | None = None,
+    sys_ctx: dict[str, Any] | None = None,
 ) -> tuple[str, CopilotAction | None]:
     """Deterministic rule-based reply and actionable button generator when LLM is offline."""
     from netops.api.routes.insights import hybrid_rank_devices
 
+    ctx = sys_ctx or {}
+    anomalies = ai_anomalies if isinstance(ai_anomalies, dict) else {}
     drifting = [d for d in devices if str(d.status) == "DRIFT_DETECTED"]
-    selected = None
-    if data.device_id is not None:
-        selected = next((d for d in devices if d.id == data.device_id), None)
-
+    selected = next((d for d in devices if d.id == data.device_id), None) if data.device_id is not None else None
     msg = data.message.lower().strip()
     if any(msg.startswith(g) for g in ["ghbdtn", "привет", "здравствуй", "hello", "hi", "добрый"]):
         return (
-            "Привет! Я AI Copilot платформы NetOps. Я анализирую риски конфигураций, "
-            "дрейф в сетевой фабрике и помогаю запускать безопасный Dry-Run. "
-            "Задайте вопрос по устройствам или выберите действие.",
+            "Привет! Я AI Copilot платформы NetOps. Я в режиме только для чтения (read-only) "
+            "инспектирую топологию L2/L3/BGP, логи пайплайнов CI/CD, Git SoT, дрейф конфигураций, "
+            "VictoriaMetrics/Prometheus и живую телеметрию устройств. Задайте вопрос или выберите действие.",
             CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
         )
-    if any(w in msg for w in ["готовност", "деплой", "deploy", "проверк"]):
-        if ai_anomalies:
-            first_anom_host, first_anom_prob = next(iter(ai_anomalies.items()))
-            anom_dev = next((d for d in devices if d.hostname == first_anom_host), None)
+    if any(w in msg for w in ["замороз", "freeze", "блокиров", "lock"]):
+        if ctx.get("is_frozen"):
             return (
-                f"Внимание: деплой заблокирован AI Telemetry Guard — на {first_anom_host} "
-                f"зафиксирована аномалия ({first_anom_prob}).",
-                CopilotAction(
-                    type="open_device",
-                    label=f"Проверить {first_anom_host}",
-                    device_id=anom_dev.id if anom_dev else None,
-                ),
+                f"Фабрика сейчас заморожена (Kill Switch активен: {ctx.get('freeze_reason')}). "
+                "Любые изменения заблокированы до снятия заморозки в Emergency Hub.",
+                CopilotAction(type="open_diff", label="Проверить состояние Diff"),
+            )
+        if ctx.get("locked_hosts"):
+            hosts_s = ", ".join(ctx["locked_hosts"])
+            return (
+                f"На узлах {hosts_s} действует защитная блокировка sync_lock после отката/аварийного патча.",
+                CopilotAction(type="open_diff", label="Посмотреть Diff"),
             )
         return (
-            "Проверка готовности к деплою: фабрика находится в стабильном состоянии. "
-            "Рекомендуется выполнить предварительную верификацию через Dry-Run перед наездом конфигурации.",
+            "Заморозка фабрики (Kill Switch) выключена, активных блокировок sync_lock нет.",
             CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
         )
-    ranked = hybrid_rank_devices(msg, devices, alerts=alerts, ai_anomalies=ai_anomalies)
-    top_match = (
-        ranked[0].device
-        if ranked and (ranked[0].lexical_score >= 3.5 or ranked[0].semantic_score >= 4.0)
-        else None
-    )
+    if any(w in msg for w in ["тополог", "линк", "связ", "spof", "drain", "коммутац"]):
+        topo = ctx.get("topo_summary") or {}
+        down = topo.get("down_links") or []
+        drained = topo.get("drained_nodes") or []
+        if down or drained:
+            parts = [f"Всего каналов в топологии: {topo.get('total_links', 0)}."]
+            if down:
+                parts.append(f"Отключенные/аварийные линки ({len(down)}): {', '.join(down[:3])}.")
+            if drained:
+                parts.append(f"Узлы в режиме Graceful Drain: {', '.join(drained)}.")
+            return (" ".join(parts), CopilotAction(type="scan_drift", label="Проверить дрейф фабрики"))
+        return (
+            f"Топология CLOS здорова: узлов {len(devices)}, активных каналов {topo.get('total_links', 0)}, "
+            "отключенных линков и изолированных сегментов нет.",
+            CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
+        )
+    if any(w in msg for w in ["ошибк", "почему упал", "джоб", "job", "задач", "откат", "rollback"]):
+        errs = ctx.get("recent_errors") or []
+        jobs_l = ctx.get("job_lines") or []
+        if errs:
+            return (
+                f"Причина сбоя в последних задачах: {'; '.join(errs[:2])}",
+                CopilotAction(type="open_diff", label="Открыть Diff и логи задачи"),
+            )
+        if jobs_l:
+            return (
+                "Последние задачи пайплайна завершились без критических ошибок:\n" + "\n".join(jobs_l[:3]),
+                CopilotAction(type="open_diff", label="Открыть DiffViewer"),
+            )
+    if any(w in msg for w in ["готовност", "деплой", "deploy", "проверк"]):
+        if ctx.get("is_frozen"):
+            return (
+                f"Деплой сейчас невозможен: активна заморозка фабрики ({ctx.get('freeze_reason')}).",
+                CopilotAction(type="open_diff", label="Открыть Diff"),
+            )
+        if anomalies:
+            first_anom_host, first_anom_prob = next(iter(anomalies.items()))
+            anom_dev = next((d for d in devices if d.hostname == first_anom_host), None)
+            return (
+                f"Внимание: деплой заблокирован AI Telemetry Guard — на {first_anom_host} зафиксирована аномалия ({first_anom_prob}).",
+                CopilotAction(type="open_device", label=f"Проверить {first_anom_host}", device_id=anom_dev.id if anom_dev else None),
+            )
+        return (
+            "Проверка готовности к деплою: фабрика находится в стабильном состоянии. Рекомендуется выполнить предварительную верификацию через Dry-Run перед наездом конфигурации.",
+            CopilotAction(type="dry_run", label="Запустить префлайт Dry-Run"),
+        )
+    ranked = hybrid_rank_devices(msg, devices, ai_anomalies=anomalies)
+    top_match = ranked[0].device if ranked and (ranked[0].lexical_score >= 3.5 or ranked[0].semantic_score >= 4.0) else None
 
     if any(w in msg for w in ["dry-run", "dry_run", "dry run", "префлайт", "холостой"]):
         target_dev = selected or top_match
         if target_dev:
             return (
                 f"Подготовлен запуск префлайт-проверки Dry-Run для {target_dev.hostname}.",
-                CopilotAction(
-                    type="dry_run",
-                    label=f"Запустить Dry-Run для {target_dev.hostname}",
-                    device_id=target_dev.id,
-                ),
+                CopilotAction(type="dry_run", label=f"Запустить Dry-Run для {target_dev.hostname}", device_id=target_dev.id),
             )
         return (
             "Подготовлен запуск префлайт-проверки Dry-Run для сетевой фабрики.",
@@ -237,85 +250,52 @@ def generate_fallback_action(
     if selected is None and ranked and ranked[0].lexical_score >= 4.5:
         selected = ranked[0].device
     if selected is not None:
-        return _device_fallback_action(selected, alerts, ai_anomalies=ai_anomalies)
+        return _device_fallback_action(selected, ai_anomalies=anomalies)
 
     if drifting:
         drift_names = ", ".join(d.hostname for d in drifting)
         if len(drifting) == 1:
             return (
-                f"В фабрике обнаружен дрейф конфигурации на устройстве {drift_names}. "
-                f"Рекомендуется устранить расхождение.",
-                CopilotAction(
-                    type="remediate",
-                    label=f"Устранить дрейф на {drifting[0].hostname}",
-                    device_id=drifting[0].id,
-                ),
+                f"В фабрике обнаружен дрейф конфигурации на устройстве {drift_names}. Рекомендуется устранить расхождение.",
+                CopilotAction(type="remediate", label=f"Устранить дрейф на {drifting[0].hostname}", device_id=drifting[0].id),
             )
         return (
-            f"В фабрике обнаружен дрейф конфигурации на {len(drifting)} устройствах "
-            f"({drift_names}).",
-            CopilotAction(
-                type="remediate",
-                label=f"Устранить дрейф ({len(drifting)} устр.)",
-                device_ids=[d.id for d in drifting],
-            ),
+            f"В фабрике обнаружен дрейф конфигурации на {len(drifting)} устройствах ({drift_names}).",
+            CopilotAction(type="remediate", label=f"Устранить дрейф ({len(drifting)} устр.)", device_ids=[d.id for d in drifting]),
         )
 
-    if ai_anomalies:
-        anom_host, anom_problem = next(iter(ai_anomalies.items()))
+    if anomalies:
+        anom_host, anom_problem = next(iter(anomalies.items()))
         anom_dev = next((d for d in devices if d.hostname == anom_host), None)
         return (
-            f"Внимание (AI Telemetry Guard): зафиксирована операционная аномалия на {anom_host} — "
-            f"{anom_problem}",
-            CopilotAction(
-                type="open_device",
-                label=f"Открыть {anom_host}",
-                device_id=anom_dev.id if anom_dev else None,
-            ),
+            f"Внимание (AI Telemetry Guard): зафиксирована операционная аномалия на {anom_host} — {anom_problem}",
+            CopilotAction(type="open_device", label=f"Открыть {anom_host}", device_id=anom_dev.id if anom_dev else None),
         )
 
-    screen_action = _screen_fallback_action(data.screen, alerts)
+    screen_action = _screen_fallback_action(data.screen)
     if screen_action is not None:
         return screen_action
 
-    if alerts:
-        first = alerts[0]
-        return (
-            f"Конфигурация синхронизирована. Ближайший риск: {first.hostname}, "
-            f"метрика «{first.label}», пробой через ~{first.breach_in_minutes} мин.",
-            CopilotAction(
-                type="open_device",
-                label=f"Открыть {first.hostname}",
-                device_id=first.device_id,
-            ),
-        )
-
-    return _nominal_fallback_action(data.screen, len(devices))
+    return _nominal_fallback_action(len(devices))
 
 
 @router.post("/copilot/chat", response_model=CopilotReply, summary="Ask the AI Copilot")
 async def copilot_chat(
     data: CopilotRequest, service: DeviceServiceDep, container: ContainerDep, user: Viewer
 ) -> CopilotReply:
-    from netops.api.routes.devices import device_allowed
+    from netops.api.routes.devices import list_allowed_devices
     from netops.api.routes.insights import (
         _check_rate_limit,
-        _compute_forecast_alerts_sync,
         select_rag_devices,
     )
     from netops.services.ai_guard import AiTelemetryGuard
+    from netops.services.copilot_context import build_copilot_system_context
+    from netops.telemetry import targets
 
     _check_rate_limit(f"copilot:{user.username}", limit=30, window_seconds=60.0)
-    devices = [
-        d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)
-    ]
-    alerts = await asyncio.to_thread(
-        _compute_forecast_alerts_sync, container.settings, devices, 72
-    )
+    devices = list_allowed_devices(service, user.allowed_system)
     guard = AiTelemetryGuard(container.settings)
-    verdicts = await asyncio.to_thread(
-        lambda: [guard.verify_execution(d) for d in devices]
-    )
+    verdicts = await asyncio.to_thread(lambda: [guard.verify_execution(d) for d in devices])
     ai_anomalies: dict[str, str] = {
         d.hostname: (v.problem or v.message)
         for d, v in zip(devices, verdicts, strict=True)
@@ -326,49 +306,29 @@ async def copilot_chat(
         data.message,
         devices,
         selected_device_id=data.device_id,
-        alerts=alerts,
         ai_anomalies=ai_anomalies,
         top_k=12,
     )
-    from netops.telemetry import targets
-
     plan_devices = (targets.last_collector_plan() or {}).get("devices") or {}
-    lines: list[str] = []
-    for d in rag_devices:
-        p_info = plan_devices.get(d.hostname) or {}
-        active_proto = p_info.get("protocol", "ssh_cli")
-        sup_map = p_info.get("supported_protocols") or {}
-        sup_list = [k for k, v in sup_map.items() if isinstance(v, dict) and v.get("supported")] or [active_proto]
-        lines.append(
-            f"- {d.hostname}: {d.role}, {d.platform}, статус {d.status}, "
-            f"протокол сбора={active_proto} (поддерживаются: {', '.join(sup_list)})"
-        )
+    sys_ctx = build_copilot_system_context(
+        service._session, container.settings, devices, rag_devices, plan_devices
+    )
+    lines: list[str] = [sys_ctx["context_text"]]
     if len(rag_devices) < len(devices):
         lines.insert(
             0,
-            f"Всего устройств в фабрике: {len(devices)} "
-            f"(показаны {len(rag_devices)} наиболее релевантных по гибридному RRF-поиску):",
+            f"Всего устройств в фабрике: {len(devices)} (показаны {len(rag_devices)} наиболее релевантных по гибридному RRF-поиску):",
         )
-    lines += [
-        f"КРИТИЧЕСКАЯ АНОМАЛИЯ ТЕЛЕМЕТРИИ (AI Guard): {host} — {prob}"
-        for host, prob in ai_anomalies.items()
-    ]
-    lines += [
-        f"Прогноз: {a.hostname} достигнет порога {a.threshold:g}% по «{a.label}» "
-        f"через ~{a.breach_in_minutes} мин"
-        for a in alerts
-    ]
+    lines += [f"КРИТИЧЕСКАЯ АНОМАЛИЯ ТЕЛЕМЕТРИИ (AI Guard): {h} — {p}" for h, p in ai_anomalies.items()]
     if data.screen:
         lines.insert(0, f"Текущий экран оператора: {data.screen}.")
     if data.device_id is not None:
         selected = next((d for d in devices if d.id == data.device_id), None)
         if selected is None:
             raise HTTPException(status_code=404, detail="Device not found")
-        lines.insert(
-            0, f"Пользователь смотрит устройство {selected.hostname} ({selected.management_ip})."
-        )
-    context = "\n".join(lines)
+        lines.insert(0, f"Пользователь смотрит устройство {selected.hostname} ({selected.management_ip}).")
 
+    context = "\n".join(lines)
     llm_prompt = f"Контекст:\n{context}\n\nВопрос: {data.message}"
     reply = await chat_with_llm(container.settings, COPILOT_SYSTEM, llm_prompt)
     if reply is not None:
@@ -376,17 +336,12 @@ async def copilot_chat(
             reply[0], default_device_id=data.device_id, devices=devices
         )
         msg_lower = data.message.lower()
-        if any(w in msg_lower for w in ["dry-run", "dry_run", "dry run", "префлайт", "холостой"]):
-            _, fallback_act = generate_fallback_action(
-                data, devices, alerts, ai_anomalies=ai_anomalies
+        if any(w in msg_lower for w in ["dry-run", "dry_run", "dry run", "префлайт", "холостой"]) or (
+            action is None and any(w in msg_lower for w in ["дрейф", "drift", "remediat", "устрани", "исправ"])
+        ):
+            _, action = generate_fallback_action(
+                data, devices, ai_anomalies=ai_anomalies, sys_ctx=sys_ctx
             )
-            action = fallback_act
-        elif action is None:
-            _, fallback_act = generate_fallback_action(
-                data, devices, alerts, ai_anomalies=ai_anomalies
-            )
-            if any(w in msg_lower for w in ["дрейф", "drift", "remediat", "устрани", "исправ"]):
-                action = fallback_act
         return CopilotReply(
             answer=answer_text,
             provider=reply[1],
@@ -394,7 +349,7 @@ async def copilot_chat(
         )
 
     summary, fallback_action = generate_fallback_action(
-        data, devices, alerts, ai_anomalies=ai_anomalies
+        data, devices, ai_anomalies=ai_anomalies, sys_ctx=sys_ctx
     )
     return CopilotReply(
         answer=f"{summary}\n\n(LLM недоступна — автоматическая рекомендация Rule-Engine.)",
@@ -421,18 +376,7 @@ class AiGuardResponse(BaseModel):
     injected_simulation: str | None = None
 
 
-@router.get("/ai-guard/check/{device_id}", response_model=AiGuardResponse, summary="Runtime error & anomaly detection via statistical quantile guard")
-@router.get("/insights/ai-guard/check/{device_id}", response_model=AiGuardResponse, include_in_schema=False)
-async def ai_guard_check_device(
-    device_id: int, service: DeviceServiceDep, container: ContainerDep, user: Viewer
-) -> AiGuardResponse:
-    from netops.api.routes.devices import assert_device_allowed
-    from netops.services.ai_guard import AiTelemetryGuard
-
-    device = service.get(device_id)
-    assert_device_allowed(device, user.allowed_system)
-    guard = AiTelemetryGuard(container.settings)
-    verdict = await asyncio.to_thread(guard.verify_execution, device)
+def _to_guard_response(device: Any, verdict: Any, guard: Any) -> AiGuardResponse:
     return AiGuardResponse(
         hostname=device.hostname,
         healthy=verdict.healthy,
@@ -445,6 +389,21 @@ async def ai_guard_check_device(
         provider=verdict.provider,
         injected_simulation=guard.get_injected_anomaly(device.hostname),
     )
+
+
+@router.get("/ai-guard/check/{device_id}", response_model=AiGuardResponse, summary="Runtime error & anomaly detection via statistical quantile guard")
+@router.get("/insights/ai-guard/check/{device_id}", response_model=AiGuardResponse, include_in_schema=False)
+async def ai_guard_check_device(
+    device_id: int, service: DeviceServiceDep, container: ContainerDep, user: Viewer
+) -> AiGuardResponse:
+    from netops.api.routes.devices import assert_device_allowed
+    from netops.services.ai_guard import AiTelemetryGuard
+
+    device = service.get(device_id)
+    assert_device_allowed(device, user.allowed_system)
+    guard = AiTelemetryGuard(container.settings)
+    verdict = await asyncio.to_thread(guard.verify_execution, device)
+    return _to_guard_response(device, verdict, guard)
 
 
 @router.post("/ai-guard/simulate", summary="Inject simulated operational anomaly (blackhole/storm) for demo (Operator/Admin)")
@@ -472,38 +431,24 @@ async def ai_guard_simulate_anomaly(
 async def ai_guard_overview(
     service: DeviceServiceDep, container: ContainerDep, user: Viewer
 ) -> list[AiGuardResponse]:
-    from netops.api.routes.devices import device_allowed
+    from netops.api.routes.devices import _iter_allowed_tokens, device_allowed
     from netops.services.ai_guard import AiTelemetryGuard
 
-    devices = [
-        d for d in service.list_devices(limit=500) if device_allowed(d, user.allowed_system)
-    ]
     guard = AiTelemetryGuard(container.settings)
-    verdicts = await asyncio.to_thread(lambda: [guard.verify_execution(d) for d in devices])
-    return [
-        AiGuardResponse(
-            hostname=d.hostname,
-            healthy=verdict.healthy,
-            metric=verdict.metric,
-            observed_value=verdict.observed_value,
-            expected_range=verdict.expected_range,
-            deviation_pct=verdict.deviation_pct,
-            problem=verdict.problem,
-            message=verdict.message,
-            provider=verdict.provider,
-            injected_simulation=guard.get_injected_anomaly(d.hostname),
-        )
-        for d, verdict in zip(devices, verdicts, strict=True)
-    ]
+    tokens = _iter_allowed_tokens(user.allowed_system)
+    devs = [d for d in service.list_devices(limit=5000, allowed_tokens=tokens) if device_allowed(d, user.allowed_system)]
+    verdicts = await asyncio.to_thread(lambda: [guard.verify_execution(d) for d in devs])
+    return [_to_guard_response(d, v, guard) for d, v in zip(devs, verdicts, strict=True)]
 
 
 @router.post("/insights/telegram/broadcast", summary="Broadcast AI network executive summary to Telegram chat (Operator/Admin)")
 async def broadcast_to_telegram(
     service: DeviceServiceDep, container: ContainerDep, _: Operator
 ) -> dict[str, Any]:
-    from netops.api.routes.insights import get_fabric_summary
+    from netops.api.routes.insights import _check_rate_limit, get_fabric_summary
     from netops.services.notifier import send_telegram_message
 
+    _check_rate_limit(f"tg_broadcast:{_.username}", limit=10, window_seconds=60.0)
     summary_data = await get_fabric_summary(service, container, _)
     tg_text = (
         "<b>[NetOps Platform] Оперативная сводка фабрики</b>\n\n"

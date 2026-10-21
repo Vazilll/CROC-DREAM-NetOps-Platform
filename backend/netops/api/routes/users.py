@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import select
 
-from netops.api.deps import Admin, SessionDep, UserServiceDep, Viewer
+from netops.api.deps import Admin, ContainerDep, SessionDep, UserServiceDep, Viewer
+from netops.api.routes.auth import (
+    StaticViewerResponse,
+    StaticViewerToggleRequest,
+    get_static_viewer,
+    rotate_static_viewer,
+    toggle_static_viewer,
+)
 from netops.models import User
 from netops.schemas.users import (
     UserBatchCreate,
@@ -64,6 +71,31 @@ def create_users_batch(
     data: UserBatchCreate, service: UserServiceDep, _: Admin
 ) -> list[UserWithToken]:
     return [_with_token(u, t) for u, t in service.create_batch(data)]
+
+
+@router.get("/static-viewer", response_model=StaticViewerResponse, include_in_schema=False)
+def get_users_static_viewer(
+    request: Request, session: SessionDep, container: ContainerDep, admin: Admin
+) -> dict[str, Any]:
+    return get_static_viewer(request, session, container, admin)
+
+
+@router.post("/static-viewer/toggle", response_model=StaticViewerResponse, include_in_schema=False)
+def toggle_users_static_viewer(
+    req: StaticViewerToggleRequest,
+    request: Request,
+    session: SessionDep,
+    container: ContainerDep,
+    admin: Admin,
+) -> dict[str, Any]:
+    return toggle_static_viewer(req, request, session, container, admin)
+
+
+@router.post("/static-viewer/rotate", response_model=StaticViewerResponse, include_in_schema=False)
+def rotate_users_static_viewer(
+    request: Request, session: SessionDep, container: ContainerDep, admin: Admin
+) -> dict[str, Any]:
+    return rotate_static_viewer(request, session, container, admin)
 
 
 @router.get("/{user_id}", response_model=UserRead, summary="Пользователь")

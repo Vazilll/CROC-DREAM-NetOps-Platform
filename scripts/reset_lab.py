@@ -51,8 +51,9 @@ def reset_environment(seed: bool = False) -> None:
     target_urls = [f"sqlite:///{db_file}"]
     if "postgresql" in settings.database_url:
         target_urls.append(settings.database_url)
-    else:
-        target_urls.append("postgresql+psycopg://netops:netops@127.0.0.1:5432/netops")
+
+    if getattr(settings, "environment", "").lower() in ("production", "prod", "staging"):
+        raise RuntimeError(f"Сброс базы данных запрещен в окружении {settings.environment}")
 
     session_factory = None
     for url in dict.fromkeys(target_urls):

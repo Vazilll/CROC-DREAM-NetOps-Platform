@@ -112,6 +112,17 @@ def detect_platform_from_version(
     return initial_platform
 
 
+def _iter_inventory_devices(settings: Any) -> list[dict[str, Any]]:
+    repo = getattr(settings, "intent_repo_path", None)
+    if repo is not None:
+        inv_path = Path(repo) / "inventory.yaml"
+        if inv_path.is_file():
+            with contextlib.suppress(Exception):
+                raw = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
+                return list(raw.get("devices") or [])
+    return []
+
+
 def _resolve_domain(settings: Any = None) -> str:
     if settings is None:
         with contextlib.suppress(Exception):
@@ -121,16 +132,10 @@ def _resolve_domain(settings: Any = None) -> str:
     dom = str(getattr(settings, "default_domain", "") or "").strip().lstrip(".")
     if dom:
         return dom
-    repo = getattr(settings, "intent_repo_path", None)
-    if repo is not None:
-        inv_path = Path(repo) / "inventory.yaml"
-        if inv_path.is_file():
-            with contextlib.suppress(Exception):
-                raw = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-                for dev in raw.get("devices") or []:
-                    h = str(dev.get("hostname") or "")
-                    if "." in h:
-                        return h.split(".", 1)[1]
+    for dev in _iter_inventory_devices(settings):
+        h = str(dev.get("hostname") or "")
+        if "." in h:
+            return h.split(".", 1)[1]
     return "croc.lab"
 
 
@@ -140,19 +145,23 @@ def _resolve_fabric_id(settings: Any = None) -> str:
             from netops.settings import get_settings
 
             settings = get_settings()
+    db_url = getattr(settings, "database_url", None)
+    if isinstance(db_url, str) and db_url:
+        with contextlib.suppress(Exception):
+            from netops.services.state import get_state_manager
+
+            rt = get_state_manager(settings).get_db_state(
+                "runtime_settings", {}, database_url=db_url
+            )
+            if isinstance(rt, dict) and rt.get("active_stand_slug"):
+                return str(rt["active_stand_slug"]).strip()
     fab = str(getattr(settings, "default_fabric_id", "") or "").strip()
     if fab:
         return fab
-    repo = getattr(settings, "intent_repo_path", None)
-    if repo is not None:
-        inv_path = Path(repo) / "inventory.yaml"
-        if inv_path.is_file():
-            with contextlib.suppress(Exception):
-                raw = yaml.safe_load(inv_path.read_text(encoding="utf-8")) or {}
-                for dev in raw.get("devices") or []:
-                    f_id = str(dev.get("fabric_id") or "").strip()
-                    if f_id:
-                        return f_id
+    for dev in _iter_inventory_devices(settings):
+        f_id = str(dev.get("fabric_id") or "").strip()
+        if f_id:
+            return f_id
     return "croc-dc1-pod1"
 
 

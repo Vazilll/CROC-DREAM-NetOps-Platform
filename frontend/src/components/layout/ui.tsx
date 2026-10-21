@@ -1,4 +1,4 @@
-import React, { useEffect, useId } from 'react';
+import React, { useEffect } from 'react';
 import { X, CheckCircle2, AlertTriangle, RotateCw, Clock } from 'lucide-react';
 import type { DeviceStatus, OperStatus } from '../../api';
 
@@ -77,7 +77,6 @@ export const Sparkline: React.FC<{
   showValue?: boolean;
   className?: string;
 }> = React.memo(({ points = [], width = 76, height = 22, fullWidth = false, showValue = true, className = '' }) => {
-  const gradId = useId();
   const normalized =
     points && points.length >= 2
       ? points
@@ -106,12 +105,11 @@ export const Sparkline: React.FC<{
     const cx = ((prev.x + p.x) / 2).toFixed(1);
     return `${acc} C${cx},${prev.y.toFixed(1)} ${cx},${p.y.toFixed(1)} ${p.x.toFixed(1)},${p.y.toFixed(1)}`;
   }, '');
-  const smoothAreaPath = `${smoothLinePath} L${xy[xy.length - 1].x.toFixed(1)},${height} L${xy[0].x.toFixed(1)},${height} Z`;
 
   const first = normalized[0];
   const last = normalized[normalized.length - 1];
   const diff = last - first;
-  const strokeColor = last > 80 ? '#f43f5e' : last > 55 ? '#f59e0b' : '#10b981';
+  const strokeColor = last > 80 ? '#f43f5e' : last > 55 ? '#f59e0b' : '#71717a';
   const arrow = diff > 4 ? '↗' : diff < -4 ? '↘' : '→';
 
   return (
@@ -123,17 +121,10 @@ export const Sparkline: React.FC<{
         preserveAspectRatio="none"
         className="sparkline shrink-0 overflow-visible"
       >
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={strokeColor} stopOpacity="0.28" />
-            <stop offset="100%" stopColor={strokeColor} stopOpacity="0.02" />
-          </linearGradient>
-        </defs>
-        <path d={smoothAreaPath} fill={`url(#${gradId})`} />
         <path
           fill="none"
           stroke={strokeColor}
-          strokeWidth="1.75"
+          strokeWidth="1.5"
           strokeLinecap="round"
           strokeLinejoin="round"
           d={smoothLinePath}
@@ -141,7 +132,7 @@ export const Sparkline: React.FC<{
         <circle
           cx={xy[xy.length - 1].x}
           cy={xy[xy.length - 1].y}
-          r="2.2"
+          r="2"
           fill={strokeColor}
         />
       </svg>
@@ -368,3 +359,14 @@ export const Modal: React.FC<ModalProps> = ({
     </div>
   );
 };
+
+export function downloadMarkdown(filename: string, content: string): void {
+  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
