@@ -1,12 +1,8 @@
-job_id: 997db32c-459e-40d5-b687-5a13ce606a28
-job_type: DRIFT_SCAN
-committed_at: 1792608692
-changed_hosts:
-- spine-2.croc.lab
+job_id: c80d817f-3887-48e9-98d8-1dd78f256428
+job_type: DRY_RUN
+committed_at: 1792639133
+changed_hosts: []
 devices:
-- hostname: spine-1.croc.lab
+- hostname: leaf-1.croc.lab
   in_sync: true
   remediation_lines: 0
-- hostname: spine-2.croc.lab
-  in_sync: false
-  remediation_lines: 34
