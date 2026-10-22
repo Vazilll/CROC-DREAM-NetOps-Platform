@@ -293,9 +293,9 @@ def test_bug_node_exporter_override_drops_device_from_sd(
     srv_id = s_resp.json()["id"]
 
     try:
-        # Before manual override: fresh device appears in Exporter SD
+        # Before manual override: an unproven device stays on ssh_cli and is not an exporter target
         exp_sd_before = client.get("/api/v1/telemetry/sd/exporter").json()
-        assert any(t.get("labels", {}).get("hostname") == srv_payload["hostname"] for t in exp_sd_before)
+        assert not any(t.get("labels", {}).get("hostname") == srv_payload["hostname"] for t in exp_sd_before)
 
         # Apply manual override to node_exporter
         srv_node = client.put(
@@ -334,6 +334,8 @@ def test_manual_override_from_snmp_to_gnmi_cache_invalidation(
     dev_id = c_resp.json()["id"]
 
     try:
+        # Unproven devices stay on ssh_cli; the operator picks SNMP explicitly
+        client.put(f"/api/v1/telemetry/collectors/{cisco_payload['hostname']}", json={"protocol": "snmp"}, headers=ADMIN)
         # Step 1: Read SNMP SD -> populates cache with Cisco device, sets sd_targets_dirty = False
         sd_snmp_1 = client.get("/api/v1/telemetry/sd/snmp").json()
         hosts_1 = [t.get("labels", {}).get("hostname") for t in sd_snmp_1]

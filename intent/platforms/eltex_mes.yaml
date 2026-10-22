@@ -35,6 +35,7 @@ commands:
   hostname_filter: show running-config | include hostname
   interfaces_brief: show ip interface brief
   lldp_neighbors: show lldp neighbors
+  bgp_summary: show ip bgp summary
 
 # ==============================================================================
 # БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)

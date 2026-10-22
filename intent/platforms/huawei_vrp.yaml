@@ -39,6 +39,11 @@ commands:
   hostname_filter: display current-configuration | include sysname
   interfaces_brief: display ip interface brief
   lldp_neighbors: display lldp neighbor brief
+  bgp_summary: display bgp peer
+
+# Порядок секций в эталоне = порядок вывода `display current-configuration` на устройстве
+# (ACL идут сразу после sysname). Иначе сравнение показывает ложный дрейф.
+render_order: [base, acls, interfaces, bgp]
 
 # ==============================================================================
 # БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)

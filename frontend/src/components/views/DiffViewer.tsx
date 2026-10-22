@@ -6,7 +6,8 @@ import type { JobDiff, DeviceDiff, JobSummary, RiskExplanation } from '../../api
 import { translations, type Locale } from '../../i18n';
 import type { AppTheme } from '../layout/Header';
 import { IntentEditor } from './IntentEditor';
-import { PlainDiffFallback, PlainCodeFallback, DiffAiRiskCard, DiffDirectToolbar, extractCliPatchFromDiff, useMonacoTheme } from './DiffViewerFallbacks';
+import { PlainDiffFallback, PlainCodeFallback, DiffDirectToolbar, extractCliPatchFromDiff, useMonacoTheme } from './DiffViewerFallbacks';
+import { DiffAiRiskCard } from './DiffAiRiskCard';
 
 interface DiffViewerProps {
   jobs: JobSummary[];

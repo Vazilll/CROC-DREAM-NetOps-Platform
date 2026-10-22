@@ -347,6 +347,7 @@ class PlatformProfile(IntentModel):
     interface_prefixes: list[str] = Field(default_factory=list)
     lldp_port_prefixes: list[str] = Field(default_factory=list)
     commands: dict[str, str] = Field(default_factory=dict)
+    render_order: list[str] = Field(default_factory=list)
     telemetry: dict[str, TelemetryMetricSpec] = Field(default_factory=dict)
     gnmi: GnmiSpec | None = None
     snmp: SnmpSpec = Field(default_factory=SnmpSpec)

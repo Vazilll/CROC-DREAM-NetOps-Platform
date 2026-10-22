@@ -33,6 +33,7 @@ from netops.services.telemetry import (
     detect_optimal_telemetry_protocol,
 )
 from netops.settings import Settings
+from netops.telemetry import fallback
 from netops.telemetry.sd_builder import (
     EXPORTER_TARGETS_FILE,
     GNMI_RELAY_BASE_PORT,
@@ -172,13 +173,6 @@ def _probe_device(
         result = {"protocol": TelemetryProtocol.SSH_CLI, "error": str(exc)}
     protocol = result.get("protocol", TelemetryProtocol.SSH_CLI)
     proto_val = str(getattr(protocol, "value", protocol))
-    if not override and detect is detect_optimal_telemetry_protocol and proto_val == TelemetryProtocol.SSH_CLI.value:
-        if device.platform.value == "linux_server":
-            proto_val = TelemetryProtocol.PROMETHEUS_EXPORTER.value
-            result["port"] = 9100
-        elif device.platform.value in ("cisco_iosxe", "arista_eos"):
-            proto_val = TelemetryProtocol.SNMP.value
-            result["port"] = extra_kwargs.get("snmp_port", 161)
 
     base_item = _sanitize_huawei_snmp(
         {
@@ -237,7 +231,19 @@ def refresh_collector_targets(
     with ThreadPoolExecutor(max_workers=workers) as pool:
         probed = list(pool.map(lambda d: _probe_device(d, toolchain, settings, detect), devices))
     plan = {dev.hostname: item for dev, item in zip(devices, probed, strict=True)}
+    prev = (last_collector_plan() or {}).get("devices") or {}
+    overrides = get_protocol_overrides()
+    by_host = {d.hostname: d for d in devices}
+    fallback.confirm_downgrades(
+        prev, plan, overrides, lambda h: _probe_device(by_host[h], toolchain, settings, detect)
+    )
+    live_overrides = {h: v for h, v in overrides.items() if h in plan}
+    if live_overrides != overrides:
+        sm = get_state_manager()
+        sm.set_json(PROTOCOL_OVERRIDES_KEY, live_overrides)
+        sm.set_db_state(PROTOCOL_OVERRIDES_KEY, live_overrides)
     summary = _persist_collector_plan(plan, settings)
+    fallback.record_changes(prev, plan)
     sync_grafana_dashboard_to_db()
     return summary
 

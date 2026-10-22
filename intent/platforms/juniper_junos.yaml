@@ -37,6 +37,7 @@ commands:
   hostname_filter: show configuration | match host-name
   interfaces_brief: show interfaces terse
   lldp_neighbors: show lldp neighbors
+  bgp_summary: show bgp summary
 
 # ==============================================================================
 # БЛОК 3: ТРИГГЕРЫ ПРОТОКОЛОВ ТЕЛЕМЕТРИИ И КАСКАД ПРИОРИТЕТОВ (CAPABILITIES)

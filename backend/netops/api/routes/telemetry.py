@@ -15,7 +15,7 @@ from netops.services.telemetry import (
     metric_series,
     resolve_device_ports,
 )
-from netops.telemetry import collector, targets
+from netops.telemetry import collector, fallback, targets
 from netops.toolchain import build_toolchain
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
@@ -231,10 +231,31 @@ class CollectorOverrideRequest(BaseModel):
 
 
 @router.get(
+    "/platform-commands",
+    summary="CLI-команды платформ из intent/platforms/*.yaml (источник истины для UI)",
+)
+def get_platform_commands(_: Viewer) -> dict[str, dict[str, str]]:
+    from netops.enums import Platform
+    from netops.services.telemetry import load_profile_for_platform
+
+    out: dict[str, dict[str, str]] = {}
+    for plat in Platform:
+        profile = load_profile_for_platform(plat)
+        if profile is not None:
+            out[plat.value] = dict(profile.commands)
+    return out
+
+
+@router.get(
     "/collectors",
     summary="Last protocol plan: which devices stream via gNMI / SNMP / exporter or stay on SSH",
 )
 def get_collector_plan(service: DeviceServiceDep, user: Viewer) -> dict[str, Any]:
+    payload = _collector_payload(service, user)
+    return {**payload, "events": fallback.get_events(set(payload.get("devices") or {}))}
+
+
+def _collector_payload(service: DeviceServiceDep, user: Viewer) -> dict[str, Any]:
     from netops.api.routes.devices import _iter_allowed_tokens
 
     tokens = _iter_allowed_tokens(user.allowed_system)

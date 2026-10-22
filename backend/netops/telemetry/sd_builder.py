@@ -371,12 +371,6 @@ def _get_sd_targets(
                 override = overrides.get(d.hostname)
                 proto = TelemetryProtocol.SSH_CLI.value
                 port = d.management_port or 22
-                if plat == "linux_server":
-                    proto = TelemetryProtocol.PROMETHEUS_EXPORTER.value
-                    port = 9100
-                elif plat in ("cisco_iosxe", "arista_eos"):
-                    proto = TelemetryProtocol.SNMP.value
-                    port = 161
 
                 base_item = {
                     "protocol": proto,

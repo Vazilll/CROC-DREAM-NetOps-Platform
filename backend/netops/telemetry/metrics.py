@@ -68,6 +68,8 @@ HELP: Mapping[str, str] = MappingProxyType(
         SERVER_TCP_RETRANSMITS: "Количество повторных передач TCP-сегментов на сервере",
         SERVER_CONNTRACK_UTIL: "Заполнение таблицы отслеживания соединений ядра (conntrack), проценты",
         COLLECTED_AT: "Время последнего сбора метрик",
+        "netops_telemetry_active_protocol": "Активный канал телеметрии устройства (1 у текущего протокола)",
+        "netops_telemetry_fallback_events_total": "Число зафиксированных смен протокола телеметрии (фоллбэков)",
     }
 )
 

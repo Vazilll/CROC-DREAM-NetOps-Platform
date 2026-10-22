@@ -170,6 +170,10 @@ def platform_samples(session: Session) -> list[Sample]:
     samples.append(Sample(metrics.DRIFT_DEVICES, float(counts[DeviceStatus.DRIFT_DETECTED])))
     samples.append(Sample(metrics.DRIFT_DEVICES_TOTAL, float(counts[DeviceStatus.DRIFT_DETECTED])))
 
+    from netops.telemetry import fallback, targets
+
+    samples.extend(fallback.metric_samples((targets.last_collector_plan() or {}).get("devices") or {}))
+
     job_counts = session.execute(
         select(Job.type, Job.status, func.count()).group_by(Job.type, Job.status)
     ).all()

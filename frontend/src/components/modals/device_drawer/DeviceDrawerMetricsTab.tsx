@@ -1,11 +1,12 @@
 import React from 'react';
 import { ExternalLink } from 'lucide-react';
-import type { CollectorDevicePlan, DeviceDetail } from '../../../api';
+import type { CollectorDevicePlan, CollectorFallbackEvent, DeviceDetail } from '../../../api';
 import { GrafanaTelemetryChart } from '../../charts/GrafanaTelemetryChart';
 
 export interface DeviceDrawerMetricsTabProps {
   device: DeviceDetail;
   collectorPlan: CollectorDevicePlan | null;
+  fallbackEvents: CollectorFallbackEvent[];
   protoSaving: boolean;
   isViewer: boolean;
   onProtocolChange: (mode: 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli') => Promise<void>;
@@ -14,6 +15,7 @@ export interface DeviceDrawerMetricsTabProps {
 export const DeviceDrawerMetricsTab: React.FC<DeviceDrawerMetricsTabProps> = ({
   device,
   collectorPlan,
+  fallbackEvents,
   protoSaving,
   isViewer,
   onProtocolChange,
@@ -59,6 +61,12 @@ export const DeviceDrawerMetricsTab: React.FC<DeviceDrawerMetricsTabProps> = ({
               {collectorPlan?.port ? ` (:${collectorPlan.port})` : ''}
               {collectorPlan?.verified_by ? ` · ${collectorPlan.verified_by}` : ''}
             </div>
+            {fallbackEvents[0] && (
+              <div className="mt-1 text-[11px] font-mono text-amber-300" data-testid="fallback-event">
+                ⚠ {new Date(fallbackEvents[0].ts).toLocaleString()} · {fallbackEvents[0].from} →{' '}
+                {fallbackEvents[0].to} ({fallbackEvents[0].reason})
+              </div>
+            )}
           </div>
           <select
             disabled={isViewer || protoSaving}

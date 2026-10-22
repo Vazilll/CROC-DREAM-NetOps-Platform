@@ -305,11 +305,20 @@ export interface CollectorDevicePlan {
   supported_protocols?: Record<string, ProtocolSupportInfo>;
 }
 
+export interface CollectorFallbackEvent {
+  ts: string;
+  hostname: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
 export interface CollectorPlanResponse {
   refreshed_at: string | null;
   protocols: Record<string, number>;
   devices: Record<string, CollectorDevicePlan>;
   overrides?: Record<string, string>;
+  events?: CollectorFallbackEvent[];
 }
 
 export interface StandRead {

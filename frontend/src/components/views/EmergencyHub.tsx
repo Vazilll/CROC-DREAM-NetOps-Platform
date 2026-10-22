@@ -24,7 +24,8 @@ interface EmergencyHubProps {
 export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   const [devices, setDevices] = useState<Array<{ hostname: string; platform: string; label: string }>>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>('');
-  const [command, setCommand] = useState<string>('show ip bgp summary');
+  const [command, setCommand] = useState<string>('');
+  const [platformCommands, setPlatformCommands] = useState<Record<string, Record<string, string>>>({});
   const [cliOutput, setCliOutput] = useState<string>('// Готов к приему команд оператора...');
   const [isExecutingCmd, setIsExecutingCmd] = useState<boolean>(false);
 
@@ -121,6 +122,16 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
   };
 
   const activeDeviceObj = devices.find((d) => d.hostname === selectedDevice) || devices[0];
+
+  // Команда по умолчанию — commands.bgp_summary из intent/platforms/<платформа>.yaml.
+  const activePlatform = activeDeviceObj?.platform;
+  useEffect(() => {
+    api.getPlatformCommands().then(setPlatformCommands).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    const cmd = activePlatform ? platformCommands[activePlatform]?.bgp_summary : undefined;
+    if (cmd) setCommand((prev) => prev || cmd);
+  }, [activePlatform, platformCommands]);
   const activePresets =
     (activeDeviceObj && PLATFORM_CLI_PRESETS[activeDeviceObj.platform]) || PLATFORM_CLI_PRESETS.arista_eos;
 
@@ -292,9 +303,8 @@ export const EmergencyHub: React.FC<EmergencyHubProps> = ({ currentRole }) => {
               onChange={(e) => {
                 setSelectedDevice(e.target.value);
                 const dev = devices.find((d) => d.hostname === e.target.value);
-                if (dev && PLATFORM_CLI_PRESETS[dev.platform]) {
-                  setCommand(PLATFORM_CLI_PRESETS[dev.platform][0]);
-                }
+                const first = dev && (platformCommands[dev.platform]?.bgp_summary ?? PLATFORM_CLI_PRESETS[dev.platform]?.[0]);
+                if (first) setCommand(first);
               }}
               className="px-3 py-1.5 rounded-lg text-xs font-mono bg-[var(--bg-elevated)] border border-[var(--border-subtle)] text-[var(--text-primary)] focus:outline-none focus:border-cyan-500"
             >

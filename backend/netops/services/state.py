@@ -182,7 +182,6 @@ class StateManager(StateDomainsMixin):
     # SD-цели (prometheus_*_targets) сюда не входят: пишутся и в БД, при Redis-miss читаются из БД.
     _HOT_REDIS_KEYS: frozenset[str] = frozenset(
         {
-            "netops:telemetry:protocols",
             "chaos_events",
             "grafana_noc_dashboard",
         }

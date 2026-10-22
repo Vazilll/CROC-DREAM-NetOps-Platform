@@ -43,7 +43,8 @@ def test_device_creation_and_deletion_immediately_reflects_in_http_sd(
     assert create_resp.status_code == 201, create_resp.text
     dev_id = create_resp.json()["id"]
 
-    # 2. Check Prometheus SNMP HTTP SD - newly created Cisco device must be immediately present
+    client.put(f"/api/v1/telemetry/collectors/test-cisco-leaf-99.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
+    # 2. Check Prometheus SNMP HTTP SD - device with explicit SNMP choice must be immediately present
     sd_snmp_resp = client.get("/api/v1/telemetry/sd/snmp")
     assert sd_snmp_resp.status_code == 200
     snmp_targets = sd_snmp_resp.json()
@@ -63,7 +64,8 @@ def test_device_creation_and_deletion_immediately_reflects_in_http_sd(
     assert create_srv_resp.status_code == 201, create_srv_resp.text
     srv_id = create_srv_resp.json()["id"]
 
-    # 4. Check Prometheus Node Exporter HTTP SD - newly created server must be immediately present
+    client.put(f"/api/v1/telemetry/collectors/test-srv-rocky-99.croc.lab", json={"protocol": "prometheus_exporter"}, headers=ADMIN)
+    # 4. Check Prometheus Node Exporter HTTP SD - server with explicit exporter choice must be immediately present
     sd_exp_resp = client.get("/api/v1/telemetry/sd/exporter")
     assert sd_exp_resp.status_code == 200
     exp_targets = sd_exp_resp.json()
@@ -188,3 +190,11 @@ def test_infer_platform_from_name_heuristics() -> None:
     assert infer_platform_from_name("srv-ubuntu-k8s") == Platform.LINUX_SERVER
     assert infer_platform_from_name("rocky-host-01") == Platform.LINUX_SERVER
     assert infer_platform_from_name("generic-switch-1") == Platform.ARISTA_EOS
+
+
+def test_platform_commands_endpoint_serves_yaml_commands(client: TestClient) -> None:
+    resp = client.get("/api/v1/telemetry/platform-commands", headers=VIEWER)
+    assert resp.status_code == 200
+    cmds = resp.json()
+    assert cmds["huawei_vrp"]["bgp_summary"] == "display bgp peer"
+    assert cmds["cisco_iosxe"]["bgp_summary"] == "show ip bgp summary"

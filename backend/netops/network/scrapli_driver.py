@@ -106,7 +106,7 @@ class _ParamikoConnAdapter:
     def __enter__(self):
         key = (self.target.host, self.target.port)
         self._device_lock = _get_device_lock(self.target.host, self.target.port)
-        self._device_lock.acquire(fail_closed=self.mutating)
+        self._device_lock.acquire(fail_closed=True)
         try:
             self._use_pool = "PYTEST_CURRENT_TEST" not in os.environ
             if self._use_pool:

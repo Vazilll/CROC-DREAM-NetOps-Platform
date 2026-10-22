@@ -418,6 +418,10 @@ export class NetOpsApiClient extends NetOpsDeviceJobClient {
     });
   }
 
+  async getPlatformCommands(): Promise<Record<string, Record<string, string>>> {
+    return this.request<Record<string, Record<string, string>>>('/telemetry/platform-commands');
+  }
+
   async getCollectorPlan(): Promise<CollectorPlanResponse> {
     return this.request<CollectorPlanResponse>('/telemetry/collectors');
   }

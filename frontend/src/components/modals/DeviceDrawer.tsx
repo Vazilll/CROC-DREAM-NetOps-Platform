@@ -8,7 +8,7 @@ import {
   Maximize2,
 } from 'lucide-react';
 import { api } from '../../api';
-import type { CollectorDevicePlan, DeviceDetail, UserRole } from '../../api';
+import type { CollectorDevicePlan, CollectorFallbackEvent, DeviceDetail, UserRole } from '../../api';
 import { StatusBadge } from '../layout/ui';
 import { PLATFORM_NAMES } from '../../constants';
 import { DeviceDrawerMetricsTab } from './device_drawer/DeviceDrawerMetricsTab';
@@ -32,6 +32,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
 }) => {
   const [device, setDevice] = useState<DeviceDetail | null>(null);
   const [collectorPlan, setCollectorPlan] = useState<CollectorDevicePlan | null>(null);
+  const [fallbackEvents, setFallbackEvents] = useState<CollectorFallbackEvent[]>([]);
   const [protoSaving, setProtoSaving] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [prevDeviceId, setPrevDeviceId] = useState<number | null>(deviceId);
@@ -67,6 +68,24 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
       active = false;
     };
   }, [deviceId]);
+
+  const hostname = device?.hostname;
+  useEffect(() => {
+    if (!hostname) return;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      api
+        .getCollectorPlan()
+        .then((plan) => {
+          if (plan.devices?.[hostname]) setCollectorPlan(plan.devices[hostname]);
+          setFallbackEvents((plan.events ?? []).filter((e) => e.hostname === hostname));
+        })
+        .catch(() => undefined);
+    };
+    tick();
+    const timer = window.setInterval(tick, 15000);
+    return () => window.clearInterval(timer);
+  }, [hostname]);
 
   // Priority escape listener
   useEffect(() => {
@@ -423,6 +442,7 @@ export const DeviceDrawer: React.FC<DeviceDrawerProps> = ({
                   <DeviceDrawerMetricsTab
                     device={device}
                     collectorPlan={collectorPlan}
+                    fallbackEvents={fallbackEvents}
                     protoSaving={protoSaving}
                     isViewer={isViewer}
                     onProtocolChange={handleProtocolChange}

@@ -20,11 +20,11 @@ scrape_configs:
       - targets: ["api:8000"]
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: "netops_(devices_total|drift_devices(_total)?|device_(reachable|cpu_utilization_percent|memory_utilization_percent|uplink_utilization_percent)|bgp_(session_up|prefixes_accepted)|server_(cpu_utilization_percent|memory_utilization_percent|disk_utilization_percent|network_rate_mbps|load_1m))"
+        regex: "netops_(telemetry_(active_protocol|fallback_events_total)|devices_total|drift_devices(_total)?|device_(reachable|cpu_utilization_percent|memory_utilization_percent|uplink_utilization_percent)|bgp_(session_up|prefixes_accepted)|server_(cpu_utilization_percent|memory_utilization_percent|disk_utilization_percent|network_rate_mbps|load_1m))"
         action: keep
 
   - job_name: "snmp_fabric"
-    scrape_interval: 30s
+    scrape_interval: 60s
     scrape_timeout: 25s
     metrics_path: /snmp
     params:

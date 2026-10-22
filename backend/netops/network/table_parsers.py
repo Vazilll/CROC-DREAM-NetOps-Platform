@@ -18,7 +18,7 @@ from netops.network.base import (
     HealthSnapshot,
     InterfaceState,
 )
-from netops.services.telemetry import collect_metrics_from_cli
+from netops.services.telemetry import collect_metrics_from_cli, load_profile_for_platform
 
 
 def parse_bgp_table(platform: Platform, output: str) -> dict[str, BgpSessionState]:
@@ -196,14 +196,10 @@ def collect_device_health_tables(
     if target.platform == Platform.LINUX_SERVER:
         bgp_sessions: dict[str, BgpSessionState] = {}
         interfaces: dict[str, InterfaceState] = {}
-    elif target.platform == Platform.HUAWEI_VRP:
-        bgp_out = conn.send_command("display bgp peer").result
-        int_out = conn.send_command("display ip interface brief").result
-        bgp_sessions = parse_bgp_table(target.platform, bgp_out)
-        interfaces = parse_interface_table(target.platform, int_out)
     else:
-        bgp_out = conn.send_command("show ip bgp summary").result
-        int_out = conn.send_command("show ip interface brief").result
+        cmds = getattr(load_profile_for_platform(target.platform), "commands", None) or {}
+        bgp_out = conn.send_command(cmds.get("bgp_summary", "show ip bgp summary")).result
+        int_out = conn.send_command(cmds.get("interfaces_brief", "show ip interface brief")).result
         bgp_sessions = parse_bgp_table(target.platform, bgp_out)
         interfaces = parse_interface_table(target.platform, int_out)
 
