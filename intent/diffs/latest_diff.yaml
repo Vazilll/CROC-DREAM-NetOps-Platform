@@ -1,6 +1,6 @@
-job_id: c16ace52-1288-49ad-9d9d-207b48421d30
+job_id: 8b1fbb2c-941a-4474-820d-c603d756d35d
 job_type: DRIFT_SCAN
-committed_at: 1792664772
+committed_at: 1792664840
 changed_hosts: []
 devices:
 - hostname: spine-3.croc.lab
