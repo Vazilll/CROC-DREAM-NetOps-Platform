@@ -1,6 +1,6 @@
-job_id: b3e358b3-7f4f-4834-9d73-f293b5eaf024
+job_id: 754094ac-b55f-4935-b88f-c398da840e69
 job_type: DRIFT_SCAN
-committed_at: 1792662949
+committed_at: 1792663824
 changed_hosts: []
 devices:
 - hostname: leaf-1.croc.lab
