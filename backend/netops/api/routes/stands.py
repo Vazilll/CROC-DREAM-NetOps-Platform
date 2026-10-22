@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from netops.api.deps import Admin, ContainerDep, DeviceServiceDep, SessionDep, Viewer
 from netops.api.routes.devices import assert_stand_allowed, device_allowed, stand_allowed
@@ -29,8 +29,10 @@ from netops.services.stands import (
     invalidate_stand_connection_cache,
 )
 from netops.services.state import get_state_manager
+from netops.telemetry.targets import refresh_telemetry_targets
 
 router = APIRouter(prefix="/stands", tags=["stands"])
+
 
 
 def get_stand_service(session: SessionDep, container: ContainerDep) -> StandService:
@@ -184,13 +186,16 @@ def create_stand(
             if str(intent_dir).startswith(str(root_dir)):
                 (intent_dir / "devices").mkdir(parents=True, exist_ok=True)
 
-    return _upsert_stand_row(
+    result = _upsert_stand_row(
         service,
         data.slug,
         data,
         intent_subpath=subpath,
         active_slug=_active_slug(container, service),
     )
+    refresh_telemetry_targets(service._session, container)
+    return result
+
 
 
 def _upsert_stand_row(
@@ -235,13 +240,15 @@ def update_stand(
     assert_stand_allowed(slug, data.site, admin.allowed_system)
     existing = service.get_stand(slug)
     assert_stand_allowed(existing.slug, existing.site, admin.allowed_system)
-    return _upsert_stand_row(
+    res = _upsert_stand_row(
         service,
         existing.slug,
         data,
         status_val=data.status,
         active_slug=_active_slug(container, service),
     )
+    refresh_telemetry_targets(service._session, container)
+    return res
 
 
 @router.delete(
@@ -252,6 +259,7 @@ def update_stand(
 def delete_stand(
     slug: str,
     service: StandServiceDep,
+    container: ContainerDep,
     admin: Admin,
     force: Annotated[bool, Query(description="Принудительное удаление")] = True,
 ) -> Response:
@@ -259,7 +267,9 @@ def delete_stand(
     existing = service.get_stand(slug)
     assert_stand_allowed(existing.slug, existing.site, admin.allowed_system)
     service.delete_stand(existing.slug, force=force)
+    refresh_telemetry_targets(service._session, container)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
 
 
 @router.post(
@@ -310,6 +320,11 @@ def sync_all_stands(
     container: ContainerDep,
     admin: Admin,
 ) -> list[StandRead]:
+    if admin.allowed_system is not None and admin.allowed_system not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global stand inventory sync requires platform admin or owner",
+        )
     from types import SimpleNamespace
 
     import yaml
@@ -363,6 +378,7 @@ def sync_all_stands(
             pmap = _parse_port_map(stand_obj.port_map_json)
             _sync_stand_nodes_from_sot_or_portmap(session, container, stand_obj, pmap)
 
+    refresh_telemetry_targets(session, container)
     active = _active_slug(container, service)
     rows = service.list_stands(allowed_system=admin.allowed_system)
     return _validate_stand_rows(rows, active)
@@ -402,6 +418,7 @@ def discover_stand(
             {"hostname": d.hostname, "endpoint": f"{d.management_ip}:{d.management_port}"}
             for d in existing_devs
         ]
+    refresh_telemetry_targets(session, container)
     return probe_res
 
 

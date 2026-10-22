@@ -42,6 +42,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const [platform, setPlatform] = useState<Platform>('linux_server');
   const [role, setRole] = useState<DeviceRole>('leaf');
   const [hostname, setHostname] = useState('');
+  const [preferredProtocol, setPreferredProtocol] = useState<string>('auto');
 
   const [probing, setProbing] = useState(false);
   const [probeResult, setProbeResult] = useState<DeviceProbeResult | null>(null);
@@ -152,6 +153,16 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
             })
           : null,
       });
+      if (preferredProtocol && preferredProtocol !== 'auto') {
+        try {
+          await api.setDeviceCollectorProtocol(
+            newDev.hostname,
+            preferredProtocol as 'auto' | 'gnmi' | 'snmp' | 'prometheus_exporter' | 'ssh_cli'
+          );
+        } catch {
+          // non-blocking protocol override
+        }
+      }
       onSuccess(newDev);
       handleClose();
     } catch (err: unknown) {
@@ -164,6 +175,7 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
   const handleClose = () => {
     setStep(1);
     setHostname('');
+    setPreferredProtocol('auto');
     setProbeResult(null);
     setProbeError('');
     onClose();
@@ -340,6 +352,8 @@ export const AddDeviceModal: React.FC<AddDeviceModalProps> = ({
                   setRole={setRole}
                   platform={platform}
                   setPlatform={setPlatform}
+                  preferredProtocol={preferredProtocol}
+                  setPreferredProtocol={setPreferredProtocol}
                   probeError={probeError}
                 />
               )}

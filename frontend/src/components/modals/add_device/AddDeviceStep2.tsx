@@ -18,8 +18,17 @@ export interface AddDeviceStep2Props {
   setRole: (val: DeviceRole) => void;
   platform: Platform;
   setPlatform: (val: Platform) => void;
+  preferredProtocol?: string;
+  setPreferredProtocol?: (val: string) => void;
   probeError: string;
 }
+
+const renderSelectOptions = (items: Record<string, string>) =>
+  Object.entries(items).map(([k, v]) => (
+    <option key={k} value={k}>
+      {v}
+    </option>
+  ));
 
 export const AddDeviceStep2: React.FC<AddDeviceStep2Props> = ({
   probeResult,
@@ -29,6 +38,8 @@ export const AddDeviceStep2: React.FC<AddDeviceStep2Props> = ({
   setRole,
   platform,
   setPlatform,
+  preferredProtocol = 'auto',
+  setPreferredProtocol,
   probeError,
 }) => {
   return (
@@ -103,7 +114,7 @@ export const AddDeviceStep2: React.FC<AddDeviceStep2Props> = ({
       </div>
 
       {/* Device Meta Form */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
         <div>
           <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
             Хостнейм в фабрике
@@ -125,11 +136,7 @@ export const AddDeviceStep2: React.FC<AddDeviceStep2Props> = ({
             onChange={(e) => setRole(e.target.value as DeviceRole)}
             className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none"
           >
-            {Object.entries(ROLE_NAMES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
+            {renderSelectOptions(ROLE_NAMES)}
           </select>
         </div>
         <div>
@@ -141,11 +148,24 @@ export const AddDeviceStep2: React.FC<AddDeviceStep2Props> = ({
             onChange={(e) => setPlatform(e.target.value as Platform)}
             className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none"
           >
-            {Object.entries(PLATFORM_NAMES).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
+            {renderSelectOptions(PLATFORM_NAMES)}
+          </select>
+
+        </div>
+        <div>
+          <label className="block text-[11px] uppercase tracking-wider font-semibold text-zinc-400 mb-1">
+            Телеметрия (Override)
+          </label>
+          <select
+            value={preferredProtocol}
+            onChange={(e) => setPreferredProtocol?.(e.target.value)}
+            className="w-full bg-[#050608] border border-white/[0.08] focus:border-cyan-500/60 rounded-lg px-3 py-1.5 text-xs text-zinc-200 focus:outline-none"
+          >
+            <option value="auto">Авто-выбор (Auto)</option>
+            <option value="gnmi">gNMI Streaming</option>
+            <option value="snmp">SNMP Fabric</option>
+            <option value="prometheus_exporter">Node Exporter</option>
+            <option value="ssh_cli">SSH CLI Fallback</option>
           </select>
         </div>
       </div>

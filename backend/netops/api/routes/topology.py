@@ -164,19 +164,14 @@ def create_or_update_topology_link(
     return upsert_custom_link(payload, container.settings)
 
 
-@router.patch(
-    "/links/{link_id}/toggle",
-    summary="Переключить состояние связи (UP / SHUTDOWN) с проверкой SPOF и авто-возвратом",
-)
-def toggle_link_state(
+def _find_allowed_topology_link(
     link_id: str,
-    req: TopologyLinkToggleRequest,
+    fabric_id: str | None,
+    operator: Operator,
     device_service: DeviceServiceDep,
     session: SessionDep,
     container: ContainerDep,
-    operator: Operator,
-    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду (slug) или 'all'")] = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     eff_fabric = fabric_id if fabric_id and fabric_id != "all" else None
     if eff_fabric:
         assert_stand_allowed(eff_fabric, None, operator.allowed_system)
@@ -193,6 +188,30 @@ def toggle_link_state(
         all_devices, session, container.settings, fabric_id=eff_fabric
     )
     target_link = next((lnk for lnk in graph.get("links", []) if str(lnk.get("id")) == link_id), None)
+    if target_link is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Link '{link_id}' not found in allowed stand topology",
+        )
+    return graph, target_link
+
+
+@router.patch(
+    "/links/{link_id}/toggle",
+    summary="Переключить состояние связи (UP / SHUTDOWN) с проверкой SPOF и авто-возвратом",
+)
+def toggle_link_state(
+    link_id: str,
+    req: TopologyLinkToggleRequest,
+    device_service: DeviceServiceDep,
+    session: SessionDep,
+    container: ContainerDep,
+    operator: Operator,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду (slug) или 'all'")] = None,
+) -> dict[str, Any]:
+    graph, target_link = _find_allowed_topology_link(
+        link_id, fabric_id, operator, device_service, session, container
+    )
     overrides = get_link_overrides(container.settings)
     cur = overrides.get(link_id) or target_link or {}
     next_state = (
@@ -235,9 +254,15 @@ def toggle_link_state(
 )
 def remove_topology_link(
     link_id: str,
+    device_service: DeviceServiceDep,
+    session: SessionDep,
     container: ContainerDep,
-    _: Operator,
+    operator: Operator,
+    fabric_id: Annotated[str | None, Query(description="Фильтр по стенду (slug) или 'all'")] = None,
 ) -> dict[str, Any]:
+    _find_allowed_topology_link(
+        link_id, fabric_id, operator, device_service, session, container
+    )
     removed = delete_custom_link(link_id, container.settings)
     return {"deleted": removed, "link_id": link_id}
 
@@ -288,6 +313,14 @@ def create_checkpoint(
     return create_topology_checkpoint(req.name, container.settings)
 
 
+def _assert_global_checkpoint_scope(operator: Operator, action: str) -> None:
+    if operator.allowed_system is not None and operator.allowed_system not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"{action} global checkpoints requires platform admin or owner with global scope",
+        )
+
+
 @router.post(
     "/checkpoints/{checkpoint_id}/restore",
     summary="Восстановить топологию и конфигурации стенда из контрольной точки",
@@ -295,8 +328,9 @@ def create_checkpoint(
 def restore_checkpoint(
     checkpoint_id: str,
     container: ContainerDep,
-    _: Operator,
+    operator: Operator,
 ) -> dict[str, Any]:
+    _assert_global_checkpoint_scope(operator, "Restoring")
     try:
         return restore_topology_checkpoint(checkpoint_id, container.settings)
     except KeyError as exc:
@@ -310,7 +344,8 @@ def restore_checkpoint(
 def remove_checkpoint(
     checkpoint_id: str,
     container: ContainerDep,
-    _: Operator,
+    operator: Operator,
 ) -> dict[str, Any]:
+    _assert_global_checkpoint_scope(operator, "Deleting")
     deleted = delete_topology_checkpoint(checkpoint_id, container.settings)
     return {"deleted": deleted, "checkpoint_id": checkpoint_id}

@@ -2,18 +2,14 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   X, Layers, Server, Plus, Trash2, CheckCircle2, AlertTriangle, WifiOff, RotateCw, Lock, Terminal, Cpu,
 } from 'lucide-react';
-import { api, getErrorMessage, type StandCreatePayload, type StandRead, type UserRole } from '../../api';
+import { api, getErrorMessage, type StandRead, type UserRole } from '../../api';
 import type { Locale } from '../../i18n';
+import { CreateStandForm } from './stands/CreateStandForm';
 
 interface StandsModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  userRole: UserRole;
-  locale: Locale;
-  activeStand: string;
-  onSelectStand: (slug: string) => void;
-  stands: StandRead[];
-  onRefreshStands: () => Promise<void>;
+  isOpen: boolean; onClose: () => void; userRole: UserRole; locale: Locale;
+  activeStand: string; onSelectStand: (slug: string) => void;
+  stands: StandRead[]; onRefreshStands: () => Promise<void>;
 }
 
 export const StandsModal: React.FC<StandsModalProps> = ({
@@ -25,23 +21,9 @@ export const StandsModal: React.FC<StandsModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [syncingGit, setSyncingGit] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [probing, setProbing] = useState(false);
   const [discoveringSlug, setDiscoveringSlug] = useState<string | null>(null);
   const [probeBanner, setProbeBanner] = useState<{ ok: boolean; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const [slug, setSlug] = useState('');
-  const [name, setName] = useState('');
-  const [site, setSite] = useState('');
-  const [driver, setDriver] = useState<'scrapli' | 'offline'>('scrapli');
-  const [jumpHost, setJumpHost] = useState('');
-  const [jumpPort, setJumpPort] = useState<number>(22);
-  const [jumpUser, setJumpUser] = useState('root');
-  const [jumpPassword, setJumpPassword] = useState('');
-  const [queueName, setQueueName] = useState('default');
-  const [description, setDescription] = useState('');
-  const [autoDiscover, setAutoDiscover] = useState(true);
 
   const handleRefresh = useCallback(async () => {
     setLoading(true);
@@ -81,23 +63,6 @@ export const StandsModal: React.FC<StandsModalProps> = ({
     }
   };
 
-  const handleProbeForm = async () => {
-    setProbing(true);
-    setProbeBanner(null);
-    setError(null);
-    try {
-      const res = await api.probeStand({
-        jump_host: driver === 'offline' ? null : jumpHost.trim() || null,
-        jump_port: Number(jumpPort) || 22,
-      });
-      setProbeBanner({ ok: res.reachable, text: res.message });
-    } catch (err: unknown) {
-      setError(getErrorMessage(err, isEn ? 'Probe failed' : 'Ошибка проверки связи'));
-    } finally {
-      setProbing(false);
-    }
-  };
-
   const handleDiscoverStand = async (targetSlug: string) => {
     setDiscoveringSlug(targetSlug);
     setProbeBanner(null);
@@ -113,40 +78,6 @@ export const StandsModal: React.FC<StandsModalProps> = ({
     }
   };
 
-  const handleCreateStand = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!slug.trim() || !name.trim()) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      const payload: StandCreatePayload = {
-        slug: slug.trim().toLowerCase(),
-        name: name.trim(),
-        site: site.trim() || null,
-        driver,
-        jump_host: jumpHost.trim() || null,
-        jump_port: Number(jumpPort) || 22,
-        jump_user: jumpUser.trim() || null,
-        jump_password: jumpPassword || null,
-        queue_name: queueName.trim() || 'default',
-        description: description.trim() || null,
-      };
-      const created = await api.createStand(payload);
-      if (autoDiscover) {
-        const disc = await api.discoverStand(created.slug);
-        setProbeBanner({ ok: disc.reachable, text: disc.message });
-      }
-      await onRefreshStands();
-      onSelectStand(created.slug);
-      setShowCreateForm(false);
-      setSlug(''); setName(''); setSite(''); setJumpHost(''); setJumpPort(22); setJumpPassword(''); setDescription('');
-    } catch (err: unknown) {
-      setError(getErrorMessage(err, isEn ? 'Failed to create stand' : 'Ошибка подключения стенда'));
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
   const handleDeleteStand = async (targetSlug: string) => {
     setError(null);
     try {
@@ -157,10 +88,6 @@ export const StandsModal: React.FC<StandsModalProps> = ({
       setError(getErrorMessage(err, isEn ? 'Failed to delete stand' : 'Ошибка удаления стенда'));
     }
   };
-
-  const inputClass =
-    'w-full px-2.5 py-1.5 rounded-md bg-[var(--bg-main)] border border-[var(--border-subtle)] focus:border-[var(--border-hover)] text-xs text-[var(--text-primary)] font-mono outline-none transition-colors';
-  const labelClass = 'block text-[11px] font-mono text-[var(--text-secondary)] mb-1';
 
   return (
     <div
@@ -358,9 +285,7 @@ export const StandsModal: React.FC<StandsModalProps> = ({
                                 const b = await api.backupStand(st.slug);
                                 setProbeBanner({ ok: true, text: b.message });
                                 await onRefreshStands();
-                              } catch (err: unknown) {
-                                setError(getErrorMessage(err));
-                              }
+                              } catch (err: unknown) { setError(getErrorMessage(err)); }
                             }}
                             data-testid={`backup-stand-${st.slug}`}
                             className="px-2 py-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 text-[11px] font-mono text-emerald-300 cursor-pointer"
@@ -416,89 +341,18 @@ export const StandsModal: React.FC<StandsModalProps> = ({
         </div>
 
         {canManage && showCreateForm && (
-          <form
-            onSubmit={handleCreateStand}
-            data-testid="create-stand-form"
-            className="p-4 rounded-xl bg-[var(--bg-elevated)]/60 border border-[var(--border-subtle)] space-y-3"
-          >
-            <div className="text-xs font-semibold font-mono uppercase tracking-wider text-cyan-400">
-              {isEn ? '+ New Stand / Pod' : '+ Новый стенд / ЦОД'}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label className={labelClass}>Slug ID *</label>
-                <input required value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="dc2-spb-pod1" className={inputClass} data-testid="stand-slug-input" />
-              </div>
-              <div>
-                <label className={labelClass}>{isEn ? 'Name *' : 'Название *'}</label>
-                <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="ЦОД СПб — Pod 1" className={inputClass} data-testid="stand-name-input" />
-              </div>
-              <div>
-                <label className={labelClass}>{isEn ? 'Site' : 'Площадка'}</label>
-                <input value={site} onChange={(e) => setSite(e.target.value)} placeholder="SPB-DC2" className={inputClass} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5">
-              <div>
-                <label className={labelClass}>{isEn ? 'Driver' : 'Драйвер'}</label>
-                <select value={driver} onChange={(e) => setDriver(e.target.value as 'scrapli' | 'offline')} className={inputClass}>
-                  <option value="scrapli">scrapli (SSH)</option>
-                  <option value="offline">offline (Эмуляция)</option>
-                </select>
-              </div>
-              <div>
-                <label className={labelClass}>Jump Host</label>
-                <input value={jumpHost} onChange={(e) => setJumpHost(e.target.value)} placeholder="10.20.30.10" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Jump Port</label>
-                <input type="number" value={jumpPort} onChange={(e) => setJumpPort(Number(e.target.value))} placeholder="22" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>Queue</label>
-                <input value={queueName} onChange={(e) => setQueueName(e.target.value)} placeholder="default" className={inputClass} />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <div>
-                <label className={labelClass}>Jump User</label>
-                <input value={jumpUser} onChange={(e) => setJumpUser(e.target.value)} placeholder="root" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>{isEn ? 'SSH Password' : 'SSH Пароль'}</label>
-                <input type="password" value={jumpPassword} onChange={(e) => setJumpPassword(e.target.value)} placeholder="••••••••" className={inputClass} />
-              </div>
-              <div>
-                <label className={labelClass}>{isEn ? 'Description' : 'Описание'}</label>
-                <input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="CLOS Pod" className={inputClass} />
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <label className="flex items-center gap-2 text-xs font-mono text-[var(--text-secondary)] cursor-pointer">
-                <input type="checkbox" checked={autoDiscover} onChange={(e) => setAutoDiscover(e.target.checked)} className="rounded border-[var(--border-subtle)]" />
-                <span>{isEn ? 'Auto-discover nodes' : 'Авто-дискавери узлов'}</span>
-              </label>
-
-              <div className="flex items-center gap-2">
-                <button type="button" onClick={() => void handleProbeForm()} disabled={probing}
-                  className="px-2.5 py-1.5 rounded-md border border-cyan-500/30 bg-cyan-500/10 text-xs font-mono text-cyan-300 hover:bg-cyan-500/20 cursor-pointer">
-                  {probing ? '...' : isEn ? 'Probe SSH' : 'Проверить SSH'}
-                </button>
-                <button type="button" onClick={() => setShowCreateForm(false)}
-                  className="px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] text-xs text-[var(--text-secondary)] hover:text-[var(--text-primary)] cursor-pointer">
-                  {isEn ? 'Cancel' : 'Отмена'}
-                </button>
-                <button type="submit" disabled={submitting} data-testid="submit-create-stand-btn"
-                  className="px-3 py-1.5 rounded-md bg-[var(--text-primary)] text-[var(--bg-main)] hover:opacity-90 text-xs font-mono font-semibold cursor-pointer">
-                  {submitting ? '...' : isEn ? 'Connect' : 'Подключить'}
-                </button>
-              </div>
-            </div>
-          </form>
+          <CreateStandForm
+            locale={locale}
+            onCancel={() => setShowCreateForm(false)}
+            onError={(msg) => setError(msg)}
+            onProbeResult={(banner) => setProbeBanner(banner)}
+            onSuccess={async (newSlug, discBanner) => {
+              if (discBanner) setProbeBanner(discBanner);
+              setShowCreateForm(false);
+              onSelectStand(newSlug);
+              void onRefreshStands();
+            }}
+          />
         )}
       </div>
     </div>

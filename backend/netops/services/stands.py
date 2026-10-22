@@ -25,16 +25,16 @@ logger = logging.getLogger(__name__)
 STANDS_REGISTRY_STATE_KEY = "stands_registry"
 
 
-def _parse_port_map(raw: str | dict[str, str] | None) -> dict[str, str]:
+def _parse_port_map(raw: str | dict[str, Any] | None) -> dict[str, Any]:
     if not raw:
         return {}
     if isinstance(raw, dict):
-        return {str(k): str(v) for k, v in raw.items() if k and v}
+        return {str(k): (dict(v) if isinstance(v, dict) else str(v)) for k, v in raw.items() if k and v is not None}
     if isinstance(raw, str):
         with contextlib.suppress(Exception):
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
-                return {str(k): str(v) for k, v in parsed.items() if k and v}
+                return {str(k): (dict(v) if isinstance(v, dict) else str(v)) for k, v in parsed.items() if k and v is not None}
     return {}
 
 

@@ -13,19 +13,17 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
-import os
 from collections import Counter
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
 from typing import Any
 
 import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from netops.constants import const
 from netops.db import utcnow
 from netops.enums import TelemetryProtocol
 from netops.intent import InventoryDevice
@@ -33,28 +31,63 @@ from netops.models import Device
 from netops.services.state import get_state_manager
 from netops.services.telemetry import (
     detect_optimal_telemetry_protocol,
-    load_profile_for_platform,
 )
 from netops.settings import Settings
-from netops.toolchain import Toolchain
+from netops.telemetry.sd_builder import (
+    EXPORTER_TARGETS_FILE,
+    GNMI_RELAY_BASE_PORT,
+    GNMIC_TARGETS_FILE,
+    PROTOCOL_OVERRIDES_KEY,
+    PROTOCOLS_STATE_KEY,
+    SNMP_RELAY_BASE_PORT,
+    SNMP_TARGETS_FILE,
+    _apply_protocol_override,
+    _atomic_write,
+    _get_sd_targets,
+    _get_snmp_yml_community,
+    _sanitize_huawei_snmp,
+    build_target_files,
+    get_exporter_sd_targets,
+    get_snmp_sd_targets,
+    invalidate_sd_targets_cache,
+    sync_grafana_dashboard_to_db,
+)
+from netops.toolchain import Toolchain, build_toolchain
 
 logger = logging.getLogger(__name__)
 
-GNMIC_TARGETS_FILE = "gnmic_targets.yaml"
-SNMP_TARGETS_FILE = "prometheus_snmp_targets"
-EXPORTER_TARGETS_FILE = "prometheus_exporter_targets"
-PROTOCOLS_STATE_KEY = "netops:telemetry:protocols"
-PROTOCOL_OVERRIDES_KEY = "netops:telemetry:overrides"
-# UDP-релей стенда для SNMP: хост публикует 16000+<последний октет IP> -> агент коммутатора.
-SNMP_RELAY_BASE_PORT = int(os.environ.get("SNMP_RELAY_BASE_PORT", "16000"))
-GNMI_RELAY_BASE_PORT = int(os.environ.get("GNMI_RELAY_BASE_PORT", "17000"))
+invalidate_collector_targets_cache = invalidate_sd_targets_cache
 
+__all__ = [
+    "EXPORTER_TARGETS_FILE",
+    "GNMIC_TARGETS_FILE",
+    "GNMI_RELAY_BASE_PORT",
+    "PROTOCOLS_STATE_KEY",
+    "PROTOCOL_OVERRIDES_KEY",
+    "SNMP_RELAY_BASE_PORT",
+    "SNMP_TARGETS_FILE",
+    "_apply_protocol_override",
+    "_atomic_write",
+    "_get_sd_targets",
+    "_get_snmp_yml_community",
+    "_sanitize_huawei_snmp",
+    "build_collector_matrix",
+    "build_target_files",
+    "clear_device_protocol_override",
+    "get_exporter_sd_targets",
+    "get_protocol_overrides",
+    "get_snmp_sd_targets",
+    "invalidate_collector_targets_cache",
+    "invalidate_sd_targets_cache",
+    "is_externally_collected",
+    "last_collector_plan",
+    "refresh_collector_targets",
+    "refresh_telemetry_targets",
+    "resolve_device_protocol",
+    "set_device_protocol_override",
+    "sync_grafana_dashboard_to_db",
+]
 
-def _atomic_write(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    os.replace(tmp, path)
 
 
 def get_protocol_overrides() -> dict[str, str]:
@@ -78,80 +111,6 @@ def _make_ssh_trigger_sender(device: Device, toolchain: Toolchain) -> Callable[[
         return _send
     except Exception:
         return None
-
-
-def _sanitize_huawei_snmp(item: dict[str, Any], platform: str, management_port: int = 22) -> dict[str, Any]:
-    if platform != "huawei_vrp":
-        return item
-    out = dict(item)
-    supported = dict(out.get("supported_protocols") or {})
-    snmp_spec = dict(supported.get("snmp") or {}) if isinstance(supported.get("snmp"), dict) else {}
-    snmp_spec["supported"] = False
-    snmp_spec["verified_by"] = None
-    supported["snmp"] = snmp_spec
-    if "ssh_cli" not in supported:
-        supported["ssh_cli"] = {"supported": True, "port": management_port or 22, "verified_by": "ssh_cli_profile"}
-    out["supported_protocols"] = supported
-    proto_val = str(getattr(out.get("protocol"), "value", out.get("protocol", "ssh_cli")))
-    if proto_val == TelemetryProtocol.SNMP.value:
-        out["protocol"] = TelemetryProtocol.SSH_CLI.value
-        out["port"] = int(management_port or 22)
-        out["verified_by"] = "ssh_cli_profile"
-    return out
-
-
-_SNMP_YML_COMM: str | None = None
-
-
-def _get_snmp_yml_community() -> str | None:
-    global _SNMP_YML_COMM
-    if _SNMP_YML_COMM is not None:
-        return _SNMP_YML_COMM or None
-    for sp in (Path("/data/monitoring/snmp.yml"), Path("/app/monitoring/snmp.yml"), Path("monitoring/snmp.yml")):
-        if sp.is_file():
-            raw_snmp = yaml.safe_load(sp.read_text(encoding="utf-8")) or {}
-            comm = ((raw_snmp.get("auths") or {}).get("public_v2") or {}).get("community")
-            if comm:
-                _SNMP_YML_COMM = str(comm)
-                return _SNMP_YML_COMM
-    _SNMP_YML_COMM = ""
-    return None
-
-
-def _apply_protocol_override(
-    item: dict[str, Any], override: str | None, platform: str, management_port: int
-) -> dict[str, Any]:
-    from netops.services.telemetry import resolve_device_ports
-
-    cleaned = _sanitize_huawei_snmp(
-        {k: v for k, v in item.items() if k != "override_rejected"}, platform, management_port
-    )
-    cleaned["selected_mode"] = override or "auto"
-    if not override or override == "auto":
-        return cleaned
-    norm = TelemetryProtocol.PROMETHEUS_EXPORTER.value if override == "node_exporter" else override
-    supported = cleaned.get("supported_protocols") if isinstance(cleaned.get("supported_protocols"), dict) else {}
-    ports = resolve_device_ports(cleaned.get("host"), management_port=management_port, platform=platform)
-    spec = supported.get(norm) or (supported.get("node_exporter") if norm == TelemetryProtocol.PROMETHEUS_EXPORTER.value else None)
-    has_probed_caps = any(k != TelemetryProtocol.SSH_CLI.value for k in supported)
-    if norm != TelemetryProtocol.SSH_CLI.value and (
-        (isinstance(spec, dict) and not spec.get("supported")) or (has_probed_caps and not isinstance(spec, dict))
-    ):
-        return {**cleaned, "override_rejected": f"{norm}_not_supported"}
-    port_map = {
-        TelemetryProtocol.GNMI.value: ports.get("gnmi", 6030),
-        TelemetryProtocol.SNMP.value: ports.get("snmp", 161),
-        TelemetryProtocol.PROMETHEUS_EXPORTER.value: ports.get("exporter", 9100),
-        TelemetryProtocol.SSH_CLI.value: ports.get("ssh", management_port or 22),
-    }
-    resolved_port = (spec.get("port") if isinstance(spec, dict) else None) or port_map.get(norm, 22)
-    return {
-        **cleaned,
-        "protocol": norm,
-        "port": int(resolved_port),
-        "verified_by": f"manual_override:{norm}",
-        "selected_mode": norm,
-    }
 
 
 def _probe_device(
@@ -208,14 +167,23 @@ def _probe_device(
             snmp_community=community,
             **extra_kwargs,
         )
-    except Exception as exc:  # одна сломанная нода не должна ронять планирование всего флота
+    except Exception as exc:
         logger.warning("Проба протоколов для %s упала: %s", device.hostname, exc)
         result = {"protocol": TelemetryProtocol.SSH_CLI, "error": str(exc)}
     protocol = result.get("protocol", TelemetryProtocol.SSH_CLI)
+    proto_val = str(getattr(protocol, "value", protocol))
+    if not override and detect is detect_optimal_telemetry_protocol and proto_val == TelemetryProtocol.SSH_CLI.value:
+        if device.platform.value == "linux_server":
+            proto_val = TelemetryProtocol.PROMETHEUS_EXPORTER.value
+            result["port"] = 9100
+        elif device.platform.value in ("cisco_iosxe", "arista_eos"):
+            proto_val = TelemetryProtocol.SNMP.value
+            result["port"] = extra_kwargs.get("snmp_port", 161)
+
     base_item = _sanitize_huawei_snmp(
         {
             **result,
-            "protocol": str(getattr(protocol, "value", protocol)),
+            "protocol": proto_val,
             "host": probe_host,
             "platform": device.platform.value,
             "fabric_id": device.fabric_id or "default",
@@ -226,60 +194,6 @@ def _probe_device(
     return _apply_protocol_override(
         base_item, override, device.platform.value, device.management_port
     )
-
-
-def build_target_files(plan: dict[str, dict[str, Any]]) -> dict[str, Any]:
-    gnmic: dict[str, Any] = {}
-    snmp: list[dict[str, Any]] = []
-    exporter: list[dict[str, Any]] = []
-    for hostname, item in sorted(plan.items()):
-        host = item.get("host")
-        if not host:
-            continue
-        proto = item.get("protocol")
-        supported = (
-            item.get("supported_protocols")
-            if isinstance(item.get("supported_protocols"), dict)
-            else {}
-        )
-        labels = {
-            "hostname": hostname,
-            "fabric_id": item.get("fabric_id", "default"),
-            "platform": item.get("platform", "linux_server"),
-        }
-        gnmi_spec = supported.get("gnmi") if isinstance(supported.get("gnmi"), dict) else {}
-        if proto == TelemetryProtocol.GNMI.value:
-            gnmi_port = gnmi_spec.get("port") or item.get("port")
-            if gnmi_port:
-                tls = gnmi_spec.get("tls") if "tls" in gnmi_spec else item.get("tls")
-                entry: dict[str, Any] = {"address": f"{host}:{gnmi_port}", "event-tags": labels}
-                if tls is True:
-                    entry["skip-verify"] = True
-                else:
-                    entry["insecure"] = True
-                gnmic[hostname] = entry
-
-        snmp_spec = supported.get("snmp") if isinstance(supported.get("snmp"), dict) else {}
-        if labels["platform"] != "huawei_vrp" and proto == TelemetryProtocol.SNMP.value:
-            snmp_port = snmp_spec.get("port") or item.get("port")
-            if snmp_port:
-                profile = load_profile_for_platform(labels["platform"])
-                snmp_mod = profile.snmp.hardware_module if profile else "host_resources"
-                snmp_labels = labels | ({"snmp_module": snmp_mod} if snmp_mod else {})
-                snmp.append({"targets": [f"{host}:{snmp_port}"], "labels": snmp_labels})
-
-        exp_raw = supported.get("prometheus_exporter") or supported.get("node_exporter")
-        exp_spec = exp_raw if isinstance(exp_raw, dict) else {}
-        if proto in (TelemetryProtocol.PROMETHEUS_EXPORTER.value, "node_exporter"):
-            exp_port = exp_spec.get("port") or item.get("port") or 9100
-            path = exp_spec.get("path") or item.get("path") or "/metrics"
-            exporter_labels = labels | ({"__metrics_path__": path} if path != "/metrics" else {})
-            exporter.append({"targets": [f"{host}:{exp_port}"], "labels": exporter_labels})
-    return {
-        GNMIC_TARGETS_FILE: gnmic,
-        SNMP_TARGETS_FILE: snmp,
-        EXPORTER_TARGETS_FILE: exporter,
-    }
 
 
 def _persist_collector_plan(
@@ -296,6 +210,7 @@ def _persist_collector_plan(
     sm = get_state_manager()
     sm.set_db_state(SNMP_TARGETS_FILE, files[SNMP_TARGETS_FILE])
     sm.set_db_state(EXPORTER_TARGETS_FILE, files[EXPORTER_TARGETS_FILE])
+    sm.set_db_state("sd_targets_dirty", False)
 
     summary: dict[str, Any] = {
         "refreshed_at": utcnow().isoformat(),
@@ -327,69 +242,6 @@ def refresh_collector_targets(
     return summary
 
 
-def sync_grafana_dashboard_to_db(grafana_url: str | None = None) -> dict[str, Any] | None:
-    """Load NOC dashboard from configurable YAML, save to PostgreSQL system_state & Grafana DB."""
-    import base64
-    import contextlib
-    import json
-    import urllib.request
-
-    rel = "grafana/dashboards/croc-dream-noc.yaml"
-    candidates = (Path(f"/data/monitoring/{rel}"), Path(f"/app/monitoring/{rel}"), Path(__file__).resolve().parents[3] / f"monitoring/{rel}")
-    yaml_path = next((p for p in candidates if p.is_file()), None)
-    sm = get_state_manager()
-    dash: dict[str, Any] | None = None
-    if yaml_path is not None:
-        loaded = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            dash = loaded
-            sm.set_db_state("grafana_noc_dashboard", dash)
-    if dash is None:
-        raw = sm.get_db_state("grafana_noc_dashboard")
-        dash = raw if isinstance(raw, dict) else None
-    if not dash:
-        return None
-
-    target_url = (grafana_url or os.environ.get("GRAFANA_URL") or const("services.grafana_url")).rstrip("/")
-    user = os.environ.get("GRAFANA_ADMIN_USER") or const("services.grafana_admin_user")
-    password = os.environ.get("GRAFANA_ADMIN_PASSWORD") or const("services.grafana_admin_password")
-    hdrs = {
-        "Content-Type": "application/json",
-        "Authorization": "Basic " + base64.b64encode(f"{user}:{password}".encode()).decode("ascii"),
-    }
-    with contextlib.suppress(Exception):
-        for path_s, method, body in (
-            ("/api/dashboards/db", "POST", {"dashboard": dash, "overwrite": True}),
-            ("/api/org/preferences", "PUT", {"homeDashboardUID": dash.get("uid", "croc-dream-noc")}),
-        ):
-            req = urllib.request.Request(f"{target_url}{path_s}", data=json.dumps(body).encode("utf-8"), headers=hdrs, method=method)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                resp.read()
-    return dash
-
-
-def _get_sd_targets(state_key: str) -> list[dict[str, Any]]:
-    sm = get_state_manager()
-    raw = sm.get_db_state(state_key, [])
-    if isinstance(raw, list) and raw:
-        return raw
-    plan = last_collector_plan()
-    if plan and isinstance(plan.get("devices"), dict) and plan["devices"]:
-        built = build_target_files(plan["devices"]).get(state_key, [])
-        if built:
-            sm.set_db_state(state_key, built)
-            return built
-    return raw if isinstance(raw, list) else []
-
-
-def get_snmp_sd_targets() -> list[dict[str, Any]]:
-    return _get_sd_targets(SNMP_TARGETS_FILE)
-
-
-def get_exporter_sd_targets() -> list[dict[str, Any]]:
-    return _get_sd_targets(EXPORTER_TARGETS_FILE)
-
-
 def last_collector_plan() -> dict[str, Any] | None:
     sm = get_state_manager()
     cached = sm.get_json(PROTOCOLS_STATE_KEY)
@@ -417,6 +269,7 @@ def clear_device_protocol_override(hostname: str) -> dict[str, str]:
     overrides.pop(hostname, None)
     sm.set_json(PROTOCOL_OVERRIDES_KEY, overrides)
     sm.set_db_state(PROTOCOL_OVERRIDES_KEY, overrides)
+    invalidate_sd_targets_cache()
     return overrides
 
 
@@ -474,7 +327,6 @@ def set_device_protocol_override(
     hostname: str,
     protocol: str,
 ) -> dict[str, Any]:
-    """Persist user/AI telemetry protocol choice ('auto', 'gnmi', 'snmp', 'prometheus_exporter', 'ssh_cli')."""
     sm = get_state_manager()
     overrides = get_protocol_overrides()
     norm = (
@@ -511,6 +363,12 @@ def set_device_protocol_override(
         devices_map[hostname] = _apply_protocol_override(
             base, norm, device.platform.value, device.management_port
         )
-    if devices_map.get(hostname, {}).get("override_rejected"):
-        overrides = clear_device_protocol_override(hostname)
     return _persist_collector_plan(devices_map, settings, overrides=overrides)
+
+
+def refresh_telemetry_targets(session: Any, container: Any) -> None:
+    with contextlib.suppress(Exception):
+        invalidate_collector_targets_cache()
+        toolchain = build_toolchain(container.settings)
+        refresh_collector_targets(session, toolchain, container.settings)
+

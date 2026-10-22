@@ -75,6 +75,11 @@ def sync_git_sot(
     user: Operator,
     req: GitSyncRequest | None = None,
 ) -> dict[str, Any]:
+    if user.allowed_system is not None and user.allowed_system not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global inventory/Git SoT sync requires platform admin or owner",
+        )
     settings = container.settings
     pull_note = git_pull_repo(settings.intent_repo_path)
     if settings.netbox_url and settings.netbox_token:
@@ -275,11 +280,23 @@ def get_integrations_status(
             for u in db_users
         }
     elif is_admin:
-        user_tokens = {
-            u.username: raw_tokens.get(u.username) or ensure_user_token(session, u, settings)
-            for u in db_users
-            if u.username != "owner"
-        }
+        if user.allowed_system is not None and user.allowed_system not in ("*", "all"):
+            from netops.api.routes.devices import _iter_allowed_tokens
+
+            caller_targets = {target for _, target in _iter_allowed_tokens(user.allowed_system)}
+            user_tokens = {
+                u.username: raw_tokens.get(u.username) or ensure_user_token(session, u, settings)
+                for u in db_users
+                if u.username != "owner"
+                and u.allowed_system is not None
+                and any(t in caller_targets for _, t in _iter_allowed_tokens(u.allowed_system))
+            }
+        else:
+            user_tokens = {
+                u.username: raw_tokens.get(u.username) or ensure_user_token(session, u, settings)
+                for u in db_users
+                if u.username != "owner"
+            }
     else:
         user_tokens = {}
     tg_bindings = load_telegram_bindings(settings) if is_admin else {}

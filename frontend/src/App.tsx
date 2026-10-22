@@ -124,16 +124,9 @@ export function App() {
   }, [setStands]);
 
   const handleRefreshStandsAndDevices = useCallback(async () => {
-    try {
-      const synced = await api.syncAllStands();
-      if (Array.isArray(synced)) {
-        setStands(synced);
-      }
-    } catch {
-      await fetchStands();
-    }
+    await fetchStands();
     await refreshAll();
-  }, [fetchStands, refreshAll, setStands]);
+  }, [fetchStands, refreshAll]);
 
   useEffect(() => {
     const onTopoMutated = () => {

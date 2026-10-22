@@ -15,7 +15,7 @@ class _StandConnectionBase(BaseModel):
     jump_host: str | None = None
     jump_user: str | None = None
     jump_password: str | None = None
-    port_map: dict[str, str] | None = None
+    port_map: dict[str, Any] | None = None
     topology_path: str | None = None
     intent_subpath: str | None = None
     description: str | None = None
@@ -49,7 +49,7 @@ class StandRead(BaseModel):
     jump_port: int = 22
     jump_user: str | None = None
     has_password: bool = False
-    port_map: dict[str, str] = Field(default_factory=dict)
+    port_map: dict[str, Any] = Field(default_factory=dict)
     topology_path: str | None = None
     intent_subpath: str | None = None
     queue_name: str = "default"

@@ -28,8 +28,10 @@ from netops.services.discovery import (
     remove_device_from_sot,
     run_device_probe,
 )
+from netops.telemetry.targets import refresh_telemetry_targets
 
 router = APIRouter(tags=["devices"])
+
 
 
 def _iter_allowed_tokens(allowed_system: str | None) -> list[tuple[str, str]]:
@@ -283,19 +285,26 @@ def create_device(
         container.settings.network_driver != "offline" and not os.environ.get("PYTEST_CURRENT_TEST")
     ):
         bind_device_to_sot(data, device, container)
-        device.status = DeviceStatus.IN_SYNC
+        device.status = DeviceStatus.UNKNOWN
         service._session.commit()
     sync_access_registry(service._session, container.settings)
+    refresh_telemetry_targets(service._session, container)
     return service.get(device.id)
 
 
 @router.patch("/devices/{device_id}", response_model=DeviceRead, summary="Изменить устройство")
 def update_device(
-    device_id: int, data: DeviceUpdate, service: DeviceServiceDep, admin: Admin
+    device_id: int,
+    data: DeviceUpdate,
+    service: DeviceServiceDep,
+    container: ContainerDep,
+    admin: Admin,
 ) -> Device:
     device = service.get(device_id)
     assert_device_allowed(device, admin.allowed_system)
-    return service.update(device_id, data)
+    updated = service.update(device_id, data)
+    refresh_telemetry_targets(service._session, container)
+    return updated
 
 
 @router.delete(
@@ -316,6 +325,7 @@ def delete_device(
         container.settings.offline_lab_path,
     )
     sync_access_registry(service._session, container.settings)
+    refresh_telemetry_targets(service._session, container)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -371,8 +381,13 @@ def restore_device_backup_route(
     summary="Import devices from NetBox (if configured) or inventory.yaml of the intent repository",
 )
 def sync_inventory(
-    service: DeviceServiceDep, container: ContainerDep, _: Admin
+    service: DeviceServiceDep, container: ContainerDep, admin: Admin
 ) -> InventorySyncResult:
+    if admin.allowed_system is not None and admin.allowed_system not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global inventory/Git SoT sync requires platform admin or owner",
+        )
     import yaml
     from sqlalchemy import select
 

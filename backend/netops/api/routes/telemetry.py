@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, status
 from pydantic import BaseModel
 
 from netops.api.deps import ContainerDep, DeviceServiceDep, Operator, SessionDep, Viewer
@@ -227,6 +227,7 @@ class ValidationError(NetOpsError):
 
 class CollectorOverrideRequest(BaseModel):
     protocol: str
+    manual_override: bool = True
 
 
 @router.get(
@@ -281,13 +282,16 @@ def get_collector_plan(service: DeviceServiceDep, user: Viewer) -> dict[str, Any
     "/collectors/{hostname}",
     summary="Select telemetry collection protocol for a device (auto, gnmi, snmp, prometheus_exporter, ssh_cli)",
 )
-def set_collector_protocol(
+def update_collector(
     hostname: str,
     body: CollectorOverrideRequest,
     session: SessionDep,
     container: ContainerDep,
-    _: Operator,
+    service: DeviceServiceDep,
+    operator: Operator,
 ) -> dict[str, Any]:
+    from netops.api.routes.devices import assert_device_allowed
+
     allowed = {"auto", "gnmi", "snmp", "prometheus_exporter", "node_exporter", "ssh_cli"}
     raw_proto = body.protocol.strip().lower()
     if raw_proto not in allowed:
@@ -296,20 +300,17 @@ def set_collector_protocol(
             detail=f"Unsupported protocol '{body.protocol}'. Allowed: {sorted(allowed)}",
         )
     proto = "prometheus_exporter" if raw_proto == "node_exporter" else raw_proto
+    device = service.get_by_hostname(hostname)
+    if device is None:
+        raise HTTPException(status_code=404, detail=f"Device '{hostname}' not found")
+    assert_device_allowed(device, operator.allowed_system)
     toolchain = build_toolchain(container.settings)
-    if proto not in ("auto", "ssh_cli"):
-        matrix = targets.build_collector_matrix(session, toolchain, container.settings)
-        dev_entry = (matrix.get("devices") or {}).get(hostname) or matrix.get(hostname) or {}
-        supported = dev_entry.get("supported_protocols") or {}
-        spec = supported.get(proto) if isinstance(supported, dict) else None
-        if not isinstance(spec, dict) or not spec.get("supported"):
-            targets.clear_device_protocol_override(hostname)
-            raise ValidationError(
-                f"Протокол '{proto}' не поддерживается на устройстве {hostname}"
-            )
     return targets.set_device_protocol_override(
         session, toolchain, container.settings, hostname, proto
     )
+
+
+set_collector_protocol = update_collector
 
 
 @router.post(
@@ -318,8 +319,13 @@ def set_collector_protocol(
     summary="Re-probe every device and rewrite gnmic / snmp-exporter / node_exporter targets",
 )
 def refresh_collector_plan(
-    container: ContainerDep, background: BackgroundTasks, _: Operator
+    container: ContainerDep, background: BackgroundTasks, operator: Operator
 ) -> dict[str, str]:
+    if operator.allowed_system is not None and operator.allowed_system not in ("*", "all"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global telemetry collector refresh requires platform admin or owner with global scope",
+        )
     # Фоновый опрос всех устройств фабрики: отвечаем сразу, результат смотреть в GET.
     def _run() -> None:
         with container.session_factory() as session:
@@ -335,15 +341,16 @@ def refresh_collector_plan(
     "/sd/snmp",
     summary="Prometheus HTTP Service Discovery for SNMP targets stored in PostgreSQL",
 )
-def get_snmp_http_sd() -> list[dict[str, Any]]:
-    return targets.get_snmp_sd_targets()
+def get_snmp_http_sd(session: SessionDep) -> list[dict[str, Any]]:
+    return targets.get_snmp_sd_targets(session=session)
 
 
 @router.get(
     "/sd/exporter",
     summary="Prometheus HTTP Service Discovery for Node Exporter targets stored in PostgreSQL",
 )
-def get_exporter_http_sd() -> list[dict[str, Any]]:
-    return list(targets.get_exporter_sd_targets())
+def get_exporter_http_sd(session: SessionDep) -> list[dict[str, Any]]:
+    return list(targets.get_exporter_sd_targets(session=session))
+
 
 

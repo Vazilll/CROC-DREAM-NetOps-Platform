@@ -297,8 +297,8 @@ def connect_with_sock(
         current_sock = sock if idx == 0 else None
         if idx > 0 and sock is not None:
             time.sleep(0.35)
-            current_sock = adapter._open_jump_channel(
-                paramiko_mod, adapter.proxy_jump or "auto", adapter.target.host, adapter.target.port
+            current_sock = open_jump_channel(
+                adapter, paramiko_mod, adapter.proxy_jump or "auto", adapter.target.host, adapter.target.port
             )
         try:
             auth_exc_cls = paramiko_mod.ssh_exception.AuthenticationException
@@ -332,7 +332,7 @@ def connect_with_sock(
                 if transport is None or not transport.is_active():
                     if current_sock is not None:
                         time.sleep(0.25)
-                        current_sock = adapter._open_jump_channel(
+                        current_sock = open_jump_channel(
                             paramiko_mod, adapter.proxy_jump or "auto", adapter.target.host, adapter.target.port
                         )
                         transport = paramiko_mod.Transport(current_sock)
@@ -367,7 +367,7 @@ def establish_fresh_session(adapter: Any) -> None:
     adapter.client = _new_ssh_client(paramiko)
     password = getattr(adapter.target.credentials, "password", "")
     username = adapter.target.credentials.username
-    jump_user, clab_host, clab_port, jump_pwd = adapter._resolve_clab_jump_defaults()
+    jump_user, clab_host, clab_port, jump_pwd = resolve_clab_jump_defaults()
     if (
         clab_host
         and adapter.target.host == clab_host
@@ -391,17 +391,17 @@ def establish_fresh_session(adapter: Any) -> None:
     try:
         sock = None
         if adapter.proxy_jump:
-            sock = adapter._open_jump_channel(
-                paramiko, adapter.proxy_jump, adapter.target.host, adapter.target.port
+            sock = open_jump_channel(
+                adapter, paramiko, adapter.proxy_jump, adapter.target.host, adapter.target.port
             )
         elif is_unrouted_docker_target and (
             clab_host not in ("127.0.0.1", "localhost", "::1")
             or not _check_tcp_endpoint(adapter.target.host, adapter.target.port, timeout=1.2)
         ):
-            sock = adapter._open_jump_channel(
-                paramiko, "auto", adapter.target.host, adapter.target.port
+            sock = open_jump_channel(
+                adapter, paramiko, "auto", adapter.target.host, adapter.target.port
             )
-        adapter._connect_with_sock(paramiko, username, password, sock=sock)
+        connect_with_sock(adapter, paramiko, username, password, sock=sock)
 
         adapter.shell = adapter.client.invoke_shell()
         with contextlib.suppress(Exception):

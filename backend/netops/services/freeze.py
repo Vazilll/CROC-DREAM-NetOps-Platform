@@ -61,14 +61,3 @@ def set_factory_freeze(
         fabric_id=clean_fab,
     )
     return _enrich_freeze_state(state)
-
-
-def set_freeze_state(
-    frozen: bool, reason: str = "", by: str | None = None, fabric_id: str | None = None
-) -> dict[str, Any]:
-    return set_factory_freeze(
-        frozen=frozen,
-        reason=reason,
-        user=by or str(const("audit.default_actor")),
-        fabric_id=fabric_id,
-    )

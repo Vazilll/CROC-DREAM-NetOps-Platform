@@ -32,13 +32,9 @@ from netops.network.ssh_pool import (
     _close_pooled_session,
     _close_ssh_objects,
     _get_device_lock,
-    connect_with_sock,
     establish_fresh_session,
     execute_shell_command,
     execute_shell_configs,
-    open_jump_channel,
-    resolve_clab_jump_defaults,
-    resolve_container_endpoint,
     sweep_session_pool,
 )
 from netops.network.table_parsers import collect_device_health_tables
@@ -105,22 +101,7 @@ class _ParamikoConnAdapter:
         self._use_pool: bool = False
         self._invalidate_pool: bool = False
 
-    def _resolve_clab_jump_defaults(self) -> tuple[str, str, int, str | None]:
-        return resolve_clab_jump_defaults()
-
-    def _resolve_container_endpoint(
-        self, host: str, dest_host: str, dest_port: int
-    ) -> tuple[str, int]:
-        return resolve_container_endpoint(host, dest_host, dest_port)
-
-    def _open_jump_channel(self, paramiko_mod, jump_spec: str, dest_host: str, dest_port: int):
-        return open_jump_channel(self, paramiko_mod, jump_spec, dest_host, dest_port)
-
-    def _connect_with_sock(self, paramiko_mod, username: str, password: str, sock=None) -> None:
-        connect_with_sock(self, paramiko_mod, username, password, sock=sock)
-
-    def _establish_fresh_session(self) -> None:
-        establish_fresh_session(self)
+    _establish_fresh_session = establish_fresh_session
 
     def __enter__(self):
         key = (self.target.host, self.target.port)

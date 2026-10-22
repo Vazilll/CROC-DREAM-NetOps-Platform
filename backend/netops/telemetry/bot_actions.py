@@ -188,14 +188,14 @@ def _scan_now_text(
 
 
 def _freeze_text(args: Sequence[str], settings: Settings | None = None) -> str:
-    from netops.services.freeze import get_freeze_state, set_freeze_state
+    from netops.services.freeze import get_freeze_state, set_factory_freeze
     from netops.services.notifier import record_security_event
 
     if args:
         act = args[0].strip().lower()
         if act in ("on", "1", "true", "freeze"):
             reason = " ".join(args[1:]) or "Активирован через Telegram Kill Switch"
-            set_freeze_state(frozen=True, reason=reason, by="telegram-admin")
+            set_factory_freeze(frozen=True, reason=reason, user="telegram-admin")
             record_security_event(
                 "KILL_SWITCH_ENGAGED",
                 f"Фабрика заморожена из Telegram: {reason}",
@@ -203,7 +203,7 @@ def _freeze_text(args: Sequence[str], settings: Settings | None = None) -> str:
                 settings=settings,
             )
         elif act in ("off", "0", "false", "unfreeze"):
-            set_freeze_state(frozen=False, reason="", by="telegram-admin")
+            set_factory_freeze(frozen=False, reason="", user="telegram-admin")
             record_security_event(
                 "KILL_SWITCH_RELEASED",
                 "Заморозка фабрики снята из Telegram",

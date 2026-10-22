@@ -24,27 +24,38 @@ _ROLE_LOCKED_PORTS = role_locked_ports()
 _LOCAL_OWNER_TOKEN = str(const("console.local_owner_login_token"))
 
 
-def _is_local_or_bridge_ip(raw_ip: str) -> bool:
+def _is_strictly_loopback_ip(raw_ip: str) -> bool:
     val = (raw_ip or "").strip().lower()
-    if not val or val in _LOOPBACK_HOSTS or val == "testclient":
+    if not val:
+        return False
+    val = val.strip("[]")
+    if val in ("localhost", "testclient", "testserver"):
         return True
     try:
         import ipaddress
 
-        ip = ipaddress.ip_address(val)
-        return ip.is_loopback or ip.is_private
+        return ipaddress.ip_address(val).is_loopback
     except ValueError:
         return False
 
 
+_is_local_or_bridge_ip = _is_strictly_loopback_ip
+
+
 def _is_local_owner_request(request: Request) -> bool:
     client_host = (request.client.host if request.client else "").strip().lower()
-    if not _is_local_or_bridge_ip(client_host):
+    if not _is_strictly_loopback_ip(client_host):
         return False
-    for fwd_hdr in ("cf-connecting-ip", "x-forwarded-for", "x-real-ip"):
-        fwd_val = (request.headers.get(fwd_hdr) or "").split(",")[0].strip().lower()
-        if not _is_local_or_bridge_ip(fwd_val):
+    xff = request.headers.get("x-forwarded-for")
+    if xff is not None:
+        ips = [ip.strip() for ip in xff.split(",")]
+        if not ips or any(not _is_strictly_loopback_ip(ip) for ip in ips):
             return False
+    for fwd_hdr in ("cf-connecting-ip", "x-real-ip"):
+        raw_val = request.headers.get(fwd_hdr)
+        if raw_val is not None:
+            if not _is_strictly_loopback_ip(raw_val.strip()):
+                return False
     console_port = (request.headers.get("x-console-port") or "").strip()
     if console_port in _ROLE_LOCKED_PORTS:
         return False

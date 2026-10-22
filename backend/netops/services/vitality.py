@@ -32,8 +32,6 @@ from netops.services.state import get_state_manager
 from netops.settings import get_settings
 
 logger = logging.getLogger(__name__)
-
-VitalityState = Literal["UP", "DOWN"]
 _VITALITY_REDIS_PREFIX = "netops:vitality:device:"
 _BACKUP_TS_CACHE: dict[tuple[str, str], tuple[float, str | None]] = {}
 _BACKUP_TS_TTL_SECONDS = 15.0

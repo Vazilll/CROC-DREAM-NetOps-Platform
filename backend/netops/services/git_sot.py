@@ -59,10 +59,6 @@ def _find_local_ssh_key() -> Path | None:
     return None
 
 
-def _has_local_ssh_key() -> bool:
-    return _find_local_ssh_key() is not None
-
-
 def _git_auth_cmd_and_env(
     url: str, github_pat: str | None = None, _repo_path: Path | None = None
 ) -> tuple[list[str], dict[str, str], str]:

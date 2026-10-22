@@ -157,9 +157,6 @@ class StaticViewerService:
 
             return cls._format_viewer_response(user, token, base_url, settings, now.isoformat())
 
-    # Alias for interface compatibility
-    get_or_create_static_viewer = get_or_create
-
     @classmethod
     def toggle(
         cls,

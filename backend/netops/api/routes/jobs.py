@@ -5,7 +5,7 @@ import json
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from netops.api.deps import ContainerDep, JobServiceDep, Operator, Viewer
@@ -110,13 +110,48 @@ def list_jobs(
 
 
 def _assert_job_allowed(job: Job, allowed_system: str | None) -> None:
-    if not allowed_system:
+    if not allowed_system or allowed_system in ("*", "all"):
         return
-    from netops.api.routes.devices import assert_device_allowed
+    from netops.api.routes.devices import assert_device_allowed, device_allowed, stand_allowed
+
+    payload = getattr(job, "payload", None)
+    if isinstance(payload, dict):
+        stand = payload.get("stand") or payload.get("fabric_id")
+        if stand and not stand_allowed(stand, None, allowed_system):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Доступ к задаче ограничен: стенд '{stand}' не разрешён",
+            )
+        devs = payload.get("devices") or []
+        if isinstance(devs, list) and devs:
+            for h in devs:
+                h_name = h if isinstance(h, str) else getattr(h, "hostname", "")
+                if h_name and not device_allowed({"hostname": h_name}, allowed_system):
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"Доступ к устройству {h_name} ограничен",
+                    )
+
+    if not job.targets:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Доступ к задаче ограничен для вашего стенда",
+        )
 
     for target in job.targets:
         if target.device is not None:
             assert_device_allowed(target.device, allowed_system)
+        elif target.hostname:
+            if not device_allowed({"hostname": target.hostname}, allowed_system):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Доступ к устройству {target.hostname} ограничен",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Доступ к задаче ограничен",
+            )
 
 
 @router.get("/{job_id}", response_model=JobRead, summary="Статус, прогресс и логи задачи")

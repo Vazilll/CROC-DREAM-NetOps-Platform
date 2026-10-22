@@ -350,7 +350,7 @@ export interface StandCreatePayload {
   jump_port?: number;
   jump_user?: string | null;
   jump_password?: string | null;
-  port_map?: Record<string, string> | null;
+  port_map?: Record<string, any> | null;
   topology_path?: string | null;
   queue_name?: string;
   status?: string;
