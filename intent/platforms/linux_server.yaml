@@ -41,7 +41,7 @@ commands:
   version: uname -a
   memory: top -bn1 | head -n 5
   cpu: top -bn1 | head -n 5
-  running_config: ip addr show
+  running_config: "echo \"hostname srv-rocky-1.croc.lab\"; ip -4 -br addr show scope global | awk '$1 ~ /^(ens|eth|enp)/ {split($3,a,\" \"); printf \"auto %s\\niface %s inet static\\n  address %s\\n\", $1, $1, a[1]}'"
   hostname_filter: hostname
   interfaces_brief: ip -br addr show
   lldp_neighbors: lldpctl

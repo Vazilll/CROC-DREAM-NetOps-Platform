@@ -24,6 +24,11 @@ interface_prefixes:
 lldp_port_prefixes:
   - Gi
   - eth
+render_order:
+  - base
+  - interfaces
+  - bgp
+  - acls
 commands:
   version: show version
   memory: show processes memory | include Processor Pool
