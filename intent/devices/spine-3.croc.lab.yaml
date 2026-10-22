@@ -25,7 +25,7 @@ interfaces:
   enabled: true
   mode: l3
   mtu: 1500
-  description: Downlink to leaf4 Ethernet3
+  description: Downlink to leaf4 Ethernet3 пам пам
   ipv4_address: 10.10.0.24/31
   ospf_area: 0.0.0.0
 - name: LoopBack0
