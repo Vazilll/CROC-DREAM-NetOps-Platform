@@ -41,7 +41,7 @@ def test_device_update_immediately_reflects_in_http_sd(
     dev_id = create_resp.json()["id"]
 
     try:
-        client.put(f"/api/v1/telemetry/collectors/adv-dev-update-01.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
+        client.put("/api/v1/telemetry/collectors/adv-dev-update-01.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
         # Check SNMP SD - must be present
         sd_snmp_1 = client.get("/api/v1/telemetry/sd/snmp").json()
         snmp_hosts_1 = [t.get("labels", {}).get("hostname") for t in sd_snmp_1]
@@ -55,7 +55,7 @@ def test_device_update_immediately_reflects_in_http_sd(
         )
         assert patch_resp.status_code == 200, patch_resp.text
 
-        client.put(f"/api/v1/telemetry/collectors/adv-dev-update-01.croc.lab", json={"protocol": "prometheus_exporter"}, headers=ADMIN)
+        client.put("/api/v1/telemetry/collectors/adv-dev-update-01.croc.lab", json={"protocol": "prometheus_exporter"}, headers=ADMIN)
         # 3. Very next queries to HTTP SD endpoints
         sd_snmp_2 = client.get("/api/v1/telemetry/sd/snmp").json()
         snmp_hosts_2 = [t.get("labels", {}).get("hostname") for t in sd_snmp_2]
@@ -93,7 +93,7 @@ def test_empty_database_sd_targets_returns_empty_list(
     assert c_resp.status_code == 201, c_resp.text
     dev_id = c_resp.json()["id"]
 
-    client.put(f"/api/v1/telemetry/collectors/adv-temp-cisco.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
+    client.put("/api/v1/telemetry/collectors/adv-temp-cisco.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
     # Verify present in SNMP
     sd_snmp = client.get("/api/v1/telemetry/sd/snmp").json()
     assert any(t.get("labels", {}).get("hostname") == "adv-temp-cisco.croc.lab" for t in sd_snmp)
