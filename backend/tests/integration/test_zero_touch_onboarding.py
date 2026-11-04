@@ -43,7 +43,7 @@ def test_device_creation_and_deletion_immediately_reflects_in_http_sd(
     assert create_resp.status_code == 201, create_resp.text
     dev_id = create_resp.json()["id"]
 
-    client.put(f"/api/v1/telemetry/collectors/test-cisco-leaf-99.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
+    client.put("/api/v1/telemetry/collectors/test-cisco-leaf-99.croc.lab", json={"protocol": "snmp"}, headers=ADMIN)
     # 2. Check Prometheus SNMP HTTP SD - device with explicit SNMP choice must be immediately present
     sd_snmp_resp = client.get("/api/v1/telemetry/sd/snmp")
     assert sd_snmp_resp.status_code == 200
@@ -64,7 +64,7 @@ def test_device_creation_and_deletion_immediately_reflects_in_http_sd(
     assert create_srv_resp.status_code == 201, create_srv_resp.text
     srv_id = create_srv_resp.json()["id"]
 
-    client.put(f"/api/v1/telemetry/collectors/test-srv-rocky-99.croc.lab", json={"protocol": "prometheus_exporter"}, headers=ADMIN)
+    client.put("/api/v1/telemetry/collectors/test-srv-rocky-99.croc.lab", json={"protocol": "prometheus_exporter"}, headers=ADMIN)
     # 4. Check Prometheus Node Exporter HTTP SD - server with explicit exporter choice must be immediately present
     sd_exp_resp = client.get("/api/v1/telemetry/sd/exporter")
     assert sd_exp_resp.status_code == 200
